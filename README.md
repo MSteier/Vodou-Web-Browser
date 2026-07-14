@@ -3,12 +3,51 @@
 A privacy-centric web browser with a built-in encrypted password manager.
 Python + PyQt6 on Qt WebEngine (the Chromium engine).
 
-## Run
+## Installation
 
-```
+**Requirements**
+
+- **Python 3.9+** (developed on 3.10)
+- **pip**
+- Windows, macOS, or Linux (the bundled Qt WebEngine build is platform-specific
+  but installs automatically via pip)
+
+**Install**
+
+```bash
+# 1. Get the code
+git clone https://github.com/MSteier/Vodou-Web-Browser.git
+cd Vodou-Web-Browser
+
+# 2. (recommended) create and activate a virtual environment
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS / Linux:
+source .venv/bin/activate
+
+# 3. Install dependencies (PyQt6, PyQt6-WebEngine, cryptography)
 pip install -r requirements.txt
+```
+
+**Run**
+
+```bash
 python main.py
 ```
+
+> **Behind a TLS-intercepting antivirus (e.g. Norton)?** If `pip install` fails
+> with `CERTIFICATE_VERIFY_FAILED`, run
+> `python -m pip install pip-system-certs` once, then retry — it teaches pip to
+> trust your system certificate store.
+
+**Optional — private search:** the home page and default search point at a local
+[SearXNG](https://github.com/searxng/searxng) instance
+(`https://localhost/searxng`). Vodou works fine without it (just type full URLs),
+but running SearXNG locally keeps your searches off third-party engines.
+
+**Optional — desktop shortcut / icon:** the repo ships `vodou.ico` for creating a
+desktop or Start-menu shortcut that points at `python main.py`.
 
 ## Privacy features
 
@@ -63,3 +102,8 @@ rules), fingerprinting resistance is partial, and the vault — while using
 sound, standard cryptography — has not been professionally audited. For
 credentials you truly care about, an audited manager (Bitwarden, 1Password,
 KeePassXC) is the safer home.
+
+## License
+
+Released under the [MIT License](LICENSE) — free to use, modify, and
+distribute, with no warranty.
