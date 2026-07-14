@@ -61,6 +61,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
 | No telemetry | The browser phones home to no one — there is no "home" |
+| Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the session cache, cookies, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared |
 | Certificate viewer | Padlock next to the address bar (green = verified HTTPS, red = unencrypted); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
 Extend the blocklist by adding domains (one per line) to
@@ -80,8 +81,66 @@ Extend the blocklist by adding domains (one per line) to
   pages, and matches entries by domain (subdomains included).
 - Copied passwords are wiped from the clipboard after 30 seconds.
 - The vault auto-locks after 5 minutes of inactivity.
+- **In-memory hardening** — while unlocked, passwords are not held as
+  plaintext; each is re-encrypted under a random per-session key and only
+  decrypted at the instant it is used (fill, copy, edit).
+- **Import / export** — pull passwords in from a Chrome, Edge, Firefox, Brave,
+  or Bitwarden **CSV** export, or export the vault to CSV (behind a plain-text
+  warning). Buttons are in the vault dialog; import is also on the ☰ menu.
 - Downloads always require confirmation (no silent drive-by downloads),
   and suggested filenames are stripped of any path components.
+
+## Bookmarks
+
+Bookmarks are the one thing kept between sessions — saved as plain JSON at
+`~/.vodou/bookmarks.json` (they hold no secrets), with atomic writes.
+
+- **☆ / Ctrl+D** — bookmark (or un-bookmark) the current page; the star fills
+  in when a page is saved.
+- **▤ toolbar dropdown** and the **☰ menu → Bookmarks** submenu both list your
+  bookmarks and rebuild each time they open.
+- **Manage bookmarks…** — a full manager to add, edit (rename / change URL),
+  delete, and open bookmarks.
+- **Import** a browser's exported bookmarks HTML (Netscape format).
+- Only `http`/`https` URLs are ever stored or opened — `javascript:`, `data:`,
+  and `file:` are rejected, even from a tampered file or import.
+
+## Plugins
+
+Qt WebEngine can't load Chrome Web Store extensions, and arbitrary script
+injection would be a security hole — so Vodou ships a **curated catalog of
+reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
+
+- All plugin code lives in Vodou's reviewed source; you never paste code.
+- The saved state is **enabled IDs only** (no executable content), so tampering
+  with it can at most toggle vetted plugins.
+- Each plugin declares a **host allowlist** (least privilege), runs in an
+  **isolated world** hidden from page scripts, and shows a **SHA-256 code
+  fingerprint** so its identity is tamper-evident.
+- Bundled: *Dark Mode Everywhere*, *Cookie Banner Zapper*, *Text Selection
+  Unlocker*.
+
+## Appearance
+
+- **☰ menu → Appearance** — five built-in themes (*Vodou Violet*, *Blood
+  Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*) plus a **dark / light**
+  toggle. Each theme tints the whole chrome, so the switch is unmistakable.
+- Changes apply live and are remembered in `~/.vodou/theme.json`.
+
+## Developer tools
+
+- **F12** or **☰ menu → Developer tools** — the full Chromium DevTools
+  (inspector, console, network, sources) **docked to the right** of the window
+  in a resizable split. It follows the active tab.
+- Close it with the **✕** in its header or by pressing **Esc**. It runs on the
+  off-the-record profile, so it persists nothing.
+
+## About & updates
+
+**☰ menu → About Vodou…** shows the app version and the live Chromium / Qt /
+PyQt / Python versions, and offers an **Update browser engine** button that
+upgrades the bundled Chromium/Qt via pip and reports whether an update was
+applied or you're already current.
 
 ## Shortcuts
 
@@ -91,8 +150,11 @@ Extend the blocklist by adding domains (one per line) to
 | Ctrl+Tab | Next tab |
 | Ctrl+L | Focus address bar |
 | Ctrl+R / F5 | Reload |
+| Ctrl+D | Bookmark current page |
 | Ctrl+Shift+F | Fill login |
 | Ctrl+Shift+V | Open vault |
+| Ctrl+Shift+Del | Clear history & memory |
+| F12 | Toggle developer tools |
 
 ## Honest limitations
 
