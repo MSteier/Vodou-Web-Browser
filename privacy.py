@@ -128,7 +128,21 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
 
 # A common, generic user agent so the browser doesn't advertise QtWebEngine
 # (shrinks the fingerprinting surface a little).
+#
+# The Chrome version is pinned to the *actual* Chromium version that this
+# QtWebEngine build ships, so the UA string agrees with the Sec-CH-UA client
+# hints QtWebEngine sends automatically. A mismatch between the two (or an
+# outdated version) reads as a spoofed/insecure browser and is one of the
+# signals Google uses to refuse sign-in with "this browser may not be secure".
+def _chrome_major() -> str:
+    try:
+        from PyQt6.QtWebEngineCore import qWebEngineChromiumVersion
+        return qWebEngineChromiumVersion().split(".")[0]
+    except Exception:
+        return "140"
+
+
 GENERIC_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    f"(KHTML, like Gecko) Chrome/{_chrome_major()}.0.0.0 Safari/537.36"
 )

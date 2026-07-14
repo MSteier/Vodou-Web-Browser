@@ -165,6 +165,29 @@ sound, standard cryptography — has not been professionally audited. For
 credentials you truly care about, an audited manager (Bitwarden, 1Password,
 KeePassXC) is the safer home.
 
+### Google sign-in ("This browser or app may not be secure")
+
+Google's account sign-in **refuses to authenticate in Vodou**, showing *"This
+browser or app may not be secure."* This is **not** a bug or a real security
+problem with Vodou — its TLS, certificate verification, and encryption are all
+intact. Google deliberately fingerprints the *rendering engine* and blocks
+sign-in from any embedded/automation framework (Qt WebEngine, CEF, Electron
+webviews, Selenium, …). Every Qt WebEngine–based browser (Falkon, qutebrowser,
+etc.) hits the same wall.
+
+Vodou already sends a current, consistent Chrome user agent that matches its
+real Chromium version, but no user-agent or flag change defeats this check —
+the only "fixes" are deceptive engine-spoofing hacks that Google patches
+quickly and that would make the browser *less* trustworthy, so Vodou doesn't
+ship them. Practical alternatives:
+
+- **Use a Google [App Password](https://myaccount.google.com/apppasswords)** with a
+  mail client over IMAP (`imap.gmail.com:993`) / SMTP (`smtp.gmail.com:465`).
+  App Passwords bypass the web "secure browser" check entirely (requires 2FA on
+  your Google account).
+- **Sign in to Google once in a mainstream browser** and use Vodou for general
+  browsing — the account gate is essentially the one thing this engine can't do.
+
 ## License
 
 Released under the [MIT License](LICENSE) — free to use, modify, and
