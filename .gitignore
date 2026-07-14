@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# Vodou runtime artifacts (never commit user data)
+*.tmp
+.vodou/
+vault.dat
+bookmarks.json
+plugins.json
+theme.json
+blocklist.txt
