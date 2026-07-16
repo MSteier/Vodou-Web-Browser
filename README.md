@@ -126,8 +126,14 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
 - Each plugin declares a **host allowlist** (least privilege), runs in an
   **isolated world** hidden from page scripts, and shows a **SHA-256 code
   fingerprint** so its identity is tamper-evident.
-- Bundled: *Dark Mode Everywhere*, *Cookie Banner Zapper*, *Text Selection
-  Unlocker*.
+- Bundled: *Dark Mode Everywhere*, *Cookie Banner Zapper*, *Glass Blur
+  Deflicker*, *Text Selection Unlocker*.
+- *Glass Blur Deflicker* works around a known Qt WebEngine bug on Windows:
+  elements styled with CSS `backdrop-filter: blur()` ("frosted glass", used
+  by chat UIs like my.replika.ai) flicker whenever anything nearby repaints —
+  even the blinking text caret. No Chromium flag fixes it short of disabling
+  GPU compositing, so this plugin simply strips the blur; sites keep their
+  translucent panels.
 
 ## Appearance
 

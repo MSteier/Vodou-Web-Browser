@@ -72,7 +72,7 @@ import json
 import secrets
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
@@ -541,9 +541,12 @@ class BrowserWindow(QMainWindow):
         menu_button.setMenu(menu)
         toolbar.addWidget(menu_button)
 
-        self.shield_label = QLabel(" 🛡 0 trackers blocked ")
+        # The shield counter floats as a direct child of the status bar
+        # (outside its layout) so it can sit dead-centre in the footer;
+        # an event filter re-centres it whenever the bar resizes.
+        self.shield_label = QLabel(" 🛡 0 trackers blocked ", self.statusBar())
         self.shield_label.setObjectName("shieldLabel")
-        self.statusBar().addPermanentWidget(self.shield_label)
+        self.statusBar().installEventFilter(self)
 
         self.version_label = VersionLabel(self)
         self.statusBar().addPermanentWidget(self.version_label)
@@ -1013,6 +1016,19 @@ class BrowserWindow(QMainWindow):
         self.blocked_count += 1
         self.shield_label.setText(
             f" 🛡 {self.blocked_count} trackers blocked ")
+        self._center_shield()  # the text grew — keep it centred
+
+    def _center_shield(self) -> None:
+        bar = self.statusBar()
+        self.shield_label.adjustSize()
+        self.shield_label.move(
+            (bar.width() - self.shield_label.width()) // 2,
+            (bar.height() - self.shield_label.height()) // 2)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.statusBar() and event.type() == QEvent.Type.Resize:
+            self._center_shield()
+        return super().eventFilter(obj, event)
 
     # -- downloads --------------------------------------------------------
 

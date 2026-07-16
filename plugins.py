@@ -93,6 +93,24 @@ html, body { overflow: auto !important; }
 """,
     ),
     Plugin(
+        id="deflicker-blur",
+        name="Glass Blur Deflicker",
+        description="Removes CSS 'frosted glass' (backdrop-filter blur) "
+                    "effects, which flicker badly in Qt WebEngine on "
+                    "Windows — e.g. the chat input and bubbles on "
+                    "my.replika.ai. Sites keep their translucent panels, "
+                    "just without the blur.",
+        version="1.0",
+        author="Vodou (verified)",
+        matches=("*",),
+        css="""
+*, *::before, *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+""",
+    ),
+    Plugin(
         id="selection-unlock",
         name="Text Selection Unlocker",
         description="Re-enables selecting and copying text on sites that "
