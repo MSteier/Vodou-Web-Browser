@@ -128,12 +128,11 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   fingerprint** so its identity is tamper-evident.
 - Bundled: *Dark Mode Everywhere*, *Cookie Banner Zapper*, *Glass Blur
   Deflicker*, *Text Selection Unlocker*.
-- *Glass Blur Deflicker* works around a known Qt WebEngine bug on Windows:
-  elements styled with CSS `backdrop-filter: blur()` ("frosted glass", used
-  by chat UIs like my.replika.ai) flicker whenever anything nearby repaints —
-  even the blinking text caret. No Chromium flag fixes it short of disabling
-  GPU compositing, so this plugin simply strips the blur; sites keep their
-  translucent panels.
+- *Glass Blur Deflicker* strips CSS `backdrop-filter` blur ("frosted
+  glass"), which can flicker under the hardware compositor on some Windows
+  GPU drivers. It reduces the effect while keeping *Hardware* graphics; if
+  flicker persists, the real fix is **☰ menu → Settings → Graphics →
+  Compatibility** (see the Graphics section).
 
 ## Appearance
 
@@ -141,6 +140,22 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*) plus a **dark / light**
   toggle. Each theme tints the whole chrome, so the switch is unmistakable.
 - Changes apply live and are remembered in `~/.vodou/theme.json`.
+
+## Graphics
+
+Some Windows GPU drivers make Qt WebEngine's hardware compositor flicker on
+pages that combine "frosted glass" (`backdrop-filter`) styling, WebGL, and a
+blinking text caret — chat UIs like my.replika.ai are the classic case (the
+input field and chat bubbles pulse while the window is focused). No Chromium
+flag fixes it; switching the compositor does.
+
+- **☰ menu → Settings → Graphics** — three profiles, remembered in
+  `~/.vodou/graphics.json` and applied on the next start:
+  *Hardware* (fastest), *Compatibility* (software compositing, WebGL stays on
+  the GPU — **fixes the flicker**), and *Software* (no GPU at all, most
+  stable).
+- Per-launch override for debugging: `python main.py --gfx
+  default|vanilla|compat|gl|warp|software`.
 
 ## Developer tools
 

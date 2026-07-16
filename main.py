@@ -18,8 +18,10 @@ Password manager:
 Run:  python main.py
 """
 
+import json
 import os
 import sys
+from pathlib import Path
 
 # Graphics profile. The default is tuned for integrated graphics:
 #   --disable-direct-composition  stops the input-field blink — Windows'
@@ -49,15 +51,39 @@ GFX_MODES = {
 }
 
 
+GFX_FILE = Path.home() / ".vodou" / "graphics.json"
+GFX_MODE = "default"  # the mode actually in effect; set by _gfx_flags()
+
+
+def _load_saved_gfx() -> str:
+    try:
+        mode = json.loads(GFX_FILE.read_text(encoding="utf-8")).get("mode")
+    except (OSError, ValueError, AttributeError):
+        return "default"
+    return mode if mode in GFX_MODES else "default"
+
+
+def save_gfx_mode(mode: str) -> None:
+    try:
+        GFX_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = GFX_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"mode": mode}), encoding="utf-8")
+        tmp.replace(GFX_FILE)
+    except OSError:
+        pass
+
+
 def _gfx_flags() -> str:
-    mode = "default"
-    if "--gfx" in sys.argv:
+    global GFX_MODE
+    mode = _load_saved_gfx()          # ☰ menu → Graphics choice, if any
+    if "--gfx" in sys.argv:           # per-launch CLI override wins
         i = sys.argv.index("--gfx")
         if i + 1 >= len(sys.argv) or sys.argv[i + 1] not in GFX_MODES:
             print(f"--gfx must be one of: {', '.join(GFX_MODES)}")
             sys.exit(2)
         mode = sys.argv[i + 1]
         del sys.argv[i:i + 2]  # keep Qt from seeing our custom args
+    GFX_MODE = mode
     return GFX_MODES[mode]
 
 
@@ -68,9 +94,7 @@ os.environ.setdefault(
     "--force-webrtc-ip-handling-policy=default_public_interface_only "
     + _gfx_flags())
 
-import json
 import secrets
-from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
@@ -528,6 +552,8 @@ class BrowserWindow(QMainWindow):
         hamburger_bookmarks.aboutToShow.connect(
             lambda: self._populate_bookmarks_menu(hamburger_bookmarks))
         self._build_appearance_menu(menu.addMenu("Appearance"))
+        settings_menu = menu.addMenu("Settings")
+        self._build_graphics_menu(settings_menu.addMenu("Graphics"))
         menu.addSeparator()
         menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
         menu.addSeparator()
@@ -845,6 +871,35 @@ class BrowserWindow(QMainWindow):
             act.setChecked(mode == self._mode)
             act.setActionGroup(mode_group)
             act.triggered.connect(lambda _c, m=mode: self._set_mode(m))
+
+    _GFX_MENU_ITEMS = (
+        ("Hardware (fastest)", "default"),
+        ("Compatibility — fixes flicker on some sites", "compat"),
+        ("Software (most stable, slowest)", "software"),
+    )
+
+    def _build_graphics_menu(self, gfx: QMenu) -> None:
+        """Compositor profile picker. The flags are consumed when the web
+        engine starts, so a change only takes effect on the next launch."""
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        for label, mode in self._GFX_MENU_ITEMS:
+            act = gfx.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(mode == GFX_MODE)
+            act.setActionGroup(group)
+            act.triggered.connect(lambda _c, m=mode: self._set_gfx_mode(m))
+
+    def _set_gfx_mode(self, mode: str) -> None:
+        save_gfx_mode(mode)
+        if mode == GFX_MODE:
+            self.statusBar().showMessage(
+                "Graphics mode unchanged — already in effect.", 5000)
+            return
+        QMessageBox.information(
+            self, "Graphics mode saved",
+            "The new graphics mode takes effect the next time Vodou "
+            "starts.")
 
     def _set_theme(self, name: str) -> None:
         self._theme_name = name
