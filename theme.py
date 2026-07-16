@@ -194,6 +194,8 @@ QStatusBar {{
     border-top: 1px solid {p.border};
 }}
 QLabel#shieldLabel {{ color: {p.ok}; font-weight: 600; }}
+QLabel#versionLabel {{ color: {p.accent}; text-decoration: underline; }}
+QLabel#versionLabel:hover {{ color: {p.text}; }}
 
 QMenu {{
     background: {p.surface};

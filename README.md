@@ -138,9 +138,21 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
 ## About & updates
 
 **☰ menu → About Vodou…** shows the app version and the live Chromium / Qt /
-PyQt / Python versions, and offers an **Update browser engine** button that
-upgrades the bundled Chromium/Qt via pip and reports whether an update was
-applied or you're already current.
+PyQt / Python versions, and offers an **Update Vodou & engine** button that
+updates both parts of the browser in one click: it pulls the latest Vodou
+from GitHub (`git pull --ff-only`, so a locally modified checkout is never
+silently merged), then upgrades the bundled Chromium/Qt engine via pip. The
+summary tells you what was updated or that you're already current.
+
+The footer shows the running version (click it to open the GitHub repo).
+About ten seconds after startup, Vodou checks whether a newer version of
+either part exists; if so, the footer tag changes to **"update available"**
+and clicking it takes you to the one-click updater.
+
+*Privacy note:* the startup check makes two anonymous HTTPS GETs of public
+files — `raw.githubusercontent.com` (Vodou's version number) and `pypi.org`
+(the engine package index). No identifiers, telemetry, or browsing data are
+sent, and a failed check does nothing.
 
 ## Shortcuts
 

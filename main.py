@@ -108,7 +108,7 @@ from plugins import PluginManager, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
 from privacy import GENERIC_USER_AGENT, PrivacyInterceptor, apply_ua_quirk
-from about import AboutDialog
+from about import APP_VERSION, REPO_URL, AboutDialog, UpdateChecker
 from theme import THEMES, apply_theme, load_prefs, save_prefs
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
 from vault_ui import (
@@ -288,6 +288,38 @@ class NotifyBar(QFrame):
             callback()
 
 
+class VersionLabel(QLabel):
+    """Footer version tag; clicking opens the GitHub repo in a new tab.
+
+    Sourced from about.APP_VERSION so it always matches the About screen —
+    bumping the version there updates the footer automatically.
+    """
+
+    def __init__(self, browser: "BrowserWindow"):
+        super().__init__(f"Vodou v{APP_VERSION} ")
+        self.browser = browser
+        self._update_available = False
+        self.setObjectName("versionLabel")
+        self.setToolTip(f"Open Vodou's GitHub repository\n{REPO_URL}")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def show_update_available(self, what: str) -> None:
+        """Turn the tag into an update notice; clicking now opens About,
+        where one click installs both parts."""
+        self._update_available = True
+        self.setText(f"Vodou v{APP_VERSION} — update available ⬆ ")
+        self.setToolTip(f"Update available: {what}\n"
+                        f"Click to open About Vodou and update")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._update_available:
+                self.browser.show_about()
+            else:
+                self.browser.add_tab(QUrl(REPO_URL))
+        super().mousePressEvent(event)
+
+
 class WebView(QWebEngineView):
     """A tab's web view; opens popups/target=_blank as new tabs."""
 
@@ -376,6 +408,13 @@ class BrowserWindow(QMainWindow):
         self._build_ui()
         self._build_shortcuts()
         self.add_tab(QUrl(HOME_URL))
+
+        # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
+        # files). Delayed so it never competes with first-page load; failures
+        # stay silent.
+        self._update_checker = UpdateChecker(self)
+        self._update_checker.finished.connect(self._on_update_check)
+        QTimer.singleShot(10000, self._update_checker.start)
 
     # -- UI ---------------------------------------------------------------
 
@@ -488,6 +527,9 @@ class BrowserWindow(QMainWindow):
         self.shield_label = QLabel(" 🛡 0 trackers blocked ")
         self.shield_label.setObjectName("shieldLabel")
         self.statusBar().addPermanentWidget(self.shield_label)
+
+        self.version_label = VersionLabel(self)
+        self.statusBar().addPermanentWidget(self.version_label)
         self.statusBar().showMessage(
             "Private session: history, cookies and cache are memory-only "
             "and erased on exit.", 8000)
@@ -800,6 +842,20 @@ class BrowserWindow(QMainWindow):
 
     def show_about(self) -> None:
         AboutDialog(self).exec()
+
+    def _on_update_check(self, vodou_ver, engine_ver) -> None:
+        if not vodou_ver and not engine_ver:
+            return
+        parts = []
+        if vodou_ver:
+            parts.append(f"Vodou v{vodou_ver}")
+        if engine_ver:
+            parts.append(f"browser engine {engine_ver}")
+        what = " and ".join(parts)
+        self.version_label.show_update_available(what)
+        self.statusBar().showMessage(
+            f"Update available: {what} — click the version tag or open "
+            f"☰ → About Vodou to install.", 15000)
 
     # -- plugins ----------------------------------------------------------
 

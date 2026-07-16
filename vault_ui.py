@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -224,6 +224,17 @@ class VaultDialog(QDialog):
         self.resize(640, 420)
 
         layout = QVBoxLayout(self)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(
+            "Search logins — site, username or notes  (Ctrl+F)")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(lambda _: self._refresh())
+        QShortcut(QKeySequence.StandardKey.Find, self,
+                  activated=lambda: (self.search_edit.setFocus(),
+                                     self.search_edit.selectAll()))
+        layout.addWidget(self.search_edit)
+
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Site", "Username", "Notes"])
         self.table.horizontalHeader().setSectionResizeMode(
@@ -265,13 +276,20 @@ class VaultDialog(QDialog):
         self._refresh()
 
     def _refresh(self) -> None:
-        entries = self.vault.entries()
-        self.table.setRowCount(len(entries))
-        for i, e in enumerate(entries):
+        # Rows carry the entry's true vault index in UserRole, so edit /
+        # delete / copy keep working on a filtered view.
+        query = self.search_edit.text().strip().lower()
+        matches = [(i, e) for i, e in enumerate(self.vault.entries())
+                   if not query
+                   or query in e.site.lower()
+                   or query in e.username.lower()
+                   or query in e.notes.lower()]
+        self.table.setRowCount(len(matches))
+        for row, (i, e) in enumerate(matches):
             for col, text in enumerate((e.site, e.username, e.notes)):
                 item = QTableWidgetItem(text)
                 item.setData(Qt.ItemDataRole.UserRole, i)
-                self.table.setItem(i, col, item)
+                self.table.setItem(row, col, item)
 
     def _selected_index(self) -> int | None:
         items = self.table.selectedItems()

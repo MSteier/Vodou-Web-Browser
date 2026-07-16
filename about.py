@@ -1,18 +1,35 @@
-"""About dialog: version info plus an in-place updater for the browser engine.
+"""About dialog: version info, update check, and a one-click updater.
 
-The rendering engine ("the chrome parts") is the Chromium build bundled inside
-the PyQt6-WebEngine package, so updating it means upgrading that package with
-pip. The upgrade runs through QProcess so the UI stays responsive and we can
-read pip's output to tell whether anything actually changed:
-  * pip printed "Successfully installed …"  -> an update was applied
-  * pip only found requirements already satisfied -> already current
+Vodou has two independently updatable parts:
+  * the app itself — this git checkout; updated with `git pull`
+  * the engine — the Chromium/Qt build bundled in the PyQt6-WebEngine
+    package; updated with `pip install --upgrade`
+
+UpdateChecker discovers newer versions of either (GitHub raw for the app's
+APP_VERSION, PyPI's JSON API for the engine) without blocking the UI, and
+AboutDialog's single button updates both in sequence. Both subprocesses run
+through QProcess so the UI stays responsive.
 """
 
 from __future__ import annotations
 
+import json
+import re
 import sys
+from importlib import metadata
+from pathlib import Path
 
-from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR, QProcess, QSize, Qt
+from PyQt6.QtCore import (
+    PYQT_VERSION_STR,
+    QT_VERSION_STR,
+    QObject,
+    QProcess,
+    QSize,
+    Qt,
+    QUrl,
+    pyqtSignal,
+)
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -24,7 +41,75 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
+REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
+
+_REPO_DIR = Path(__file__).resolve().parent
+_RAW_ABOUT_URL = ("https://raw.githubusercontent.com/MSteier/"
+                  "Vodou-Web-Browser/master/about.py")
+_PYPI_JSON_URL = "https://pypi.org/pypi/PyQt6-WebEngine/json"
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    parts = []
+    for piece in version.split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def is_newer(remote: str, local: str) -> bool:
+    return _version_tuple(remote) > _version_tuple(local)
+
+
+class UpdateChecker(QObject):
+    """Async check for newer versions of the app (GitHub) and engine (PyPI).
+
+    Emits finished(vodou, engine) where each is the newer version string or
+    None. Both requests are plain anonymous HTTPS GETs of public files — no
+    identifiers are sent, and any network failure is silently treated as
+    "no update".
+    """
+
+    finished = pyqtSignal(object, object)
+
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        self._nam = QNetworkAccessManager(self)
+        self._vodou: str | None = None
+        self._engine: str | None = None
+        self._pending = 0
+
+    def start(self) -> None:
+        for url, handler in ((_RAW_ABOUT_URL, self._parse_vodou),
+                             (_PYPI_JSON_URL, self._parse_engine)):
+            reply = self._nam.get(QNetworkRequest(QUrl(url)))
+            self._pending += 1
+            reply.finished.connect(
+                lambda r=reply, h=handler: self._on_reply(r, h))
+
+    def _on_reply(self, reply, handler) -> None:
+        try:
+            if reply.error() == QNetworkReply.NetworkError.NoError:
+                handler(bytes(reply.readAll()).decode("utf-8", "replace"))
+        except Exception:
+            pass  # a failed check must never disturb the browser
+        finally:
+            reply.deleteLater()
+            self._pending -= 1
+            if self._pending == 0:
+                self.finished.emit(self._vodou, self._engine)
+
+    def _parse_vodou(self, text: str) -> None:
+        match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', text)
+        if match and is_newer(match.group(1), APP_VERSION):
+            self._vodou = match.group(1)
+
+    def _parse_engine(self, text: str) -> None:
+        latest = json.loads(text)["info"]["version"]
+        installed = metadata.version("PyQt6-WebEngine")
+        if is_newer(latest, installed):
+            self._engine = latest
 
 # Packages that carry the engine + toolkit. Upgrading PyQt6-WebEngine pulls the
 # matching Qt/Chromium binaries; PyQt6 keeps the widget layer in step.
@@ -99,10 +184,12 @@ class AboutDialog(QDialog):
         outer.addWidget(self.status)
 
         buttons = QHBoxLayout()
-        self.update_btn = QPushButton("Update browser engine…")
+        self.update_btn = QPushButton("Update Vodou && engine…")
         self.update_btn.setToolTip(
-            "Upgrade the bundled Chromium engine and Qt toolkit via pip")
-        self.update_btn.clicked.connect(self._update_engine)
+            "One click updates both parts: pulls the latest Vodou from "
+            "GitHub, then upgrades the bundled Chromium engine and Qt "
+            "toolkit via pip")
+        self.update_btn.clicked.connect(self._update_all)
         buttons.addWidget(self.update_btn)
         buttons.addStretch()
         self.close_btn = QPushButton("Close")
@@ -111,40 +198,44 @@ class AboutDialog(QDialog):
         buttons.addWidget(self.close_btn)
         outer.addLayout(buttons)
 
-    def _update_engine(self) -> None:
+    # -- one-click update: Vodou (git pull), then engine (pip upgrade) ------
+
+    def _update_all(self) -> None:
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Update browser engine")
+        box.setWindowTitle("Update Vodou & engine")
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(
-            "This checks for a newer Chromium engine and Qt toolkit and "
-            "installs it if one is available.\n\n"
-            "If an update is found it may download a few hundred MB. Vodou "
-            "stays usable while it runs; you'll be told the result when it "
-            "finishes.\n\n"
-            "Check for updates now?")
+            "This updates both parts of the browser in one go:\n\n"
+            "1. Vodou itself — pulls the latest version from GitHub\n"
+            "2. The engine — upgrades the bundled Chromium/Qt via pip\n\n"
+            "An engine update can download a few hundred MB. Vodou stays "
+            "usable while it runs; you'll get a summary when it finishes.\n\n"
+            "Update now?")
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         if box.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        self._output = ""
         self.update_btn.setEnabled(False)
-        self.update_btn.setText("Checking…")
-        self.status.setText("Contacting PyPI and installing any update — "
-                            "this can take a few minutes…")
+        self.update_btn.setText("Updating…")
         self.status.show()
+        self._results: list[str] = []
+        self._start_git()
 
+    def _start_proc(self, on_finished, on_error, program: str,
+                    args: list[str], workdir: str | None = None) -> None:
+        self._output = ""
         self._proc = QProcess(self)
+        if workdir:
+            self._proc.setWorkingDirectory(workdir)
         self._proc.setProcessChannelMode(
             QProcess.ProcessChannelMode.MergedChannels)
         self._proc.readyReadStandardOutput.connect(self._read_output)
-        self._proc.finished.connect(self._on_finished)
-        self._proc.errorOccurred.connect(self._on_error)
-        self._proc.start(sys.executable,
-                         ["-m", "pip", "install", "--upgrade",
-                          *_ENGINE_PACKAGES])
+        self._proc.finished.connect(on_finished)
+        self._proc.errorOccurred.connect(on_error)
+        self._proc.start(program, args)
 
     def _read_output(self) -> None:
         if self._proc is not None:
@@ -152,46 +243,95 @@ class AboutDialog(QDialog):
                 "utf-8", "replace")
             self._output += chunk
 
-    def _reset_button(self) -> None:
-        self.update_btn.setEnabled(True)
-        self.update_btn.setText("Update browser engine…")
-        self.status.hide()
+    # step 1: the app itself
+    def _start_git(self) -> None:
+        if not (_REPO_DIR / ".git").exists():
+            self._results.append(
+                "Vodou app: skipped — this copy is not a git checkout. "
+                f"Get updates from {REPO_URL}")
+            self._start_pip()
+            return
+        self.status.setText("Step 1/2: updating Vodou from GitHub…")
+        # --ff-only so a locally modified checkout is never merged or
+        # rebased behind the user's back — it fails loudly instead.
+        self._start_proc(self._git_finished, self._git_error,
+                         "git", ["pull", "--ff-only"], str(_REPO_DIR))
 
-    def _on_error(self, _error) -> None:
-        # Failure to launch pip at all (e.g. python not found).
+    def _git_error(self, _error) -> None:
         if self._proc is None:
             return
         self._proc = None
-        self._reset_button()
-        QMessageBox.warning(
-            self, "Update failed to start",
-            "Could not launch the updater.\n\nYou can update manually with:\n"
-            "  python -m pip install --upgrade " + " ".join(_ENGINE_PACKAGES))
+        self._results.append(
+            "Vodou app: could not run git — update manually from "
+            f"{REPO_URL}")
+        self._start_pip()
 
-    def _on_finished(self, exit_code: int, _status) -> None:
+    def _git_finished(self, exit_code: int, _status) -> None:
         self._read_output()
-        self._proc = None
-        self._reset_button()
-        out = self._output
-
+        out, self._proc = self._output, None
         if exit_code != 0:
-            tail = "\n".join(out.strip().splitlines()[-8:]) or "(no output)"
+            tail = (out.strip().splitlines() or ["unknown git error"])[-1]
+            self._results.append(f"Vodou app: update failed — {tail}")
+        elif "Already up to date" in out:
+            self._results.append("Vodou app: already the current version.")
+        else:
+            self._results.append("Vodou app: updated — restart to apply.")
+        self._start_pip()
+
+    # step 2: the engine
+    def _start_pip(self) -> None:
+        self.status.setText("Step 2/2: checking the Chromium engine on PyPI — "
+                            "this can take a few minutes…")
+        self._start_proc(self._pip_finished, self._pip_error,
+                         sys.executable,
+                         ["-m", "pip", "install", "--upgrade",
+                          *_ENGINE_PACKAGES])
+
+    def _pip_error(self, _error) -> None:
+        if self._proc is None:
+            return
+        self._proc = None
+        self._results.append(
+            "Engine: could not launch pip — update manually with:  "
+            "python -m pip install --upgrade " + " ".join(_ENGINE_PACKAGES))
+        self._finish()
+
+    def _pip_finished(self, exit_code: int, _status) -> None:
+        self._read_output()
+        out, self._proc = self._output, None
+        if exit_code != 0:
+            tail = "\n".join(out.strip().splitlines()[-4:]) or "(no output)"
             hint = ""
             if "CERTIFICATE_VERIFY_FAILED" in out or "SSLError" in out:
-                hint = ("\n\nThis looks like your antivirus intercepting TLS. "
-                        "Installing 'pip-system-certs' fixes it.")
-            QMessageBox.warning(
-                self, "Update failed",
-                f"The update did not complete (exit code {exit_code}):\n\n"
-                f"{tail}{hint}")
-            return
+                hint = (" This looks like your antivirus intercepting TLS; "
+                        "installing 'pip-system-certs' fixes it.")
+            self._results.append(
+                f"Engine: update failed (exit code {exit_code}).{hint}\n"
+                f"{tail}")
+        elif "Successfully installed" in out:
+            self._results.append("Engine: updated — restart to apply.")
+        else:
+            self._results.append("Engine: already the current version.")
+        self._finish()
 
-        if "Successfully installed" in out:
+    def _finish(self) -> None:
+        self.update_btn.setEnabled(True)
+        self.update_btn.setText("Update Vodou && engine…")
+        self.status.hide()
+        summary = "\n\n".join(self._results)
+        updated = any("restart to apply" in r for r in self._results)
+        trouble = any("failed" in r or "could not" in r
+                      for r in self._results)
+        if trouble:
+            QMessageBox.warning(self, "Update finished with problems",
+                                summary)
+        elif updated:
             QMessageBox.information(
                 self, "Update completed",
-                "Update completed.\n\n"
-                "Close and reopen Vodou to start using the new engine.")
+                f"Update completed.\n\n{summary}\n\n"
+                f"Close and reopen Vodou to start using the new version.")
         else:
             QMessageBox.information(
                 self, "No update needed",
-                "You are using the most current version of the application.")
+                "You are using the most current version of the "
+                f"application.\n\n{summary}")
