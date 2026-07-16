@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -138,6 +140,68 @@ class UnlockDialog(QDialog):
                 f"The vault could not be opened:\n{error}\n\n"
                 f"The file has not been modified.")
             return
+        self.accept()
+
+
+class ChangeMasterDialog(QDialog):
+    """Change the vault's master password (current one re-verified first)."""
+
+    def __init__(self, vault: Vault, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.vault = vault
+        self.setWindowTitle("Change master password")
+        self.setMinimumWidth(400)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "The new master password re-encrypts the whole vault.\n"
+            "If you forget it, the vault cannot be recovered."))
+
+        form = QFormLayout()
+        self.current_edit = QLineEdit()
+        self.new_edit = QLineEdit()
+        self.confirm_edit = QLineEdit()
+        for edit in (self.current_edit, self.new_edit, self.confirm_edit):
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Current master password:", self.current_edit)
+        form.addRow("New master password:", self.new_edit)
+        form.addRow("Confirm new:", self.confirm_edit)
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._submit)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.current_edit.setFocus()
+
+    def _submit(self) -> None:
+        new = self.new_edit.text()
+        if len(new) < 8:
+            QMessageBox.warning(self, "Too short",
+                                "Use at least 8 characters (a long "
+                                "passphrase is best).")
+            return
+        if new != self.confirm_edit.text():
+            QMessageBox.warning(self, "Mismatch",
+                                "New passwords don't match.")
+            return
+        try:
+            self.vault.change_master_password(self.current_edit.text(), new)
+        except WrongMasterPassword:
+            QMessageBox.warning(self, "Wrong password",
+                                "The current master password is incorrect.")
+            self.current_edit.clear()
+            self.current_edit.setFocus()
+            return
+        except OSError as error:
+            QMessageBox.critical(self, "Vault error",
+                                 f"Could not save the vault:\n{error}")
+            return
+        QMessageBox.information(
+            self, "Master password changed",
+            "The vault was re-encrypted under your new master password.")
         self.accept()
 
 
@@ -266,6 +330,10 @@ class VaultDialog(QDialog):
         io_row.addWidget(import_btn)
         io_row.addWidget(export_btn)
         io_row.addStretch()
+        master_btn = QPushButton("Change master password…")
+        master_btn.clicked.connect(
+            lambda: ChangeMasterDialog(self.vault, self).exec())
+        io_row.addWidget(master_btn)
         layout.addLayout(io_row)
 
         hint = QLabel(f"Copied passwords are cleared from the clipboard "
@@ -434,23 +502,79 @@ class PickEntryDialog(QDialog):
     """When several logins match the current site, pick one to fill.
 
     Takes (index, entry) pairs so the caller can reveal the chosen
-    password by index — passwords are never held here.
+    password by index — passwords are never held here. When a vault is
+    passed, the highlighted login can also be deleted right from the
+    picker (handy for clearing out stale duplicates).
     """
 
     def __init__(self, matches: list[tuple[int, Entry]],
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None,
+                 vault: Vault | None = None):
         super().__init__(parent)
         self.setWindowTitle("Choose login")
         self.choice: tuple[int, Entry] | None = None
+        self.vault = vault
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Multiple saved logins match this site:"))
-        for index, entry in matches:
-            btn = QPushButton(f"{entry.username}  ({entry.site})")
-            btn.clicked.connect(
-                lambda _, pair=(index, entry): self._pick(pair))
-            layout.addWidget(btn)
 
-    def _pick(self, pair: tuple[int, Entry]) -> None:
-        self.choice = pair
+        self.list = QListWidget()
+        for index, entry in matches:
+            # QListWidgetItem renders plain text only, so the untrusted
+            # username/site can't inject markup.
+            item = QListWidgetItem(f"{entry.username}  ({entry.site})")
+            item.setData(Qt.ItemDataRole.UserRole, (index, entry))
+            self.list.addItem(item)
+        self.list.setCurrentRow(0)
+        self.list.itemDoubleClicked.connect(lambda _: self._select())
+        layout.addWidget(self.list)
+
+        buttons = QHBoxLayout()
+        select_btn = QPushButton("Select")
+        select_btn.setDefault(True)
+        select_btn.clicked.connect(self._select)
+        buttons.addWidget(select_btn)
+        if vault is not None:
+            delete_btn = QPushButton("Delete login")
+            delete_btn.clicked.connect(self._delete)
+            buttons.addWidget(delete_btn)
+        buttons.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+    def _select(self) -> None:
+        item = self.list.currentItem()
+        if item is None:
+            return
+        self.choice = item.data(Qt.ItemDataRole.UserRole)
         self.accept()
+
+    def _delete(self) -> None:
+        item = self.list.currentItem()
+        if item is None or self.vault is None:
+            return
+        index, entry = item.data(Qt.ItemDataRole.UserRole)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Delete login")
+        box.setText(f"Delete the login for {entry.site} ({entry.username})?")
+        box.setTextFormat(Qt.TextFormat.PlainText)  # site/username untrusted
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        self.vault.delete(index)
+        self.list.takeItem(self.list.row(item))
+        # Deleting shifts every later vault entry down one slot; fix the
+        # stored indices so a follow-up Select still fills the right login.
+        for i in range(self.list.count()):
+            other = self.list.item(i)
+            other_index, other_entry = other.data(Qt.ItemDataRole.UserRole)
+            if other_index > index:
+                other.setData(Qt.ItemDataRole.UserRole,
+                              (other_index - 1, other_entry))
+        if self.list.count() == 0:
+            self.reject()

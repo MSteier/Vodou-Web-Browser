@@ -1209,7 +1209,7 @@ class BrowserWindow(QMainWindow):
         if len(matches) == 1:
             index, entry = matches[0]
         else:
-            picker = PickEntryDialog(matches, self)
+            picker = PickEntryDialog(matches, self, vault=self.vault)
             if not picker.exec() or picker.choice is None:
                 return
             index, entry = picker.choice

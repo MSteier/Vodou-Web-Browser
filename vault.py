@@ -89,6 +89,7 @@ class Vault:
     def __init__(self, path: Path = VAULT_FILE):
         self.path = path
         self._fernet: Fernet | None = None       # at-rest key (master-derived)
+        self._key: bytes | None = None           # same key, raw, for rekeying
         self._session: Fernet | None = None      # ephemeral in-memory key
         # Metadata only: the `password` field of every entry here is "".
         self._entries: list[Entry] = []
@@ -110,6 +111,7 @@ class Vault:
 
     def lock(self) -> None:
         self._fernet = None
+        self._key = None
         self._session = None
         self._entries = []
         self._secrets = []
@@ -147,6 +149,7 @@ class Vault:
         self._kdf = (SCRYPT_N, SCRYPT_R, SCRYPT_P)
         key = _derive_key(master, salt, *self._kdf)
         self._fernet = Fernet(key)
+        self._key = key
         self._session = Fernet(Fernet.generate_key())
         self._salt = salt
         self._entries = []
@@ -182,10 +185,30 @@ class Vault:
         except InvalidToken:
             raise WrongMasterPassword()
         self._fernet = fernet
+        self._key = key
         self._session = Fernet(Fernet.generate_key())
         self._salt = salt
         self._kdf = kdf
         self._ingest([Entry(**e) for e in json.loads(raw)])
+
+    def change_master_password(self, current: str, new: str) -> None:
+        """Re-encrypt the vault under a key derived from a new master.
+
+        The current master password must be re-entered and is verified
+        (constant-time) against the key the vault was unlocked with, so a
+        walk-up attacker at an unlocked vault can't silently take it over.
+        Rekeying uses a fresh random salt and today's recommended scrypt
+        parameters, so an old vault is also upgraded in passing.
+        """
+        self._require_unlocked()
+        if not secrets.compare_digest(
+                _derive_key(current, self._salt, *self._kdf), self._key):
+            raise WrongMasterPassword()
+        self._salt = secrets.token_bytes(16)
+        self._kdf = (SCRYPT_N, SCRYPT_R, SCRYPT_P)
+        self._key = _derive_key(new, self._salt, *self._kdf)
+        self._fernet = Fernet(self._key)
+        self._save()
 
     # -- entries ---------------------------------------------------------
 

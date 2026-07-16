@@ -81,7 +81,13 @@ Extend the blocklist by adding domains (one per line) to
   and generate strong random passwords (`secrets` module).
 - **🔑 / Ctrl+Shift+F** — fill the saved login on the current page.
   Filling is always user-initiated (never automatic), warns on non-HTTPS
-  pages, and matches entries by domain (subdomains included).
+  pages, and matches entries by domain (subdomains included). When several
+  logins match, a picker lists them — **Select** (or double-click / Enter)
+  fills the highlighted one, and **Delete login** removes stale entries
+  right from the picker.
+- **Change master password** — button in the vault window; re-enters and
+  verifies the current master first, then re-encrypts the whole vault under
+  the new one (with a fresh salt and current-strength scrypt parameters).
 - Copied passwords are wiped from the clipboard after 30 seconds.
 - The vault auto-locks after 5 minutes of inactivity.
 - **In-memory hardening** — while unlocked, passwords are not held as
