@@ -887,8 +887,12 @@ class BrowserWindow(QMainWindow):
             return
         self._devtools_view = QWebEngineView()
         # Same off-the-record profile, so DevTools leaves nothing on disk.
-        self._devtools_view.setPage(
-            QWebEnginePage(self.profile, self._devtools_view))
+        devtools_page = QWebEnginePage(self.profile, self._devtools_view)
+        self._devtools_view.setPage(devtools_page)
+        # DevTools' own ✕ (inside the inspector toolbar) asks its window to
+        # close rather than closing anything itself; honor it like our header
+        # button.
+        devtools_page.windowCloseRequested.connect(self._close_dev_tools)
 
         header = QWidget()
         header.setObjectName("devtoolsHeader")
