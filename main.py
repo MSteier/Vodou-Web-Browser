@@ -107,7 +107,7 @@ from bookmarks_ui import BookmarksManagerDialog
 from plugins import PluginManager, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
-from privacy import GENERIC_USER_AGENT, PrivacyInterceptor
+from privacy import GENERIC_USER_AGENT, PrivacyInterceptor, apply_ua_quirk
 from about import AboutDialog
 from theme import THEMES, apply_theme, load_prefs, save_prefs
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
@@ -202,6 +202,26 @@ class WebPage(QWebEnginePage):
                  parent=None):
         super().__init__(profile, parent)
         self._capture_prefix = capture_prefix
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame) -> bool:
+        # Mutating the profile from inside this callback re-enters QtWebEngine
+        # and aborts the process, so the identity switch is deferred one event
+        # loop tick.
+        if is_main_frame:
+            QTimer.singleShot(
+                0, lambda u=QUrl(url): self._apply_ua_quirk(u))
+        return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+    def _apply_ua_quirk(self, url: QUrl) -> None:
+        try:
+            if apply_ua_quirk(self.profile(), url.host()):
+                # A UA change makes QtWebEngine reload the current page, which
+                # cancels the navigation that triggered the switch — re-issue
+                # it. The re-entry is a no-op (identity already matches), so
+                # this cannot loop.
+                self.setUrl(url)
+        except RuntimeError:
+            pass  # page torn down before the deferred call fired
 
     def javaScriptConsoleMessage(self, level, message, line, source_id):
         if message.startswith(self._capture_prefix):

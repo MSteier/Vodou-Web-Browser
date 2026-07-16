@@ -20,3 +20,9 @@ bookmarks.json
 plugins.json
 theme.json
 blocklist.txt
+
+# Private notes / conversation logs (never commit — local only)
+*conversation*.txt
+*transcript*.txt
+*-Conversation.txt
+notes/

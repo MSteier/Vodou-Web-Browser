@@ -124,6 +124,17 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
             return
         info.setHttpHeader(b"DNT", b"1")
         info.setHttpHeader(b"Sec-GPC", b"1")
+        if google_auth_host(host) or google_auth_host(
+                info.firstPartyUrl().host()):
+            # Google-sign-in quirk: present as Firefox (see FIREFOX_USER_AGENT
+            # below). Firefox sends no Sec-CH-UA hints, so none are injected.
+            info.setHttpHeader(b"User-Agent", FIREFOX_UA_BYTES)
+            return
+        # Keep the client-hint brands consistent with the Chrome UA string
+        # (QtWebEngine otherwise omits the "Google Chrome" brand, which reads as
+        # a spoofed/embedded browser to sites that inspect these headers).
+        info.setHttpHeader(b"Sec-CH-UA", SEC_CH_UA)
+        info.setHttpHeader(b"Sec-CH-UA-Full-Version-List", SEC_CH_UA_FULL)
 
 
 # A common, generic user agent so the browser doesn't advertise QtWebEngine
@@ -134,15 +145,86 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
 # hints QtWebEngine sends automatically. A mismatch between the two (or an
 # outdated version) reads as a spoofed/insecure browser and is one of the
 # signals Google uses to refuse sign-in with "this browser may not be secure".
-def _chrome_major() -> str:
+def _chrome_version() -> str:
     try:
         from PyQt6.QtWebEngineCore import qWebEngineChromiumVersion
-        return qWebEngineChromiumVersion().split(".")[0]
+        return qWebEngineChromiumVersion()
     except Exception:
-        return "140"
+        return "140.0.0.0"
 
+
+_CHROME_FULL = _chrome_version()             # e.g. "140.0.7339.225"
+_CHROME_MAJOR = _CHROME_FULL.split(".")[0]   # e.g. "140"
 
 GENERIC_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    f"(KHTML, like Gecko) Chrome/{_chrome_major()}.0.0.0 Safari/537.36"
+    f"(KHTML, like Gecko) Chrome/{_CHROME_MAJOR}.0.0.0 Safari/537.36"
 )
+
+# User-Agent Client Hints. QtWebEngine's own Sec-CH-UA advertises only
+# "Chromium" (no "Google Chrome" brand), which contradicts the Chrome UA string
+# above and makes the browser look spoofed/embedded to sites like Google that
+# read these headers. We rewrite them so the brands agree with the UA — the
+# same "present as generic Chrome" identity the browser already adopts, made
+# consistent. GREASE token ("Not=A?Brand";v="24") matches what this Chromium
+# build emits. Sent as bytes for the interceptor's setHttpHeader.
+SEC_CH_UA = (
+    f'"Chromium";v="{_CHROME_MAJOR}", "Not=A?Brand";v="24", '
+    f'"Google Chrome";v="{_CHROME_MAJOR}"'
+).encode()
+SEC_CH_UA_FULL = (
+    f'"Chromium";v="{_CHROME_FULL}", "Not=A?Brand";v="24.0.0.0", '
+    f'"Google Chrome";v="{_CHROME_FULL}"'
+).encode()
+
+# Google refuses sign-in from embedded Chromium engines ("This browser or app
+# may not be secure") no matter how consistent the Chrome identity above is —
+# it fingerprints the engine, not the headers. qutebrowser (also QtWebEngine)
+# solved this years ago with a site-specific quirk: present as *Firefox* on
+# Google's account hosts only (qutebrowser/qutebrowser#5182, shipped as
+# content.site_specific_quirks). Firefox UAs have kept working where Chrome-
+# and Edge-flavored ones get re-blocked, and real Firefox sends no Sec-CH-UA
+# client hints at all, so the "spoofed browser" inconsistency disappears.
+# Bump the version below if Google ever complains the browser is outdated.
+FIREFOX_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) "
+    "Gecko/20100101 Firefox/140.0"
+)
+FIREFOX_UA_BYTES = FIREFOX_USER_AGENT.encode()
+
+_GOOGLE_AUTH_HOSTS = frozenset({"accounts.google.com", "accounts.youtube.com"})
+
+
+def google_auth_host(host: str) -> bool:
+    """True for Google's sign-in hosts (including ccTLD variants like
+    accounts.google.co.uk that the sign-in flow can bounce through)."""
+    return host in _GOOGLE_AUTH_HOSTS or host.startswith("accounts.google.")
+
+
+def apply_ua_quirk(profile, host: str) -> bool:
+    """Switch the profile identity for a main-frame navigation: Firefox on
+    Google's account hosts, the generic Chrome identity everywhere else.
+    Returns True if the identity actually changed.
+
+    Profile-level (not just the header override in interceptRequest) so that
+    navigator.userAgent in page JS agrees with the HTTP headers — Google's
+    sign-in check reads both. The profile is shared across tabs, so another
+    tab navigating mid-sign-in can flip it back; a reload of the sign-in page
+    recovers. This mirrors how qutebrowser's quirk behaves.
+
+    Must NOT be called from inside a QtWebEngine navigation callback
+    (acceptNavigationRequest etc.) — setHttpUserAgent re-enters the engine
+    and aborts the process. Callers defer it by one event-loop tick.
+    """
+    firefox = google_auth_host(host)
+    target = FIREFOX_USER_AGENT if firefox else GENERIC_USER_AGENT
+    if profile.httpUserAgent() == target:
+        return False
+    profile.setHttpUserAgent(target)
+    try:
+        # Qt 6.8+: real Firefox sends no client hints, so disable them
+        # entirely while presenting as Firefox.
+        profile.clientHints().setAllClientHintsEnabled(not firefox)
+    except AttributeError:
+        pass
+    return True

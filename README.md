@@ -165,28 +165,34 @@ sound, standard cryptography — has not been professionally audited. For
 credentials you truly care about, an audited manager (Bitwarden, 1Password,
 KeePassXC) is the safer home.
 
-### Google sign-in ("This browser or app may not be secure")
+### Google sign-in
 
-Google's account sign-in **refuses to authenticate in Vodou**, showing *"This
-browser or app may not be secure."* This is **not** a bug or a real security
-problem with Vodou — its TLS, certificate verification, and encryption are all
-intact. Google deliberately fingerprints the *rendering engine* and blocks
-sign-in from any embedded/automation framework (Qt WebEngine, CEF, Electron
-webviews, Selenium, …). Every Qt WebEngine–based browser (Falkon, qutebrowser,
-etc.) hits the same wall.
+Google normally **blocks sign-in from embedded rendering engines** (Qt
+WebEngine, CEF, Electron webviews, Selenium, …) with *"This browser or app may
+not be secure."* This is engine fingerprinting on Google's side, not a security
+problem with Vodou — every Qt WebEngine–based browser (Falkon, qutebrowser,
+etc.) hits the same wall, and no amount of Chrome-identity consistency defeats
+it.
 
-Vodou already sends a current, consistent Chrome user agent that matches its
-real Chromium version, but no user-agent or flag change defeats this check —
-the only "fixes" are deceptive engine-spoofing hacks that Google patches
-quickly and that would make the browser *less* trustworthy, so Vodou doesn't
-ship them. Practical alternatives:
+Vodou solves it the way qutebrowser has since 2020 (see
+[qutebrowser#5182](https://github.com/qutebrowser/qutebrowser/issues/5182),
+shipped there as `content.site_specific_quirks`): a **site-specific identity
+quirk**. On Google's account hosts only (`accounts.google.com`,
+`accounts.youtube.com`), Vodou presents as Firefox — user agent, HTTP headers,
+and `navigator.userAgent` — and sends no `Sec-CH-UA` client hints, exactly
+like real Firefox. Everywhere else it keeps its usual generic-Chrome identity.
+Firefox identities have remained unblocked for years while Chrome- and
+Edge-flavored spoofs keep getting re-blocked, so **signing in to Gmail and
+YouTube works normally in Vodou**.
 
-- **Use a Google [App Password](https://myaccount.google.com/apppasswords)** with a
-  mail client over IMAP (`imap.gmail.com:993`) / SMTP (`smtp.gmail.com:465`).
-  App Passwords bypass the web "secure browser" check entirely (requires 2FA on
-  your Google account).
-- **Sign in to Google once in a mainstream browser** and use Vodou for general
-  browsing — the account gate is essentially the one thing this engine can't do.
+Two implementation notes for the curious (they cost real debugging time):
+changing a `QWebEngineProfile` user agent from inside `acceptNavigationRequest`
+aborts the process, so the switch is deferred one event-loop tick; and a UA
+change reloads the current page, cancelling the in-flight navigation, so the
+navigation is re-issued after the switch (a no-op on re-entry, so it can't
+loop). One behavioral caveat: the identity is profile-wide, so if another tab
+navigates in the middle of a sign-in flow, reload the sign-in page and
+continue.
 
 ## License
 
