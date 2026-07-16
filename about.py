@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -141,6 +141,10 @@ def engine_versions() -> dict[str, str]:
 
 
 class AboutDialog(QDialog):
+    # (app_or_engine_updated, had_problems) — lets the main window update
+    # its footer version tag after a one-click update run.
+    update_finished = pyqtSignal(bool, bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("About Vodou")
@@ -335,3 +339,4 @@ class AboutDialog(QDialog):
                 self, "No update needed",
                 "You are using the most current version of the "
                 f"application.\n\n{summary}")
+        self.update_finished.emit(updated, trouble)

@@ -311,6 +311,20 @@ class VersionLabel(QLabel):
         self.setToolTip(f"Update available: {what}\n"
                         f"Click to open About Vodou and update")
 
+    def show_up_to_date(self, restart_needed: bool = False) -> None:
+        """Confirmed-current state: after a check found nothing newer, or
+        right after the one-click updater ran ('updated' until the restart
+        actually loads the new version)."""
+        self._update_available = False
+        if restart_needed:
+            self.setText(f"Vodou v{APP_VERSION} — updated ✓ ")
+            self.setToolTip("Update installed — close and reopen Vodou to "
+                            "finish.\nClick to open the GitHub repository")
+        else:
+            self.setText(f"Vodou v{APP_VERSION} — up to date ✓ ")
+            self.setToolTip("You are using the most current version.\n"
+                            f"Click to open the GitHub repository\n{REPO_URL}")
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._update_available:
@@ -841,10 +855,18 @@ class BrowserWindow(QMainWindow):
             f"Theme: {self._theme_name} · {self._mode.capitalize()} mode", 4000)
 
     def show_about(self) -> None:
-        AboutDialog(self).exec()
+        dialog = AboutDialog(self)
+        dialog.update_finished.connect(self._on_update_finished)
+        dialog.exec()
+
+    def _on_update_finished(self, updated: bool, trouble: bool) -> None:
+        if trouble:
+            return  # keep whatever state the tag was in
+        self.version_label.show_up_to_date(restart_needed=updated)
 
     def _on_update_check(self, vodou_ver, engine_ver) -> None:
         if not vodou_ver and not engine_ver:
+            self.version_label.show_up_to_date()
             return
         parts = []
         if vodou_ver:
