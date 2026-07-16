@@ -254,12 +254,14 @@ class WebPage(QWebEnginePage):
                 data = json.loads(message[len(self._capture_prefix):])
                 username = str(data.get("u", ""))[:256]
                 password = str(data.get("p", ""))[:256]
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, AttributeError):
                 return
             if password:
                 self.captured.emit(username, password)
-            return
-        super().javaScriptConsoleMessage(level, message, line, source_id)
+        # Everything else is dropped instead of forwarded: the default
+        # handler writes page console output (which routinely includes
+        # user data) to stderr/logs. DevTools has its own console feed,
+        # so nothing is lost for debugging.
 
 
 class NotifyBar(QFrame):
@@ -443,6 +445,12 @@ class BrowserWindow(QMainWindow):
 
         self.blocked_count = 0
         self.interceptor.blocked.connect(self._on_blocked)
+        # Ad-heavy pages can block dozens of requests per second; coalesce
+        # the label repaints instead of doing one per request.
+        self._shield_timer = QTimer(self)
+        self._shield_timer.setSingleShot(True)
+        self._shield_timer.setInterval(250)
+        self._shield_timer.timeout.connect(self._refresh_shield)
 
         self._build_ui()
         self._build_shortcuts()
@@ -794,8 +802,10 @@ class BrowserWindow(QMainWindow):
         try:
             found = parse_bookmarks_html(Path(path))
         except OSError as error:
-            QMessageBox.warning(self, "Import failed",
-                                f"Could not read the file:\n{error}")
+            # plain text: the error embeds the filename, which for a
+            # downloaded file was chosen by a website.
+            plain_message(self, QMessageBox.Icon.Warning, "Import failed",
+                          f"Could not read the file:\n{error}")
             return
         added = self.bookmarks.add_many(found)
         self._update_star(self.current_view().url())
@@ -821,8 +831,8 @@ class BrowserWindow(QMainWindow):
         try:
             entries, skipped = parse_password_csv(Path(path))
         except OSError as error:
-            QMessageBox.warning(self, "Import failed",
-                                f"Could not read the file:\n{error}")
+            plain_message(self, QMessageBox.Icon.Warning, "Import failed",
+                          f"Could not read the file:\n{error}")
             return
         if not entries:
             QMessageBox.warning(
@@ -834,13 +844,14 @@ class BrowserWindow(QMainWindow):
 
         existing = {(normalize_site(e.site), e.username)
                     for e in self.vault.entries()}
-        added = 0
+        to_add = []
         for entry in entries:
-            if (normalize_site(entry.site), entry.username) in existing:
+            key = (normalize_site(entry.site), entry.username)
+            if key in existing:
                 continue
-            self.vault.add(entry)
-            existing.add((normalize_site(entry.site), entry.username))
-            added += 1
+            existing.add(key)
+            to_add.append(entry)
+        added = self.vault.add_many(to_add)
         QMessageBox.information(
             self, "Passwords imported",
             f"Imported {added} login(s) into the vault.\n"
@@ -1069,6 +1080,10 @@ class BrowserWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_blocked(self, host: str) -> None:
         self.blocked_count += 1
+        if not self._shield_timer.isActive():
+            self._shield_timer.start()
+
+    def _refresh_shield(self) -> None:
         self.shield_label.setText(
             f" 🛡 {self.blocked_count} trackers blocked ")
         self._center_shield()  # the text grew — keep it centred

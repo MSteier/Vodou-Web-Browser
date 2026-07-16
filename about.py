@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -335,16 +335,24 @@ class AboutDialog(QDialog):
         trouble = any("failed" in r or "could not" in r
                       for r in self._results)
         if trouble:
-            QMessageBox.warning(self, "Update finished with problems",
-                                summary)
+            icon, title, text = (QMessageBox.Icon.Warning,
+                                 "Update finished with problems", summary)
         elif updated:
-            QMessageBox.information(
-                self, "Update completed",
+            icon, title, text = (
+                QMessageBox.Icon.Information, "Update completed",
                 f"Update completed.\n\n{summary}\n\n"
                 f"Close and reopen Vodou to start using the new version.")
         else:
-            QMessageBox.information(
-                self, "No update needed",
+            icon, title, text = (
+                QMessageBox.Icon.Information, "No update needed",
                 "You are using the most current version of the "
                 f"application.\n\n{summary}")
+        box = QMessageBox(self)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(text)
+        # The summary quotes raw git/pip output (network-derived); never
+        # let QMessageBox's rich-text auto-detection interpret it.
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.exec()
         self.update_finished.emit(updated, trouble)

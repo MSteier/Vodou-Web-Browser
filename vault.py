@@ -246,6 +246,18 @@ class Vault:
         self._entries.append(self._meta_copy(entry))
         self._save()
 
+    def add_many(self, new_entries: list[Entry]) -> int:
+        """Bulk add (imports): seal everything, then ONE re-encrypt + disk
+        write — per-entry add() would rewrite the whole vault n times."""
+        self._require_unlocked()
+        for entry in new_entries:
+            entry.site = normalize_site(entry.site)
+            self._secrets.append(self._seal(entry.password))
+            self._entries.append(self._meta_copy(entry))
+        if new_entries:
+            self._save()
+        return len(new_entries)
+
     def update(self, index: int, entry: Entry) -> None:
         self._require_unlocked()
         entry.site = normalize_site(entry.site)

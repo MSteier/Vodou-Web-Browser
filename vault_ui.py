@@ -52,6 +52,18 @@ def clear_copied_secrets() -> None:
     _pending_secrets.clear()
 
 
+def _plain_warning(parent: QWidget, title: str, text: str) -> None:
+    """Warning box that renders as PLAIN text — used wherever the message
+    embeds a filename or OS error (a downloaded file's name was chosen by a
+    website, and QMessageBox auto-detects rich text)."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    box.exec()
+
+
 def _copy_with_auto_clear(text: str, parent: QWidget) -> None:
     """Copy to clipboard and wipe it after CLIPBOARD_CLEAR_SECONDS.
 
@@ -418,8 +430,8 @@ class VaultDialog(QDialog):
         try:
             entries, skipped = parse_password_csv(Path(path))
         except OSError as error:
-            QMessageBox.warning(self, "Import failed",
-                                f"Could not read the file:\n{error}")
+            _plain_warning(self, "Import failed",
+                           f"Could not read the file:\n{error}")
             return
         if not entries:
             QMessageBox.warning(
@@ -432,14 +444,14 @@ class VaultDialog(QDialog):
         # Skip logins already present (same site + username).
         existing = {(normalize_site(e.site), e.username)
                     for e in self.vault.entries()}
-        added = 0
+        to_add = []
         for entry in entries:
             key = (normalize_site(entry.site), entry.username)
             if key in existing:
                 continue
-            self.vault.add(entry)
             existing.add(key)
-            added += 1
+            to_add.append(entry)
+        added = self.vault.add_many(to_add)
         self._refresh()
         QMessageBox.information(
             self, "Passwords imported",
@@ -485,8 +497,8 @@ class VaultDialog(QDialog):
         try:
             write_password_csv(Path(path), full)
         except OSError as error:
-            QMessageBox.warning(self, "Export failed",
-                                f"Could not write the file:\n{error}")
+            _plain_warning(self, "Export failed",
+                           f"Could not write the file:\n{error}")
             return
         finally:
             for entry in full:  # drop plaintext references promptly
