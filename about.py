@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.2.0"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -162,11 +162,19 @@ class AboutDialog(QDialog):
         title_box = QVBoxLayout()
         name = QLabel("Vodou")
         name.setStyleSheet("font-size: 22pt; font-weight: 700;")
+        company = QLabel("by Mist Technologies")
+        company.setTextFormat(Qt.TextFormat.PlainText)
+        company.setStyleSheet("font-size: 11pt; font-weight: 600;")
         tagline = QLabel("A privacy-first browser with a built-in vault.")
         tagline.setTextFormat(Qt.TextFormat.PlainText)
         tagline.setStyleSheet("color: gray;")
+        credit = QLabel("Co-authored by Claude Fable 5")
+        credit.setTextFormat(Qt.TextFormat.PlainText)
+        credit.setStyleSheet("color: gray;")
         title_box.addWidget(name)
+        title_box.addWidget(company)
         title_box.addWidget(tagline)
+        title_box.addWidget(credit)
         header.addLayout(title_box)
         header.addStretch()
         outer.addLayout(header)

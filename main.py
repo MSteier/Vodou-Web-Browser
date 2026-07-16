@@ -104,6 +104,7 @@ from PyQt6.QtWidgets import (
 from autofill import PROBE_JS, build_capture_script, build_fill_script
 from bookmarks import Bookmarks
 from bookmarks_ui import BookmarksManagerDialog
+from downloads_ui import DownloadsDialog
 from plugins import PluginManager, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
@@ -528,6 +529,8 @@ class BrowserWindow(QMainWindow):
             lambda: self._populate_bookmarks_menu(hamburger_bookmarks))
         self._build_appearance_menu(menu.addMenu("Appearance"))
         menu.addSeparator()
+        menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
+        menu.addSeparator()
         menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
         menu.addAction("Import passwords (.csv)…", self.import_passwords)
         menu.addSeparator()
@@ -559,6 +562,7 @@ class BrowserWindow(QMainWindow):
             "Ctrl+Shift+V": self.open_vault,
             "Ctrl+Shift+Del": self.clear_browsing_data,
             "Ctrl+D": self.toggle_bookmark,
+            "Ctrl+J": self.show_downloads,
             "Ctrl+Tab": self._next_tab,
             "F12": self.open_dev_tools,
         }
@@ -1029,8 +1033,18 @@ class BrowserWindow(QMainWindow):
         item.setDownloadFileName(safe_name)
         item.setDownloadDirectory(str(downloads))
         item.accept()
-        self.statusBar().showMessage(
-            f"Downloading {safe_name} to {downloads}", 6000)
+        self._downloads_dialog().add(item)
+
+    def _downloads_dialog(self) -> DownloadsDialog:
+        if getattr(self, "_downloads", None) is None:
+            self._downloads = DownloadsDialog(self)
+        return self._downloads
+
+    def show_downloads(self) -> None:
+        dialog = self._downloads_dialog()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     # -- password manager --------------------------------------------------
 

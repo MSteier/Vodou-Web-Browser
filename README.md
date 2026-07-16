@@ -1,5 +1,7 @@
 # Vodou Browser
 
+**by Mist Technologies** — co-authored by Claude Fable 5
+
 A privacy-centric web browser with a built-in encrypted password manager.
 Python + PyQt6 on Qt WebEngine (the Chromium engine).
 
@@ -60,7 +62,8 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
-| No telemetry | The browser phones home to no one — there is no "home" |
+| No telemetry | Nothing about you or your browsing is ever sent anywhere. The only outbound calls of Vodou's own are the two anonymous version checks described in *About & updates* |
+| Download manager | Every download is user-approved (no drive-by saves), then tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
 | Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the session cache, cookies, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared |
 | Certificate viewer | Padlock next to the address bar (green = verified HTTPS, red = unencrypted); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
@@ -163,6 +166,7 @@ sent, and a failed check does nothing.
 | Ctrl+L | Focus address bar |
 | Ctrl+R / F5 | Reload |
 | Ctrl+D | Bookmark current page |
+| Ctrl+J | Downloads |
 | Ctrl+Shift+F | Fill login |
 | Ctrl+Shift+V | Open vault |
 | Ctrl+Shift+Del | Clear history & memory |
