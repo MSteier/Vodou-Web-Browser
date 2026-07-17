@@ -135,7 +135,9 @@ from plugins import PluginManager, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
 from privacy import (
+    FIREFOX_QUIRK_JS,
     GENERIC_USER_AGENT,
+    WEBAUTHN_SHIM_JS,
     PrivacyInterceptor,
     apply_ua_quirk,
     ua_quirk_needed,
@@ -268,12 +270,22 @@ class WebPage(QWebEnginePage):
 
     def _apply_ua_quirk(self, url: QUrl) -> None:
         try:
-            apply_ua_quirk(self.profile(), url.host())
-            # Re-issue the held navigation. On re-entry the identity already
-            # matches, so acceptNavigationRequest lets it through — no loop.
+            changed = apply_ua_quirk(self.profile(), url.host())
+        except RuntimeError:
+            return  # page torn down before the deferred call fired
+        # Re-issue the held navigation. On re-entry the identity already
+        # matches, so acceptNavigationRequest lets it through — no loop.
+        # After an actual switch, wait a beat first: the new UA propagates
+        # to the renderer asynchronously, and loading immediately could
+        # still expose the old navigator.userAgent to the page.
+        reissue = lambda u=QUrl(url): self._reissue(u)
+        QTimer.singleShot(150 if changed else 0, reissue)
+
+    def _reissue(self, url: QUrl) -> None:
+        try:
             self.setUrl(url)
         except RuntimeError:
-            pass  # page torn down before the deferred call fired
+            pass
 
     def javaScriptConsoleMessage(self, level, message, line, source_id):
         if message.startswith(self._capture_prefix):
@@ -486,6 +498,31 @@ class BrowserWindow(QMainWindow):
         capture_script.setSourceCode(
             build_capture_script(self.capture_prefix))
         self.profile.scripts().insert(capture_script)
+
+        # Firefox-identity JS quirk for Google's sign-in pages (see
+        # privacy.FIREFOX_QUIRK_JS). Main world on purpose: it changes what
+        # the page's own scripts observe; the script self-limits to the
+        # auth hosts.
+        ff_quirk = QWebEngineScript()
+        ff_quirk.setName("vodou-ff-quirk")
+        ff_quirk.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        ff_quirk.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        ff_quirk.setRunsOnSubFrames(True)
+        ff_quirk.setSourceCode(FIREFOX_QUIRK_JS)
+        self.profile.scripts().insert(ff_quirk)
+
+        # WebAuthn capability shim for the engine's never-settling
+        # getClientCapabilities() (see privacy.WEBAUTHN_SHIM_JS). All sites:
+        # the bug breaks any passkey flow that awaits capability detection.
+        webauthn_shim = QWebEngineScript()
+        webauthn_shim.setName("vodou-webauthn-shim")
+        webauthn_shim.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        webauthn_shim.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        webauthn_shim.setRunsOnSubFrames(True)
+        webauthn_shim.setSourceCode(WEBAUTHN_SHIM_JS)
+        self.profile.scripts().insert(webauthn_shim)
 
         # Reviewed, opt-in plugins injected into the isolated world. State is
         # ID-only (no code from disk); each plugin self-limits to its hosts.

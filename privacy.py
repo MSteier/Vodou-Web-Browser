@@ -128,10 +128,15 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
             return
         info.setHttpHeader(b"DNT", b"1")
         info.setHttpHeader(b"Sec-GPC", b"1")
-        if google_auth_host(host) or google_auth_host(
-                info.firstPartyUrl().host()):
+        if (_firefox_mode or google_auth_host(host)
+                or google_auth_host(info.firstPartyUrl().host())):
             # Google-sign-in quirk: present as Firefox (see FIREFOX_USER_AGENT
-            # below). Firefox sends no Sec-CH-UA hints, so none are injected.
+            # below) on EVERY request while the Firefox identity is active,
+            # not just on auth hosts. A sign-in flow crosses non-auth hosts
+            # (YouTube's bounces through www.youtube.com mid-handshake), and
+            # a Firefox User-Agent carrying Chrome Sec-CH-UA brands is
+            # exactly the mismatch Google flags as a spoofed browser. Real
+            # Firefox sends no client hints anywhere, so none are injected.
             info.setHttpHeader(b"User-Agent", FIREFOX_UA_BYTES)
             return
         # Keep the client-hint brands consistent with the Chrome UA string
@@ -205,6 +210,89 @@ def google_auth_host(host: str) -> bool:
     return host in _GOOGLE_AUTH_HOSTS or host.startswith("accounts.google.")
 
 
+# QtWebEngine's WebAuthn performs the actual ceremonies fine (Windows Hello
+# prompts and signs), but PublicKeyCredential.getClientCapabilities() never
+# settles — a known engine bug (qutebrowser#8930) that stalls or fails any
+# sign-in flow that awaits it before/after the ceremony. Google's rejection
+# code for our passkey loop (rrk=46, adjacent to rrk=47 "JavaScript
+# disabled") points at exactly such a client-capability failure, matching
+# the retry-until-it-works symptom. The shim resolves immediately with what
+# the engine truly offers: a user-verifying platform authenticator (Windows
+# Hello) and NO conditional/autofill passkey UI — steering sites onto the
+# modal flow that actually works. Injected on all sites; the bug isn't
+# Google-specific (it also breaks e.g. ChatGPT's login modal).
+WEBAUTHN_SHIM_JS = """\
+(function () {
+    "use strict";
+    if (!window.PublicKeyCredential) {
+        return;
+    }
+    var caps = {
+        conditionalCreate: false,
+        conditionalGet: false,
+        conditionalMediation: false,
+        hybridTransport: false,
+        passkeyPlatformAuthenticator: true,
+        userVerifyingPlatformAuthenticator: true,
+        relatedOrigins: false,
+        signalAllAcceptedCredentials: false,
+        signalCurrentUserDetails: false,
+        signalUnknownCredential: false
+    };
+    try {
+        Object.defineProperty(PublicKeyCredential, "getClientCapabilities", {
+            value: function () { return Promise.resolve(caps); },
+            configurable: true,
+            writable: true
+        });
+    } catch (e) {}
+    try {
+        Object.defineProperty(PublicKeyCredential,
+                              "isConditionalMediationAvailable", {
+            value: function () { return Promise.resolve(false); },
+            configurable: true,
+            writable: true
+        });
+    } catch (e) {}
+})();
+"""
+
+
+# JS-visible Chromium giveaways that contradict the Firefox identity on
+# Google's sign-in pages. The risk checks there don't stop at headers: page
+# script can see window.chrome, navigator.userAgentData (with Chromium
+# brands), and navigator.vendor "Google Inc." — none of which exist in real
+# Firefox — no matter what the User-Agent claims. Injected at
+# DocumentCreation in the page's MAIN world (it must affect what the page
+# itself sees), self-limited to the auth hosts, incl. their subframes.
+FIREFOX_QUIRK_JS = """\
+(function () {
+    "use strict";
+    var h = location.host;
+    if (h !== "accounts.google.com" && h !== "accounts.youtube.com"
+            && h.indexOf("accounts.google.") !== 0) {
+        return;
+    }
+    try { delete window.chrome; } catch (e) {}
+    var firefoxNavigator = {
+        userAgentData: undefined,             // Chromium-only API
+        vendor: "",                           // "Google Inc." in Chromium
+        productSub: "20100101",               // Firefox's frozen value
+        buildID: "20181001000000",            // Firefox-only, frozen value
+        oscpu: "Windows NT 10.0; Win64; x64"  // Firefox-only
+    };
+    Object.keys(firefoxNavigator).forEach(function (name) {
+        try {
+            Object.defineProperty(Navigator.prototype, name, {
+                get: function () { return firefoxNavigator[name]; },
+                configurable: true
+            });
+        } catch (e) {}
+    });
+})();
+"""
+
+
 # How long the Firefox identity stays sticky after the last navigation to a
 # Google auth host. A sign-in flow bounces through redirects, popups, and the
 # site's OAuth callback; reverting the (profile-wide) identity on the first
@@ -213,6 +301,11 @@ def google_auth_host(host: str) -> bool:
 # sign-in is harmless; the next navigation after the hold reverts it.
 _AUTH_HOLD_SECONDS = 90.0
 _last_auth_nav = 0.0
+# Mirrors which identity the profile currently presents. Written on the UI
+# thread by apply_ua_quirk, read on the IO thread by interceptRequest — a
+# single bool attribute is GIL-atomic. The interceptor keys its headers off
+# this so per-request identity can never contradict the profile identity.
+_firefox_mode = False
 
 
 def _identity_for(profile, host: str) -> str:
@@ -253,7 +346,9 @@ def apply_ua_quirk(profile, host: str) -> bool:
     (acceptNavigationRequest etc.) — setHttpUserAgent re-enters the engine
     and aborts the process. Callers defer it by one event-loop tick.
     """
+    global _firefox_mode
     target = _identity_for(profile, host)
+    _firefox_mode = target == FIREFOX_USER_AGENT
     if profile.httpUserAgent() == target:
         return False
     profile.setHttpUserAgent(target)

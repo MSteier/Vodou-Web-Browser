@@ -307,7 +307,25 @@ Reliability details (each cost real debugging time):
   grace period after the last auth-host navigation, so none of those hops
   (nor another tab navigating mid-flow) flips the identity — and reloads
   pages — in the middle of the handshake. The first navigation after the
-  grace period quietly reverts to the generic Chrome identity.
+  grace period quietly reverts to the generic Chrome identity. While the
+  Firefox identity is active it is consistent *everywhere*: every request
+  presents as Firefox with no Chrome client hints, and on the auth pages a
+  main-world script removes the JS-visible Chromium giveaways
+  (`window.chrome`, `navigator.userAgentData`, `navigator.vendor`) and adds
+  Firefox's own (`buildID`, `oscpu`).
+- **Passkeys (Windows Hello) work on the first attempt.** Qt WebEngine
+  performs WebAuthn ceremonies fine, but its
+  `PublicKeyCredential.getClientCapabilities()` promise never settles
+  ([qutebrowser#8930](https://github.com/qutebrowser/qutebrowser/issues/8930)),
+  so any sign-in flow that awaits capability detection stalls and gets
+  reported as a defective client — Google showed "this browser may not be
+  secure" *after* a successful passkey ceremony (rejection code `rrk=46`,
+  next to `rrk=47` "JavaScript disabled"), and only about one attempt in
+  four got through. Vodou shims the call on every site to resolve
+  immediately with the engine's true capabilities — user-verifying platform
+  authenticator: yes; conditional/autofill passkey UI: no — which steers
+  sites onto the modal Windows Hello flow that works. The same engine bug
+  also breaks e.g. ChatGPT's login modal, so the shim is site-agnostic.
 
 ## License
 
