@@ -64,7 +64,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. The only outbound calls of Vodou's own are the two anonymous version checks described in *About & updates* |
 | Download manager | Every download is user-approved (no drive-by saves), then tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
-| Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the session cache (memory and disk), cookies, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared |
+| Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — the recorded blocking statistics, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute: exit deliberately keeps the cookie jar and the blocking history, so this is the only control that destroys them (and the only way to drop cookies without losing your open tabs) |
 | Certificate viewer | Padlock next to the address bar (green = verified HTTPS, red = unencrypted); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
 Extend the blocklist by adding domains (one per line) to

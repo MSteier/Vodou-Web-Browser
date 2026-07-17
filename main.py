@@ -682,8 +682,9 @@ class BrowserWindow(QMainWindow):
         clear_action = menu.addAction("Clear history & memory\tCtrl+Shift+Del",
                                       self.clear_browsing_data)
         clear_action.setToolTip(
-            "Erase visited-link history, the HTTP cache, cookies, and each "
-            "tab's back/forward navigation memory")
+            "Erase visited-link history, the HTTP cache, cookies (including "
+            "the saved ones for allowlisted sites), the recorded blocking "
+            "statistics, and each tab's back/forward navigation memory")
         menu.addSeparator()
         hamburger_bookmarks = menu.addMenu("Bookmarks")
         hamburger_bookmarks.aboutToShow.connect(
@@ -1354,8 +1355,13 @@ class BrowserWindow(QMainWindow):
         self._devtools_esc.setEnabled(False)
 
     def clear_browsing_data(self) -> None:
-        """Wipe the session's cache, cookies, visited-link history, and each
-        open tab's back/forward navigation memory.
+        """Wipe the cache, cookies, visited-link history, blocking stats, and
+        each open tab's back/forward navigation memory.
+
+        Not redundant with quitting, despite the memory-only session: exit
+        deliberately *keeps* the saved cookie jar and the blocking history
+        (closeEvent flushes both), so this is the only control that destroys
+        them — and the only way to drop cookies without losing open tabs.
 
         The engine clears its on-disk cache with ordinary deletion here (it
         holds the files open, so they can't be overwritten mid-session);
@@ -1377,15 +1383,23 @@ class BrowserWindow(QMainWindow):
             if view is not None:
                 view.history().clear()
         self.statusBar().showMessage("History and memory cleared.", 6000)
+        # This summary must name the *persistent* stores too. Quitting keeps
+        # them (closeEvent flushes both), so this is the only control that
+        # destroys them — saying "nothing was written to disk" here, as an
+        # earlier version did, would be a lie about data the user may be
+        # relying on.
         QMessageBox.information(
             self, "History & memory cleared",
-            "✅ Your in-memory data has been cleared:\n\n"
+            "✅ Cleared:\n\n"
             "  •  Visited-link history\n"
             "  •  Back/forward navigation memory (every open tab)\n"
-            "  •  HTTP cache\n"
-            "  •  Cookies (you are now signed out of all sites)\n\n"
-            "This session was memory-only to begin with — nothing had "
-            "been written to disk.")
+            "  •  HTTP cache (memory and disk)\n"
+            "  •  Cookies (you are now signed out of all sites)\n"
+            "  •  Saved cookies for your allowlisted sites — those sites "
+            "are signed out too, though the exceptions list itself is "
+            "kept\n"
+            "  •  Recorded blocking statistics\n\n"
+            "The disk cache is securely shredded when Vodou closes.")
 
     # -- privacy status -------------------------------------------------
 
