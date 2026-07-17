@@ -55,7 +55,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 
 | Feature | How |
 |---|---|
-| No history/cookies/cache on disk | Off-the-record profile; everything is memory-only and erased on exit (one deliberate exception: see *Crash recovery*) |
+| Cookies & history never persist | Cookies are memory-only and die with the process. The bulky, low-sensitivity artifacts (HTTP cache, site storage) live in a size-capped disk folder for performance and are **securely shredded** on every exit — see *Performance & secure shredding* |
 | Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
@@ -64,11 +64,37 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. The only outbound calls of Vodou's own are the two anonymous version checks described in *About & updates* |
 | Download manager | Every download is user-approved (no drive-by saves), then tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
-| Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the session cache, cookies, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared |
+| Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the session cache (memory and disk), cookies, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared |
 | Certificate viewer | Padlock next to the address bar (green = verified HTTPS, red = unencrypted); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
 Extend the blocklist by adding domains (one per line) to
 `~/.vodou/blocklist.txt`.
+
+## Performance & secure shredding
+
+Early versions kept *everything* — including Chromium's HTTP cache — in RAM,
+which starved machines with 16 GB or less during heavy browsing. Vodou now
+uses a **hybrid profile** that keeps the security posture while cutting the
+memory footprint:
+
+- **Memory-only (unchanged):** cookies — the truly sensitive record of your
+  logins — never touch disk and die with the process.
+- **On disk, capped at 512 MB:** the HTTP cache and site storage
+  (localStorage etc.) live in `~/.vodou/profile`. Revisited pages come from
+  disk cache instead of RAM or the network.
+- **Securely shredded:** on every clean exit, every file in that folder is
+  overwritten with random bytes (forced to disk with `fsync`) and then
+  deleted — a recovery tool finds noise, not your browsing. The same shred
+  runs again **at startup**, so a crash or a briefly-locked file can't leave
+  anything readable behind; nothing survives more than one launch cycle.
+
+*Honest caveat:* on SSDs, wear-leveling means an overwrite isn't guaranteed
+to hit the same physical cells as the original data. The complete answer to
+that is full-disk encryption (BitLocker / FileVault / LUKS); the shredder is
+defence in depth on top, not a substitute. Mid-session, **Ctrl+Shift+Del**
+clears the disk cache with ordinary deletion (the engine holds the files
+open, so they can't be overwritten while running) — the secure shred always
+covers the whole folder at exit.
 
 ## Crash recovery
 
@@ -182,9 +208,23 @@ flag fixes it; switching the compositor does.
 - Close it with the **✕** in its header or by pressing **Esc**. It runs on the
   off-the-record profile, so it persists nothing.
 
-## About & updates
+## Help, issue reporting & updates
 
-**☰ menu → About Vodou…** shows the app version and the live Chromium / Qt /
+**☰ menu → Help** collects the support tools:
+
+- **Report an issue…** — opens a new GitHub issue with the environment
+  pre-filled: Vodou version **and the exact git commit**, Chromium / Qt /
+  PyQt / Python versions, and your OS. Every report pins the precise code
+  it's about.
+- **View on GitHub** — opens the repository.
+- **About Vodou…** — version info and the one-click updater (below).
+
+Version numbers everywhere (footer, About dialog, issue reports) include the
+short hash of the checked-out commit — e.g. `v1.5.0 (28fae28)` — read
+directly from the repo's `.git` files, so it works even where git isn't
+installed.
+
+**Help → About Vodou…** shows the app version and the live Chromium / Qt /
 PyQt / Python versions, and offers an **Update Vodou & engine** button that
 updates both parts of the browser in one click: it pulls the latest Vodou
 from GitHub (`git pull --ff-only`, so a locally modified checkout is never

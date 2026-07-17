@@ -41,13 +41,44 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
 _RAW_ABOUT_URL = ("https://raw.githubusercontent.com/MSteier/"
                   "Vodou-Web-Browser/master/about.py")
 _PYPI_JSON_URL = "https://pypi.org/pypi/PyQt6-WebEngine/json"
+
+
+def _git_head() -> str:
+    """Short hash of the checked-out commit, read straight from .git files
+    (no git subprocess — works under pythonw without a console flash, and
+    even when git isn't installed). Empty string when unavailable."""
+    git = _REPO_DIR / ".git"
+    try:
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref: "):
+            ref = head[5:]
+            ref_file = git.joinpath(*ref.split("/"))
+            if ref_file.exists():
+                head = ref_file.read_text(encoding="utf-8").strip()
+            else:  # ref may live in packed-refs instead
+                head = ""
+                for line in (git / "packed-refs").read_text(
+                        encoding="utf-8").splitlines():
+                    if line.endswith(" " + ref):
+                        head = line.split(" ", 1)[0]
+                        break
+    except OSError:
+        return ""
+    head = head[:7]
+    return head if all(c in "0123456789abcdef" for c in head) else ""
+
+
+GIT_COMMIT = _git_head()
+# Version as shown to the user, e.g. "1.4.0 (28fae28)" — the commit hash pins
+# the exact code an issue report is about.
+VERSION_DISPLAY = APP_VERSION + (f" ({GIT_COMMIT})" if GIT_COMMIT else "")
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -121,7 +152,7 @@ def engine_versions() -> dict[str, str]:
     py = f"{sys.version_info.major}.{sys.version_info.minor}." \
          f"{sys.version_info.micro}"
     info = {
-        "Vodou": APP_VERSION,
+        "Vodou": VERSION_DISPLAY,
         "Chromium engine": "unknown",
         "Qt WebEngine": "unknown",
         "Qt": QT_VERSION_STR,

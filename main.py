@@ -94,7 +94,9 @@ os.environ.setdefault(
     "--force-webrtc-ip-handling-policy=default_public_interface_only "
     + _gfx_flags())
 
+import platform
 import secrets
+from urllib.parse import quote
 
 from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
@@ -134,7 +136,14 @@ from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
 from privacy import GENERIC_USER_AGENT, PrivacyInterceptor, apply_ua_quirk
 from session import clear_snapshot, load_snapshot, save_snapshot
-from about import APP_VERSION, REPO_URL, AboutDialog, UpdateChecker
+from shred import shred_dir
+from about import (
+    REPO_URL,
+    VERSION_DISPLAY,
+    AboutDialog,
+    UpdateChecker,
+    engine_versions,
+)
 from theme import THEMES, apply_theme, load_prefs, save_prefs
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
 from vault_ui import (
@@ -166,6 +175,11 @@ def migrate_config_dir(old: Path = LEGACY_VAULT_DIR,
     return False
 
 HOME_URL = "https://localhost/searxng"
+
+# On-disk half of the hybrid profile: capped HTTP cache + site storage.
+# Created by the engine at startup, shredded on every exit and at the next
+# startup after a crash. ~/.vodou is outside any cloud-synced folder.
+PROFILE_DIR = Path.home() / ".vodou" / "profile"
 SEARCH_URL = "https://localhost/searxng/search?q={}"
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
@@ -324,7 +338,7 @@ class VersionLabel(QLabel):
     """
 
     def __init__(self, browser: "BrowserWindow"):
-        super().__init__(f"Vodou v{APP_VERSION} ")
+        super().__init__(f"Vodou v{VERSION_DISPLAY} ")
         self.browser = browser
         self._update_available = False
         self.setObjectName("versionLabel")
@@ -335,7 +349,7 @@ class VersionLabel(QLabel):
         """Turn the tag into an update notice; clicking now opens About,
         where one click installs both parts."""
         self._update_available = True
-        self.setText(f"Vodou v{APP_VERSION} — update available ⬆ ")
+        self.setText(f"Vodou v{VERSION_DISPLAY} — update available ⬆ ")
         self.setToolTip(f"Update available: {what}\n"
                         f"Click to open About Vodou and update")
 
@@ -345,11 +359,11 @@ class VersionLabel(QLabel):
         actually loads the new version)."""
         self._update_available = False
         if restart_needed:
-            self.setText(f"Vodou v{APP_VERSION} — updated ✓ ")
+            self.setText(f"Vodou v{VERSION_DISPLAY} — updated ✓ ")
             self.setToolTip("Update installed — close and reopen Vodou to "
                             "finish.\nClick to open the GitHub repository")
         else:
-            self.setText(f"Vodou v{APP_VERSION} — up to date ✓ ")
+            self.setText(f"Vodou v{VERSION_DISPLAY} — up to date ✓ ")
             self.setToolTip("You are using the most current version.\n"
                             f"Click to open the GitHub repository\n{REPO_URL}")
 
@@ -410,9 +424,21 @@ class BrowserWindow(QMainWindow):
         self.setWindowTitle("Vodou Browser — private")
         self.resize(1280, 830)
 
-        # Off-the-record profile: no storage name, no persistent path ->
-        # cookies/cache/history stay in memory and die with the process.
-        self.profile = QWebEngineProfile(self)
+        # Hybrid profile. Fully off-the-record forced Chromium's HTTP cache
+        # into RAM, which starves smaller machines during heavy browsing.
+        # Instead, the bulky but low-sensitivity artifacts (HTTP cache, site
+        # storage) live in a size-capped folder on disk, while cookies stay
+        # memory-only. Everything under PROFILE_DIR is shredded — overwritten
+        # with random bytes, then deleted (see shred.py) — on every exit, and
+        # again at startup to cover a run that crashed before its wipe.
+        self.profile = QWebEngineProfile("vodou", self)
+        self.profile.setCachePath(str(PROFILE_DIR / "cache"))
+        self.profile.setPersistentStoragePath(str(PROFILE_DIR / "storage"))
+        self.profile.setHttpCacheType(
+            QWebEngineProfile.HttpCacheType.DiskHttpCache)
+        self.profile.setHttpCacheMaximumSize(512 * 1024 * 1024)
+        self.profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
         self.profile.setHttpUserAgent(GENERIC_USER_AGENT)
         self.interceptor = PrivacyInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.interceptor)
@@ -593,7 +619,15 @@ class BrowserWindow(QMainWindow):
         menu.addAction("Plugins…", self.open_plugins)
         menu.addAction("Developer tools\tF12", self.open_dev_tools)
         menu.addSeparator()
-        menu.addAction("About Vodou…", self.show_about)
+        help_menu = menu.addMenu("Help")
+        report = help_menu.addAction("Report an issue…", self.report_issue)
+        report.setToolTip(
+            "Open a new GitHub issue with the version, commit, and "
+            "platform details pre-filled")
+        help_menu.addAction("View on GitHub",
+                            lambda: self.add_tab(QUrl(REPO_URL)))
+        help_menu.addSeparator()
+        help_menu.addAction("About Vodou…", self.show_about)
         menu_button.setMenu(menu)
         toolbar.addWidget(menu_button)
 
@@ -1025,6 +1059,18 @@ class BrowserWindow(QMainWindow):
         dialog.update_finished.connect(self._on_update_finished)
         dialog.exec()
 
+    def report_issue(self) -> None:
+        """Open GitHub's new-issue page with the environment pre-filled,
+        so every report carries the exact version + commit it's about."""
+        details = "\n".join(
+            f"- {name}: {version}"
+            for name, version in engine_versions().items())
+        body = (
+            "**What happened?**\n\n\n**Steps to reproduce**\n\n\n"
+            f"---\n**Environment**\n{details}\n"
+            f"- OS: {platform.platform()}\n")
+        self.add_tab(QUrl(f"{REPO_URL}/issues/new?body={quote(body)}"))
+
     def _on_update_finished(self, updated: bool, trouble: bool) -> None:
         if trouble:
             return  # keep whatever state the tag was in
@@ -1146,8 +1192,12 @@ class BrowserWindow(QMainWindow):
         self._devtools_esc.setEnabled(False)
 
     def clear_browsing_data(self) -> None:
-        """Wipe the session's (memory-only) cache, cookies, visited-link
-        history, and each open tab's back/forward navigation memory."""
+        """Wipe the session's cache, cookies, visited-link history, and each
+        open tab's back/forward navigation memory.
+
+        The engine clears its on-disk cache with ordinary deletion here (it
+        holds the files open, so they can't be overwritten mid-session);
+        the secure shred of the whole profile folder runs at exit."""
         self.profile.clearHttpCache()
         self.profile.cookieStore().deleteAllCookies()
         self.profile.clearAllVisitedLinks()
@@ -1445,12 +1495,19 @@ class BrowserWindow(QMainWindow):
 
 def main() -> None:
     migrate_config_dir()
+    # A leftover profile folder means the last run ended before its exit
+    # wipe (crash/kill) — shred it before the engine starts and recreates it.
+    shred_dir(PROFILE_DIR)
     app = QApplication(sys.argv)
     app.setApplicationName("Vodou Browser")
     apply_theme(app)
     window = BrowserWindow()
     window.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    # Engine shutdown can keep the odd cache file locked for a moment;
+    # anything skipped here is caught by the startup shred on the next run.
+    shred_dir(PROFILE_DIR)
+    sys.exit(code)
 
 
 if __name__ == "__main__":
