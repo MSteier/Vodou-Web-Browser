@@ -213,6 +213,13 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   fingerprint** so its identity is tamper-evident.
 - Bundled: *Dark Mode Everywhere*, *Cookie Banner Zapper*, *Glass Blur
   Deflicker*, *Text Selection Unlocker*.
+- *Dark Mode Everywhere* darkens **light** pages only. Its dark styling is
+  applied immediately so light pages never flash white, then — once the
+  site's own stylesheets have loaded — it measures the page's background
+  and withdraws itself if the site was already dark. Without that, its
+  inversion would turn an already-dark page light and override whatever
+  theme the site (or you) chose, which looks exactly like the site's own
+  theme setting being ignored.
 - *Glass Blur Deflicker* strips CSS `backdrop-filter` blur ("frosted
   glass"), which can flicker under the hardware compositor on some Windows
   GPU drivers. It reduces the effect while keeping *Hardware* graphics; if
