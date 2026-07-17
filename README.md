@@ -55,7 +55,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 
 | Feature | How |
 |---|---|
-| Cookies & history never persist | Cookies are memory-only and die with the process. The bulky, low-sensitivity artifacts (HTTP cache, site storage) live in a size-capped disk folder for performance and are **securely shredded** on every exit — see *Performance & secure shredding* |
+| Cookies & history never persist | Cookies are memory-only and die with the process, except for sites you explicitly allowlist — see *Cookie exceptions*. The bulky, low-sensitivity artifacts (HTTP cache, site storage) live in a size-capped disk folder for performance and are **securely shredded** on every exit — see *Performance & secure shredding* |
 | Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
@@ -88,6 +88,14 @@ memory footprint:
   runs again **at startup**, so a crash or a briefly-locked file can't leave
   anything readable behind; nothing survives more than one launch cycle.
 
+**Reload always fetches fresh.** The disk cache exists to spare RAM, not to
+speed up reloads — and a page whose content depends on a cookie (site
+preference pages are the classic case) often ships no `Cache-Control` or
+`Vary`, so a cache-allowed reload can serve a stale copy after you change a
+setting. **Ctrl+R / F5 / ⟳** therefore bypass the cache and re-fetch, so an
+explicit reload always shows the live page; ordinary link-clicking and
+re-navigation still use the cache.
+
 *Honest caveat:* on SSDs, wear-leveling means an overwrite isn't guaranteed
 to hit the same physical cells as the original data. The complete answer to
 that is full-disk encryption (BitLocker / FileVault / LUKS); the shredder is
@@ -95,6 +103,35 @@ defence in depth on top, not a substitute. Mid-session, **Ctrl+Shift+Del**
 clears the disk cache with ordinary deletion (the engine holds the files
 open, so they can't be overwritten while running) — the secure shred always
 covers the whole folder at exit.
+
+## Cookie exceptions
+
+Memory-only cookies are the right default, but they also forget the logins
+and site settings you *want* kept. **☰ menu → Settings → Cookie
+exceptions…** lists the sites that are exempt: add a bare host like
+`youtube.com` (subdomains included), `localhost`, or an IP.
+
+- Everything not on the list is unchanged: memory-only, erased on exit.
+- Listed sites' cookies are mirrored to `~/.vodou/cookies.dat` and restored
+  at the next start. QtWebEngine's cookie persistence is profile-wide
+  (all-or-nothing), so Vodou does the selection itself: it watches the live
+  cookie store and keeps only the allowlisted subset.
+- **Encrypted at rest with Windows DPAPI** — the same per-user OS
+  encryption Chrome uses for its own cookie database, so no password prompt
+  and no other Windows account can read it. *Honest limit:* as with
+  Chrome's jar, software running as **you** could decrypt it. On
+  non-Windows platforms the jar is written unencrypted.
+- Only real persistent cookies are kept: session cookies (which the site
+  itself marks as "die with the browser") are never saved, and expired ones
+  are dropped on restore.
+- Writes are debounced (≤1 per 3 s of cookie churn), so busy sites cost
+  nothing and a crash loses at most a few seconds of updates.
+- **Ctrl+Shift+Del** empties the saved jar too — clearing cookies means all
+  of them. The exception *list* survives; only the cookies are wiped.
+
+Note that a site's login cookies often live on a parent or sibling domain
+(YouTube's live on `google.com`), so keeping one site signed in can take
+more than one entry.
 
 ## Crash recovery
 
@@ -121,7 +158,10 @@ everything; **Start fresh** discards it and opens the usual home tab.
   written to disk unencrypted, and a forgotten master password is
   unrecoverable by design.
 - **🗄 / Ctrl+Shift+V** — open the vault: add, edit, delete, copy entries,
-  and generate strong random passwords (`secrets` module).
+  and generate strong random passwords (`secrets` module). The vault is an
+  ordinary window, not a modal dialog — it stays usable alongside the
+  browser and other apps, drops behind when you click elsewhere, and
+  returns via its taskbar button.
 - **🔑 / Ctrl+Shift+F** — fill the saved login on the current page.
   Filling is always user-initiated (never automatic), warns on non-HTTPS
   pages, and matches entries by domain (subdomains included). When several
@@ -132,7 +172,9 @@ everything; **Start fresh** discards it and opens the usual home tab.
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).
 - Copied passwords are wiped from the clipboard after 30 seconds.
-- The vault auto-locks after 5 minutes of inactivity.
+- The vault auto-locks after 5 minutes of inactivity; because the vault
+  window can be left open in the background, auto-locking closes it too.
+  Active use (any add/edit/reveal dialog open) defers the lock.
 - **In-memory hardening** — while unlocked, passwords are not held as
   plaintext; each is re-encrypted under a random per-session key and only
   decrypted at the instant it is used (fill, copy, edit).
@@ -252,7 +294,7 @@ sent, and a failed check does nothing.
 | Ctrl+T / Ctrl+W | New / close tab |
 | Ctrl+Tab | Next tab |
 | Ctrl+L | Focus address bar |
-| Ctrl+R / F5 | Reload |
+| Ctrl+R / F5 | Reload (bypasses the cache — always fetches fresh) |
 | Ctrl + + / − (or Ctrl + wheel) | Zoom in / out |
 | Ctrl+0 | Reset zoom |
 | Ctrl+D | Bookmark current page |

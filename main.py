@@ -110,6 +110,7 @@ from PyQt6.QtWebEngineCore import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -129,6 +130,8 @@ from PyQt6.QtWidgets import (
 
 from autofill import PROBE_JS, build_capture_script, build_fill_script
 from bookmarks import Bookmarks
+from cookies import CookieKeeper
+from cookies_ui import CookieSitesDialog
 from bookmarks_ui import BookmarksManagerDialog
 from downloads_ui import DownloadsDialog
 from plugins import PluginManager, wrap_plugin_source
@@ -482,6 +485,13 @@ class BrowserWindow(QMainWindow):
         self.profile.setPersistentCookiesPolicy(
             QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
         self.profile.setHttpUserAgent(GENERIC_USER_AGENT)
+
+        # Cookie exceptions: cookies stay memory-only except for sites the
+        # user allowlists (☰ → Settings → Cookie exceptions…) — those are
+        # mirrored to an encrypted jar and restored here at startup.
+        self.cookie_keeper = CookieKeeper(self.profile.cookieStore(), self)
+        self.cookie_keeper.restore()
+
         self.interceptor = PrivacyInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.interceptor)
         self.profile.downloadRequested.connect(self._on_download)
@@ -542,6 +552,9 @@ class BrowserWindow(QMainWindow):
         self._vault_lock_timer.setSingleShot(True)
         self._vault_lock_timer.setInterval(VAULT_AUTOLOCK_MINUTES * 60 * 1000)
         self._vault_lock_timer.timeout.connect(self._autolock_vault)
+        # The vault window is modeless, so it outlives the call that opened
+        # it; this holds the live one (None when closed).
+        self._vault_dialog: VaultDialog | None = None
 
         self.blocked_count = 0
         self.interceptor.blocked.connect(self._on_blocked)
@@ -615,7 +628,7 @@ class BrowserWindow(QMainWindow):
         action("←", "Back (Alt+Left)", lambda: self.current_view().back())
         action("→", "Forward (Alt+Right)",
                lambda: self.current_view().forward())
-        action("⟳", "Reload (Ctrl+R)", lambda: self.current_view().reload())
+        action("⟳", "Reload (Ctrl+R)", self.reload_page)
         action("⌂", "Home", lambda: self.current_view().setUrl(QUrl(HOME_URL)))
 
         self.lock_button = QToolButton()
@@ -684,6 +697,7 @@ class BrowserWindow(QMainWindow):
             "Let tracker/ad requests through until resumed — for sites "
             "that break with blocking on. Blocking resumes on restart.")
         self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
+        settings_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
         menu.addSeparator()
         menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
         menu.addSeparator()
@@ -726,8 +740,8 @@ class BrowserWindow(QMainWindow):
             "Ctrl+T": lambda: self.add_tab(QUrl(HOME_URL)),
             "Ctrl+W": lambda: self.close_tab(self.tabs.currentIndex()),
             "Ctrl+L": self._focus_url_bar,
-            "Ctrl+R": lambda: self.current_view().reload(),
-            "F5": lambda: self.current_view().reload(),
+            "Ctrl+R": self.reload_page,
+            "F5": self.reload_page,
             "Ctrl+Shift+F": self.fill_login,
             "Ctrl+Shift+V": self.open_vault,
             "Ctrl+Shift+Del": self.clear_browsing_data,
@@ -790,6 +804,20 @@ class BrowserWindow(QMainWindow):
     def current_view(self) -> WebView:
         return self.tabs.currentWidget()
 
+    def reload_page(self) -> None:
+        """Reload the current tab, bypassing the HTTP cache.
+
+        Vodou's disk cache exists to spare RAM, not to speed up reloads —
+        and pages whose content depends on a cookie (SearXNG's theme, many
+        preference pages) carry no Cache-Control/Vary, so a cache-allowed
+        reload can serve a stale copy after you change a setting. An
+        explicit reload should always show the live page, so it fetches
+        fresh; the cache still serves ordinary re-navigation."""
+        view = self.current_view()
+        if view is not None:
+            view.page().triggerAction(
+                QWebEnginePage.WebAction.ReloadAndBypassCache)
+
     # -- zoom ---------------------------------------------------------------
 
     def zoom_view(self, view: WebView, direction: int) -> None:
@@ -823,7 +851,23 @@ class BrowserWindow(QMainWindow):
         clear_copied_secrets()  # no passwords left on the clipboard
         self._session_timer.stop()
         clear_snapshot()  # clean exit — a leftover file means "crashed"
+        self.cookie_keeper.flush()  # capture last cookie updates in the jar
+        # The vault window has no parent (so it can fall behind), which also
+        # means it won't be torn down with this one — close it explicitly or
+        # it would outlive the browser and keep the process alive.
+        if self._vault_dialog is not None:
+            self._vault_dialog.close()
         super().closeEvent(event)
+
+    def manage_cookie_sites(self) -> None:
+        dialog = CookieSitesDialog(self.cookie_keeper.sites, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.cookie_keeper.set_sites(dialog.sites())
+            n = len(self.cookie_keeper.sites)
+            self.statusBar().showMessage(
+                f"Cookie exceptions saved ({n} site{'s' if n != 1 else ''}). "
+                "Reload a site (or sign in again) to capture its cookies.",
+                6000)
 
     # -- crash recovery ---------------------------------------------------
 
@@ -1306,6 +1350,7 @@ class BrowserWindow(QMainWindow):
         the secure shred of the whole profile folder runs at exit."""
         self.profile.clearHttpCache()
         self.profile.cookieStore().deleteAllCookies()
+        self.cookie_keeper.clear()  # saved jar too — clearing means all of it
         self.profile.clearAllVisitedLinks()
         # Clear each tab's in-memory back/forward navigation history so the
         # trail of pages you moved through this session is dropped too.
@@ -1415,17 +1460,46 @@ class BrowserWindow(QMainWindow):
             self._vault_lock_timer.start()  # vault UI in use; retry later
             return
         if self.vault.unlocked:
+            # The vault window no longer blocks the app, so it can be left
+            # open and forgotten in the background — close it here or
+            # auto-lock would be defeated by simply leaving it up.
+            if self._vault_dialog is not None:
+                self._vault_dialog.close()
             self.vault.lock()
             self.statusBar().showMessage(
                 f"Password vault auto-locked after {VAULT_AUTOLOCK_MINUTES} "
                 f"minutes of inactivity.", 6000)
 
     def open_vault(self) -> None:
+        if self._vault_dialog is not None:
+            # Already open — surface it rather than stacking a second copy.
+            self._vault_dialog.showNormal()
+            self._vault_dialog.raise_()
+            self._vault_dialog.activateWindow()
+            return
         if not self._unlock_vault():
             return
         host = self.current_view().url().host().removeprefix("www.")
-        VaultDialog(self.vault, self, current_site=host).exec()
-        self._vault_lock_timer.start()
+        # Deliberately unparented: on Windows an *owned* window is always
+        # z-ordered above its owner, so parenting this to the browser would
+        # pin it on top even though it's modeless. With no owner it behaves
+        # like any other window — it drops behind when you click elsewhere
+        # and returns when you click it or its taskbar button. The app-level
+        # window icon (theme.apply_theme) still applies. Its own child
+        # dialogs (add/edit/reveal) stay modal to it, which keeps auto-lock
+        # deferred while one is open (see _autolock_vault).
+        dialog = VaultDialog(self.vault, None, current_site=host)
+        dialog.setWindowFlags(Qt.WindowType.Window)
+        dialog.setModal(False)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(self._on_vault_dialog_closed)
+        self._vault_dialog = dialog
+        dialog.show()
+
+    def _on_vault_dialog_closed(self, _result: int = 0) -> None:
+        self._vault_dialog = None
+        if self.vault.unlocked:
+            self._vault_lock_timer.start()  # fresh countdown after use
 
     def save_login_for_site(self) -> None:
         if not self._unlock_vault():
