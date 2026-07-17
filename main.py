@@ -129,6 +129,8 @@ from PyQt6.QtWidgets import (
 )
 
 from autofill import PROBE_JS, build_capture_script, build_fill_script
+from blockstats import BlockStats
+from blockstats_ui import BlockingReportWindow
 from bookmarks import Bookmarks
 from cookies import CookieKeeper
 from cookies_ui import CookieSitesDialog
@@ -557,6 +559,9 @@ class BrowserWindow(QMainWindow):
         self._vault_dialog: VaultDialog | None = None
 
         self.blocked_count = 0
+        # Aggregated per-day history behind the ☰ → Blocking report window.
+        self.block_stats = BlockStats(self)
+        self._report_window: BlockingReportWindow | None = None
         self.interceptor.blocked.connect(self._on_blocked)
         # Ad-heavy pages can block dozens of requests per second; coalesce
         # the label repaints instead of doing one per request.
@@ -699,6 +704,10 @@ class BrowserWindow(QMainWindow):
         self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
         settings_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
         menu.addSeparator()
+        report = menu.addAction("Blocking report…", self.show_blocking_report)
+        report.setToolTip(
+            "Charts of how many trackers and ads were blocked per day, "
+            "and which ones came up most")
         menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
         menu.addSeparator()
         menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
@@ -857,6 +866,9 @@ class BrowserWindow(QMainWindow):
         # it would outlive the browser and keep the process alive.
         if self._vault_dialog is not None:
             self._vault_dialog.close()
+        if self._report_window is not None:
+            self._report_window.close()
+        self.block_stats.flush()  # don't lose the last few blocks
         super().closeEvent(event)
 
     def manage_cookie_sites(self) -> None:
@@ -1351,6 +1363,12 @@ class BrowserWindow(QMainWindow):
         self.profile.clearHttpCache()
         self.profile.cookieStore().deleteAllCookies()
         self.cookie_keeper.clear()  # saved jar too — clearing means all of it
+        # Blocking counts imply where you were, so they go with the history.
+        self.block_stats.clear()
+        self.blocked_count = 0
+        self._refresh_shield()
+        if self._report_window is not None:
+            self._report_window.refresh()
         self.profile.clearAllVisitedLinks()
         # Clear each tab's in-memory back/forward navigation history so the
         # trail of pages you moved through this session is dropped too.
@@ -1374,6 +1392,7 @@ class BrowserWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_blocked(self, host: str) -> None:
         self.blocked_count += 1
+        self.block_stats.record(host)  # dict bump; its writes are debounced
         if not self._shield_timer.isActive():
             self._shield_timer.start()
 
@@ -1500,6 +1519,30 @@ class BrowserWindow(QMainWindow):
         self._vault_dialog = None
         if self.vault.unlocked:
             self._vault_lock_timer.start()  # fresh countdown after use
+
+    def show_blocking_report(self) -> None:
+        if self._report_window is not None:
+            self._report_window.showNormal()
+            self._report_window.raise_()
+            self._report_window.activateWindow()
+            return
+        # Unparented for the same reason as the vault window: an owned
+        # window is pinned above its owner on Windows.
+        window = BlockingReportWindow(self.block_stats, None)
+        window.setWindowFlags(Qt.WindowType.Window)
+        window.setModal(False)
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        window.finished.connect(self._on_report_closed)
+        self._report_window = window
+        window.show()
+        # Keep the figures live while the user watches them.
+        self._report_timer = QTimer(window)
+        self._report_timer.setInterval(2000)
+        self._report_timer.timeout.connect(window.refresh)
+        self._report_timer.start()
+
+    def _on_report_closed(self, _result: int = 0) -> None:
+        self._report_window = None
 
     def save_login_for_site(self) -> None:
         if not self._unlock_vault():

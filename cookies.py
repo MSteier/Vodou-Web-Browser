@@ -8,12 +8,11 @@ instead: a keeper watches the live cookie store, mirrors the cookies whose
 domain the user has allowlisted, and writes just those to disk — everything
 else stays memory-only.
 
-At rest the jar is encrypted with Windows DPAPI (CryptProtectData), the same
-per-user OS encryption Chrome uses for its cookie database: no password
-prompt needed, and another Windows account (or a lifted disk) can't read it.
-Honest limit: like Chrome's jar, anything running *as this user* could
-decrypt it. On non-Windows platforms the jar is written unencrypted —
-documented in the README.
+At rest the jar is sealed with Windows DPAPI (see dpapi.py): no password
+prompt, and another Windows account (or a lifted disk) can't read it. Honest
+limit: like Chrome's jar, anything running *as this user* could decrypt it.
+On non-Windows platforms the jar is written unencrypted — documented in the
+README.
 
 Only non-session cookies are kept (session cookies are meant to die with
 the browser), and expired ones are dropped on restore.
@@ -22,53 +21,16 @@ the browser), and expired ones are dropped on restore.
 from __future__ import annotations
 
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtNetwork import QNetworkCookie
 
+from dpapi import seal as _seal, unseal as _unseal
+
 COOKIE_SITES_FILE = Path.home() / ".vodou" / "cookie_sites.json"
 COOKIE_JAR_FILE = Path.home() / ".vodou" / "cookies.dat"
-
-_JAR_MAGIC = b"VODOUJAR1\n"  # marks the plaintext fallback format
-
-
-def _dpapi(data: bytes, protect: bool) -> bytes:
-    """Encrypt/decrypt with the Windows user's DPAPI key."""
-    from ctypes import (POINTER, Structure, byref, c_char, cast,
-                        create_string_buffer, string_at, windll)
-    from ctypes.wintypes import DWORD
-
-    class _Blob(Structure):
-        _fields_ = [("cbData", DWORD), ("pbData", POINTER(c_char))]
-
-    buf = create_string_buffer(data, len(data))
-    blob_in = _Blob(len(data), cast(buf, POINTER(c_char)))
-    blob_out = _Blob()
-    func = (windll.crypt32.CryptProtectData if protect
-            else windll.crypt32.CryptUnprotectData)
-    if not func(byref(blob_in), None, None, None, None, 0, byref(blob_out)):
-        raise OSError("DPAPI call failed")
-    try:
-        return string_at(blob_out.pbData, blob_out.cbData)
-    finally:
-        windll.kernel32.LocalFree(blob_out.pbData)
-
-
-def _seal(data: bytes) -> bytes:
-    if sys.platform == "win32":
-        return _dpapi(data, protect=True)
-    return _JAR_MAGIC + data
-
-
-def _unseal(blob: bytes) -> bytes:
-    if blob.startswith(_JAR_MAGIC):
-        return blob[len(_JAR_MAGIC):]
-    if sys.platform == "win32":
-        return _dpapi(blob, protect=False)
-    raise OSError("unreadable cookie jar")
 
 
 def load_sites() -> list[str]:

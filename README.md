@@ -56,7 +56,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Feature | How |
 |---|---|
 | Cookies & history never persist | Cookies are memory-only and die with the process, except for sites you explicitly allowlist — see *Cookie exceptions*. The bulky, low-sensitivity artifacts (HTTP cache, site storage) live in a size-capped disk folder for performance and are **securely shredded** on every exit — see *Performance & secure shredding* |
-| Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
+| Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar; charts in ☰ menu → *Blocking report*). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
@@ -103,6 +103,26 @@ defence in depth on top, not a substitute. Mid-session, **Ctrl+Shift+Del**
 clears the disk cache with ordinary deletion (the engine holds the files
 open, so they can't be overwritten while running) — the secure shred always
 covers the whole folder at exit.
+
+## Blocking report
+
+**☰ menu → Blocking report…** opens a native window (not a page) charting
+what the blocker actually did: a headline total for the period, a column
+chart of requests blocked per day, and a ranked list of the trackers that
+came up most. A period selector — 7, 30, or 90 days — scopes the whole
+window, figures stay live while it's open, and hovering any column gives
+that day's exact figure. It follows the active theme in dark and light.
+
+The counts are aggregated history, so they are treated as browsing data:
+
+- **Aggregates only.** Per day, per blocked host, a count. No URLs, no
+  times beyond the date, no record of which site you were on, no ordering.
+- **Encrypted at rest** with Windows DPAPI, like the cookie jar — and with
+  the same honest limit (software running as you can read it). Plaintext on
+  non-Windows platforms.
+- **Capped at 90 days**; older days are pruned automatically.
+- **Ctrl+Shift+Del erases them** along with the rest of your history, and
+  the window has its own *Reset statistics…* button.
 
 ## Cookie exceptions
 
@@ -211,15 +231,15 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
 - Each plugin declares a **host allowlist** (least privilege), runs in an
   **isolated world** hidden from page scripts, and shows a **SHA-256 code
   fingerprint** so its identity is tamper-evident.
-- Bundled: *Dark Mode Everywhere*, *Cookie Banner Zapper*, *Glass Blur
-  Deflicker*, *Text Selection Unlocker*.
-- *Dark Mode Everywhere* darkens **light** pages only. Its dark styling is
-  applied immediately so light pages never flash white, then — once the
-  site's own stylesheets have loaded — it measures the page's background
-  and withdraws itself if the site was already dark. Without that, its
-  inversion would turn an already-dark page light and override whatever
-  theme the site (or you) chose, which looks exactly like the site's own
-  theme setting being ignored.
+- Bundled: *Cookie Banner Zapper*, *Glass Blur Deflicker*, *Text Selection
+  Unlocker*.
+- A *Dark Mode Everywhere* plugin was bundled until v1.8.0 and has been
+  removed. Forcing a dark scheme onto arbitrary sites means inverting them,
+  which fights whatever styling a site already has: it turned already-dark
+  pages light, overrode sites' own theme settings, and distorted page
+  colours. That is inherent to the approach, not a bug that could be tuned
+  out. Use a site's own dark theme where it has one; **☰ menu →
+  Appearance** still themes Vodou's own chrome.
 - *Glass Blur Deflicker* strips CSS `backdrop-filter` blur ("frosted
   glass"), which can flicker under the hardware compositor on some Windows
   GPU drivers. It reduces the effect while keeping *Hardware* graphics; if

@@ -56,65 +56,16 @@ class Plugin:
 # Keep every entry small, auditable, and side-effect-free beyond its stated
 # purpose. Anything added here has been read line by line.
 
+# A "Dark Mode Everywhere" plugin lived here until v1.8.0. Forcing a dark
+# scheme onto arbitrary sites means inverting them, which fights any styling
+# the site already has: it turned already-dark pages light, masked site theme
+# settings, and distorted page colours generally. Detecting "is this page
+# already dark?" only narrowed the damage — the approach itself is wrong, so
+# it was removed rather than patched further. Sites' own dark themes and the
+# ☰ → Appearance chrome themes cover the need without touching page content.
+# PluginManager drops unknown IDs on load, so a stale enable of it is inert.
+
 _CATALOG_LIST: list[Plugin] = [
-    Plugin(
-        id="dark-everywhere",
-        name="Dark Mode Everywhere",
-        description="Renders light websites in a dark colour scheme by "
-                    "inverting the page and correcting media colours. "
-                    "Sites that are already dark are left untouched.",
-        version="1.1",
-        author="Vodou (verified)",
-        matches=("*",),
-        css="""
-html { background: #101114 !important; }
-html { filter: invert(1) hue-rotate(180deg) !important; }
-img, video, picture, canvas, svg, [style*="background-image"],
-iframe, embed, object {
-    filter: invert(1) hue-rotate(180deg) !important;
-}
-""",
-        # Inverting a page that is ALREADY dark turns it light — the opposite
-        # of this plugin's purpose, and it masks any dark theme the site (or
-        # the user) chose. The CSS above is applied eagerly so light pages
-        # never flash white; here, once the real stylesheets have loaded, the
-        # page's own background is measured and the inversion is withdrawn if
-        # the site was dark to begin with. Toggling `disabled` around the
-        # measurement is synchronous, so no frame is painted in between and
-        # the reader sees no flicker.
-        js="""
-var vodouDarkStyle = document.querySelector(
-    'style[data-vodou-plugin="dark-everywhere"]');
-var vodouReview = function () {
-    if (!vodouDarkStyle) return;
-    vodouDarkStyle.disabled = true;   // read the site's true colours
-    var node = document.body || document.documentElement;
-    var lum = null;
-    while (node && lum === null) {
-        var m = /rgba?\\(([^)]+)\\)/.exec(
-            getComputedStyle(node).backgroundColor);
-        if (m) {
-            var p = m[1].split(",").map(parseFloat);
-            if (!(p.length > 3 && p[3] === 0)) {   // skip transparent
-                lum = (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255;
-            }
-        }
-        node = node.parentElement;
-    }
-    // Nothing opaque found => browser default white => treat as light.
-    if (lum !== null && lum < 0.35) {
-        vodouDarkStyle.remove();       // already dark: leave the site alone
-    } else {
-        vodouDarkStyle.disabled = false;
-    }
-};
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", vodouReview);
-} else {
-    vodouReview();
-}
-""",
-    ),
     Plugin(
         id="cookie-zapper",
         name="Cookie Banner Zapper",
