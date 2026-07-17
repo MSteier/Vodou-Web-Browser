@@ -183,6 +183,10 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*) plus a **dark / light**
   toggle. Each theme tints the whole chrome, so the switch is unmistakable.
 - Changes apply live and are remembered in `~/.vodou/theme.json`.
+- **Zoom** — `Ctrl` `+` / `Ctrl` `-` (or **Ctrl + mouse wheel**, or
+  **☰ menu → Zoom**) steps page zoom along Chrome's ladder from 25% to
+  500%; `Ctrl+0` resets. The level you pick applies to new tabs for the
+  rest of the session, and the footer shows each change (e.g. "Zoom: 125%").
 
 ## Graphics
 
@@ -249,6 +253,8 @@ sent, and a failed check does nothing.
 | Ctrl+Tab | Next tab |
 | Ctrl+L | Focus address bar |
 | Ctrl+R / F5 | Reload |
+| Ctrl + + / − (or Ctrl + wheel) | Zoom in / out |
+| Ctrl+0 | Reset zoom |
 | Ctrl+D | Bookmark current page |
 | Ctrl+J | Downloads |
 | Ctrl+Shift+F | Fill login |
@@ -283,16 +289,25 @@ and `navigator.userAgent` — and sends no `Sec-CH-UA` client hints, exactly
 like real Firefox. Everywhere else it keeps its usual generic-Chrome identity.
 Firefox identities have remained unblocked for years while Chrome- and
 Edge-flavored spoofs keep getting re-blocked, so **signing in to Gmail and
-YouTube works normally in Vodou**.
+YouTube works normally in Vodou** — passkeys via Windows Hello included.
 
-Two implementation notes for the curious (they cost real debugging time):
-changing a `QWebEngineProfile` user agent from inside `acceptNavigationRequest`
-aborts the process, so the switch is deferred one event-loop tick; and a UA
-change reloads the current page, cancelling the in-flight navigation, so the
-navigation is re-issued after the switch (a no-op on re-entry, so it can't
-loop). One behavioral caveat: the identity is profile-wide, so if another tab
-navigates in the middle of a sign-in flow, reload the sign-in page and
-continue.
+Reliability details (each cost real debugging time):
+
+- **The navigation waits for the disguise.** A navigation that requires an
+  identity switch is held, the switch is applied (deferred one event-loop
+  tick — mutating the profile from inside `acceptNavigationRequest` aborts
+  the process), and only then is the navigation re-issued. The first request
+  to reach Google therefore always carries a fully consistent Firefox
+  identity; early versions let the two race, which made first sign-in
+  attempts fail intermittently. Re-issuing can't loop: on re-entry no switch
+  is needed.
+- **The identity is sticky through the flow.** The profile identity is
+  shared across tabs, and a sign-in bounces through redirects, popups, and
+  the site's OAuth callback. Vodou keeps the Firefox identity for a 90-second
+  grace period after the last auth-host navigation, so none of those hops
+  (nor another tab navigating mid-flow) flips the identity — and reloads
+  pages — in the middle of the handshake. The first navigation after the
+  grace period quietly reverts to the generic Chrome identity.
 
 ## License
 

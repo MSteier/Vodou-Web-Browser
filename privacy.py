@@ -8,6 +8,7 @@ into ~/.vodou/blocklist.txt to extend it.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -204,30 +205,63 @@ def google_auth_host(host: str) -> bool:
     return host in _GOOGLE_AUTH_HOSTS or host.startswith("accounts.google.")
 
 
+# How long the Firefox identity stays sticky after the last navigation to a
+# Google auth host. A sign-in flow bounces through redirects, popups, and the
+# site's OAuth callback; reverting the (profile-wide) identity on the first
+# non-Google hop reloads pages mid-handshake and breaks the flow — the
+# "retry until it works" symptom. Sites seeing a Firefox UA for a bit after
+# sign-in is harmless; the next navigation after the hold reverts it.
+_AUTH_HOLD_SECONDS = 90.0
+_last_auth_nav = 0.0
+
+
+def _identity_for(profile, host: str) -> str:
+    """The User-Agent the profile should present for a main-frame navigation
+    to host: Firefox on Google's auth hosts, Firefox held through the
+    sign-in grace period, generic Chrome otherwise."""
+    global _last_auth_nav
+    now = time.monotonic()
+    if google_auth_host(host):
+        _last_auth_nav = now
+        return FIREFOX_USER_AGENT
+    if (profile.httpUserAgent() == FIREFOX_USER_AGENT
+            and now - _last_auth_nav < _AUTH_HOLD_SECONDS):
+        return FIREFOX_USER_AGENT
+    return GENERIC_USER_AGENT
+
+
+def ua_quirk_needed(profile, host: str) -> bool:
+    """True if a main-frame navigation to host must switch identity first.
+
+    Read-only (no engine mutation), so it IS safe inside navigation
+    callbacks — callers use it to decide whether to hold a navigation while
+    the deferred apply_ua_quirk runs."""
+    return profile.httpUserAgent() != _identity_for(profile, host)
+
+
 def apply_ua_quirk(profile, host: str) -> bool:
     """Switch the profile identity for a main-frame navigation: Firefox on
-    Google's account hosts, the generic Chrome identity everywhere else.
-    Returns True if the identity actually changed.
+    Google's account hosts (sticky for _AUTH_HOLD_SECONDS — see above), the
+    generic Chrome identity everywhere else. Returns True if the identity
+    actually changed.
 
     Profile-level (not just the header override in interceptRequest) so that
     navigator.userAgent in page JS agrees with the HTTP headers — Google's
-    sign-in check reads both. The profile is shared across tabs, so another
-    tab navigating mid-sign-in can flip it back; a reload of the sign-in page
-    recovers. This mirrors how qutebrowser's quirk behaves.
+    sign-in check reads both.
 
     Must NOT be called from inside a QtWebEngine navigation callback
     (acceptNavigationRequest etc.) — setHttpUserAgent re-enters the engine
     and aborts the process. Callers defer it by one event-loop tick.
     """
-    firefox = google_auth_host(host)
-    target = FIREFOX_USER_AGENT if firefox else GENERIC_USER_AGENT
+    target = _identity_for(profile, host)
     if profile.httpUserAgent() == target:
         return False
     profile.setHttpUserAgent(target)
     try:
         # Qt 6.8+: real Firefox sends no client hints, so disable them
         # entirely while presenting as Firefox.
-        profile.clientHints().setAllClientHintsEnabled(not firefox)
+        profile.clientHints().setAllClientHintsEnabled(
+            target != FIREFOX_USER_AGENT)
     except AttributeError:
         pass
     return True

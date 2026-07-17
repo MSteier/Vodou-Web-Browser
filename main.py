@@ -134,7 +134,12 @@ from downloads_ui import DownloadsDialog
 from plugins import PluginManager, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
-from privacy import GENERIC_USER_AGENT, PrivacyInterceptor, apply_ua_quirk
+from privacy import (
+    GENERIC_USER_AGENT,
+    PrivacyInterceptor,
+    apply_ua_quirk,
+    ua_quirk_needed,
+)
 from session import clear_snapshot, load_snapshot, save_snapshot
 from shred import shred_dir
 from about import (
@@ -180,6 +185,10 @@ HOME_URL = "https://localhost/searxng"
 # Created by the engine at startup, shredded on every exit and at the next
 # startup after a crash. ~/.vodou is outside any cloud-synced folder.
 PROFILE_DIR = Path.home() / ".vodou" / "profile"
+
+# Chrome's zoom ladder; the engine accepts factors from 0.25 to 5.0.
+ZOOM_LEVELS = (0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0,
+               1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0)
 SEARCH_URL = "https://localhost/searxng/search?q={}"
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
@@ -244,22 +253,25 @@ class WebPage(QWebEnginePage):
         self._capture_prefix = capture_prefix
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame) -> bool:
-        # Mutating the profile from inside this callback re-enters QtWebEngine
-        # and aborts the process, so the identity switch is deferred one event
-        # loop tick.
-        if is_main_frame:
+        # The identity must be right BEFORE the request leaves: letting the
+        # navigation race the deferred switch meant the first sign-in attempt
+        # could reach Google with a half-switched identity (headers vs
+        # navigator.userAgent), failing until retried. So when a switch is
+        # needed, hold this navigation, switch, then re-issue it. Mutating
+        # the profile from inside this callback re-enters QtWebEngine and
+        # aborts the process, hence the one-tick deferral.
+        if is_main_frame and ua_quirk_needed(self.profile(), url.host()):
             QTimer.singleShot(
                 0, lambda u=QUrl(url): self._apply_ua_quirk(u))
+            return False
         return super().acceptNavigationRequest(url, nav_type, is_main_frame)
 
     def _apply_ua_quirk(self, url: QUrl) -> None:
         try:
-            if apply_ua_quirk(self.profile(), url.host()):
-                # A UA change makes QtWebEngine reload the current page, which
-                # cancels the navigation that triggered the switch — re-issue
-                # it. The re-entry is a no-op (identity already matches), so
-                # this cannot loop.
-                self.setUrl(url)
+            apply_ua_quirk(self.profile(), url.host())
+            # Re-issue the held navigation. On re-entry the identity already
+            # matches, so acceptNavigationRequest lets it through — no loop.
+            self.setUrl(url)
         except RuntimeError:
             pass  # page torn down before the deferred call fired
 
@@ -417,6 +429,24 @@ class WebView(QWebEngineView):
     def createWindow(self, _type):
         return self.browser.add_tab()
 
+    # Wheel events land on the engine's internal render widget, not on this
+    # view — so Ctrl+wheel zoom is caught by filtering that child, grabbed
+    # here the moment it is added.
+    def childEvent(self, event) -> None:
+        super().childEvent(event)
+        if (event.type() == QEvent.Type.ChildAdded
+                and event.child().isWidgetType()):
+            event.child().installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if (event.type() == QEvent.Type.Wheel
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            delta = event.angleDelta().y()
+            if delta:
+                self.browser.zoom_view(self, 1 if delta > 0 else -1)
+            return True  # don't also scroll the page
+        return super().eventFilter(obj, event)
+
 
 class BrowserWindow(QMainWindow):
     def __init__(self):
@@ -465,6 +495,9 @@ class BrowserWindow(QMainWindow):
 
         self._fill_offer_dismissed: set[str] = set()        # hosts
         self._capture_dismissed: set[tuple[str, str]] = set()  # (host, user)
+        # Last zoom the user chose; new tabs inherit it so zooming once
+        # sticks for the whole session (resets to 100% on restart).
+        self._zoom = 1.0
 
         self.vault = Vault()
         self.bookmarks = Bookmarks()
@@ -601,6 +634,10 @@ class BrowserWindow(QMainWindow):
         hamburger_bookmarks.aboutToShow.connect(
             lambda: self._populate_bookmarks_menu(hamburger_bookmarks))
         self._build_appearance_menu(menu.addMenu("Appearance"))
+        zoom_menu = menu.addMenu("Zoom")
+        zoom_menu.addAction("Zoom in\tCtrl++", self.zoom_in)
+        zoom_menu.addAction("Zoom out\tCtrl+-", self.zoom_out)
+        zoom_menu.addAction("Reset zoom\tCtrl+0", self.zoom_reset)
         settings_menu = menu.addMenu("Settings")
         self._build_graphics_menu(settings_menu.addMenu("Graphics"))
         self.pause_blocking_action = settings_menu.addAction(
@@ -661,6 +698,12 @@ class BrowserWindow(QMainWindow):
             "Ctrl+J": self.show_downloads,
             "Ctrl+Tab": self._next_tab,
             "F12": self.open_dev_tools,
+            # Ctrl+= is the unshifted key Ctrl++ lives on; bind both so
+            # zooming works without holding Shift.
+            "Ctrl+=": self.zoom_in,
+            "Ctrl++": self.zoom_in,
+            "Ctrl+-": self.zoom_out,
+            "Ctrl+0": self.zoom_reset,
         }
         for keys, slot in bindings.items():
             QShortcut(QKeySequence(keys), self, activated=slot)
@@ -678,6 +721,8 @@ class BrowserWindow(QMainWindow):
 
     def add_tab(self, url: QUrl | None = None) -> WebView:
         view = WebView(self)
+        if self._zoom != 1.0:
+            view.setZoomFactor(self._zoom)
         index = self.tabs.addTab(view, "New tab")
         self.tabs.setCurrentIndex(index)
 
@@ -707,6 +752,30 @@ class BrowserWindow(QMainWindow):
 
     def current_view(self) -> WebView:
         return self.tabs.currentWidget()
+
+    # -- zoom ---------------------------------------------------------------
+
+    def zoom_view(self, view: WebView, direction: int) -> None:
+        """Step one view up/down the zoom ladder from its current factor."""
+        current = view.zoomFactor()
+        nearest = min(range(len(ZOOM_LEVELS)),
+                      key=lambda i: abs(ZOOM_LEVELS[i] - current))
+        stepped = max(0, min(len(ZOOM_LEVELS) - 1, nearest + direction))
+        self._set_zoom(view, ZOOM_LEVELS[stepped])
+
+    def zoom_in(self) -> None:
+        self.zoom_view(self.current_view(), +1)
+
+    def zoom_out(self) -> None:
+        self.zoom_view(self.current_view(), -1)
+
+    def zoom_reset(self) -> None:
+        self._set_zoom(self.current_view(), 1.0)
+
+    def _set_zoom(self, view: WebView, factor: float) -> None:
+        view.setZoomFactor(factor)
+        self._zoom = factor
+        self.statusBar().showMessage(f"Zoom: {round(factor * 100)}%", 2500)
 
     def _on_fullscreen(self, request) -> None:
         request.accept()
