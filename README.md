@@ -55,8 +55,8 @@ desktop or Start-menu shortcut that points at `python main.py`.
 
 | Feature | How |
 |---|---|
-| No history/cookies/cache on disk | Off-the-record profile; everything is memory-only and erased on exit |
-| Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar) |
+| No history/cookies/cache on disk | Off-the-record profile; everything is memory-only and erased on exit (one deliberate exception: see *Crash recovery*) |
+| Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
@@ -69,6 +69,23 @@ desktop or Start-menu shortcut that points at `python main.py`.
 
 Extend the blocklist by adding domains (one per line) to
 `~/.vodou/blocklist.txt`.
+
+## Crash recovery
+
+If Vodou closes unexpectedly (crash, forced kill, power loss), the next start
+asks whether to pick up where you left off — **Restore tabs** reopens
+everything; **Start fresh** discards it and opens the usual home tab.
+
+- While running, the open-tab URLs are snapshotted to
+  `~/.vodou/session.json` — just the tabs, no history, titles, or form data.
+  Writes are debounced (at most one per second, skipped when nothing
+  changed), so heavy browsing never queues up disk churn.
+- The snapshot is **deleted on every clean exit**, so its presence at
+  startup is itself the crash signal — after a normal close, no page URLs
+  remain on disk. Declining the restore deletes it too.
+- Restored background tabs load **lazily**: each starts loading the first
+  time you switch to it (until then the tab shows the site's hostname), so
+  recovering a big session costs one page load, not one per tab.
 
 ## Password manager
 

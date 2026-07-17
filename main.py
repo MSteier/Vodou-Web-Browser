@@ -133,6 +133,7 @@ from plugins import PluginManager, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
 from privacy import GENERIC_USER_AGENT, PrivacyInterceptor, apply_ua_quirk
+from session import clear_snapshot, load_snapshot, save_snapshot
 from about import APP_VERSION, REPO_URL, AboutDialog, UpdateChecker
 from theme import THEMES, apply_theme, load_prefs, save_prefs
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
@@ -367,6 +368,9 @@ class WebView(QWebEngineView):
     def __init__(self, browser: "BrowserWindow"):
         super().__init__()
         self.browser = browser
+        # Set on crash-restored background tabs: the URL to load the first
+        # time the tab is actually activated (see _load_pending).
+        self.pending_url: QUrl | None = None
         page = WebPage(browser.profile, browser.capture_prefix, self)
         page.certificateError.connect(self._on_certificate_error)
         self.setPage(page)
@@ -452,9 +456,18 @@ class BrowserWindow(QMainWindow):
         self._shield_timer.setInterval(250)
         self._shield_timer.timeout.connect(self._refresh_shield)
 
+        # Crash-recovery snapshot of the open tabs. Navigation bursts are
+        # coalesced into one debounced disk write; the file is deleted on
+        # clean exit, so its presence at startup means the last run crashed.
+        self._session_timer = QTimer(self)
+        self._session_timer.setSingleShot(True)
+        self._session_timer.setInterval(1000)
+        self._session_timer.timeout.connect(self._write_session)
+
         self._build_ui()
         self._build_shortcuts()
-        self.add_tab(QUrl(HOME_URL))
+        if not self._offer_crash_restore():
+            self.add_tab(QUrl(HOME_URL))
 
         # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
         # files). Delayed so it never competes with first-page load; failures
@@ -472,6 +485,8 @@ class BrowserWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.tabs.tabBar().tabMoved.connect(
+            lambda *_: self._schedule_session_save())
 
         # Tabs on the left; the DevTools panel (added lazily) docks to the
         # right of this splitter when developer tools are enabled.
@@ -562,6 +577,13 @@ class BrowserWindow(QMainWindow):
         self._build_appearance_menu(menu.addMenu("Appearance"))
         settings_menu = menu.addMenu("Settings")
         self._build_graphics_menu(settings_menu.addMenu("Graphics"))
+        self.pause_blocking_action = settings_menu.addAction(
+            "Pause tracker blocking")
+        self.pause_blocking_action.setCheckable(True)
+        self.pause_blocking_action.setToolTip(
+            "Let tracker/ad requests through until resumed — for sites "
+            "that break with blocking on. Blocking resumes on restart.")
+        self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
         menu.addSeparator()
         menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
         menu.addSeparator()
@@ -580,6 +602,9 @@ class BrowserWindow(QMainWindow):
         # an event filter re-centres it whenever the bar resizes.
         self.shield_label = QLabel(" 🛡 0 trackers blocked ", self.statusBar())
         self.shield_label.setObjectName("shieldLabel")
+        self.shield_label.setToolTip("Click to pause/resume tracker blocking")
+        self.shield_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.shield_label.installEventFilter(self)  # click toggles pause
         self.statusBar().installEventFilter(self)
 
         self.version_label = VersionLabel(self)
@@ -644,6 +669,7 @@ class BrowserWindow(QMainWindow):
         view = self.tabs.widget(index)
         self.tabs.removeTab(index)
         view.deleteLater()
+        self._schedule_session_save()
 
     def current_view(self) -> WebView:
         return self.tabs.currentWidget()
@@ -655,11 +681,77 @@ class BrowserWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         clear_copied_secrets()  # no passwords left on the clipboard
+        self._session_timer.stop()
+        clear_snapshot()  # clean exit — a leftover file means "crashed"
         super().closeEvent(event)
+
+    # -- crash recovery ---------------------------------------------------
+
+    def _offer_crash_restore(self) -> bool:
+        """If the last run ended unexpectedly, offer those tabs back.
+
+        Returns True when tabs were restored, so the caller skips opening
+        the usual home tab. Restored background tabs are NOT loaded up
+        front — each starts loading the first time it's activated, so
+        recovering a big session costs one page load, not one per tab.
+        """
+        snapshot = load_snapshot()
+        if snapshot is None:
+            return False
+        urls, current = snapshot
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Restore session?")
+        n = len(urls)
+        box.setText(
+            "Vodou didn't shut down cleanly last time.\n\nPick up where "
+            f"you left off and reopen {'that tab' if n == 1 else f'those {n} tabs'}?")
+        restore = box.addButton(
+            "Restore tabs", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Start fresh", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is not restore:
+            clear_snapshot()
+            return False
+        for u in urls:
+            view = self.add_tab(None)
+            view.pending_url = QUrl(u)
+            # Label the unloaded tab with its host so it's recognizable.
+            self.tabs.setTabText(self.tabs.indexOf(view),
+                                 view.pending_url.host() or u)
+        self.tabs.setCurrentIndex(current)
+        self._load_pending(self.tabs.widget(current))
+        return True
+
+    @staticmethod
+    def _load_pending(view: WebView | None) -> None:
+        if view is not None and view.pending_url is not None:
+            url, view.pending_url = view.pending_url, None
+            view.setUrl(url)
+
+    def _schedule_session_save(self) -> None:
+        if not self._session_timer.isActive():
+            self._session_timer.start()
+
+    def _write_session(self) -> None:
+        urls: list[str] = []
+        current = 0
+        cur = self.tabs.currentWidget()
+        for i in range(self.tabs.count()):
+            view = self.tabs.widget(i)
+            url = view.pending_url or view.url()
+            text = url.toString()
+            if text and url.scheme() in ("http", "https", "file"):
+                if view is cur:
+                    current = len(urls)
+                urls.append(text)
+        save_snapshot(urls, current)
 
     def _on_tab_changed(self, index: int) -> None:
         self.notify_bar.hide()
+        self._schedule_session_save()
         view = self.tabs.widget(index)
+        self._load_pending(view)
         if view is not None:
             self.url_bar.setText(view.url().toString())
             self._update_security_indicator(view.url())
@@ -669,6 +761,7 @@ class BrowserWindow(QMainWindow):
                 view.page().setDevToolsPage(self._devtools_view.page())
 
     def _on_url_changed(self, view: WebView, url: QUrl) -> None:
+        self._schedule_session_save()
         if view is self.current_view():
             self.url_bar.setText(url.toString())
             self.url_bar.setCursorPosition(0)
@@ -1083,9 +1176,25 @@ class BrowserWindow(QMainWindow):
         if not self._shield_timer.isActive():
             self._shield_timer.start()
 
+    def _set_blocking_paused(self, paused: bool) -> None:
+        # Session-only on purpose: pausing is a "this site is broken right
+        # now" escape hatch, so protection always comes back on restart.
+        self.interceptor.paused = paused
+        self.shield_label.setProperty("paused", paused)
+        style = self.shield_label.style()
+        style.unpolish(self.shield_label)
+        style.polish(self.shield_label)
+        self._refresh_shield()
+        self.statusBar().showMessage(
+            "Tracker blocking paused — reload the page for it to take "
+            "effect." if paused else "Tracker blocking resumed.", 5000)
+
     def _refresh_shield(self) -> None:
-        self.shield_label.setText(
-            f" 🛡 {self.blocked_count} trackers blocked ")
+        if self.interceptor.paused:
+            self.shield_label.setText(" ⏸ tracker blocking paused ")
+        else:
+            self.shield_label.setText(
+                f" 🛡 {self.blocked_count} trackers blocked ")
         self._center_shield()  # the text grew — keep it centred
 
     def _center_shield(self) -> None:
@@ -1098,6 +1207,10 @@ class BrowserWindow(QMainWindow):
     def eventFilter(self, obj, event) -> bool:
         if obj is self.statusBar() and event.type() == QEvent.Type.Resize:
             self._center_shield()
+        elif (obj is self.shield_label
+                and event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton):
+            self.pause_blocking_action.toggle()
         return super().eventFilter(obj, event)
 
     # -- downloads --------------------------------------------------------

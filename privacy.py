@@ -100,6 +100,9 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
         super().__init__(parent)
         self._domains = frozenset(TRACKER_DOMAINS | _load_user_blocklist())
         self._verdicts: dict[str, bool] = {}
+        # UI-toggled kill switch. Written from the UI thread, read from the
+        # IO thread — a single bool attribute read/write is GIL-atomic.
+        self.paused = False
 
     def is_tracker(self, host: str) -> bool:
         """Verdict for a host, with caching. Normalizes first: lowercase and
@@ -118,7 +121,7 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
         host = info.requestUrl().host()
         verdict = self.is_tracker(host)
 
-        if verdict:
+        if verdict and not self.paused:
             info.block(True)
             self.blocked.emit(host)
             return
