@@ -236,8 +236,11 @@ everything; **Start fresh** discards it and opens the usual home tab.
 - **Import / export** — pull passwords in from a Chrome, Edge, Firefox, Brave,
   or Bitwarden **CSV** export, or export the vault to CSV (behind a plain-text
   warning). Buttons are in the vault dialog; import is also on the ☰ menu.
-- Downloads always require confirmation (no silent drive-by downloads),
-  and suggested filenames are stripped of any path components.
+- Downloads always require confirmation (no silent drive-by downloads), and
+  the server-suggested filename is sanitised: path components, NTFS
+  alternate-data-stream colons (`report.pdf:evil.exe`), reserved device names
+  (`CON`, `NUL`, `COM1`…), and trailing dots/spaces are stripped so a crafted
+  name can't write outside Downloads or hide an executable.
 
 ## Bookmarks
 

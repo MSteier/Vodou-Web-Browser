@@ -361,3 +361,43 @@ def download_risk(filename: str) -> str | None:
     on the machine, else None. Used to escalate the download prompt."""
     ext = PurePosixPath(filename).suffix.lower()
     return ext if ext in _DANGEROUS_EXTS else None
+
+
+# Windows-reserved device names (with or without an extension, any case).
+_WIN_RESERVED = frozenset({
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+})
+
+# Characters illegal in Windows filenames, or that open an NTFS alternate data
+# stream (':') or a path component ('/', '\\').
+_BAD_FILENAME_CHARS = frozenset('<>:"/\\|?*')
+
+
+def safe_download_name(name: str) -> str:
+    """Sanitise a server-suggested download filename to a safe basename.
+
+    A `Content-Disposition` filename is attacker-controlled. `Path(name).name`
+    strips directories but not the characters that let a crafted name hide an
+    executable in an NTFS alternate data stream (`report.pdf:evil.exe`),
+    collide with a reserved device name (`CON`, `NUL`, `COM1`…), or slip past
+    an extension check with trailing dots/spaces (Windows ignores those). This
+    removes all of that and always returns a non-empty, extension-preserving
+    basename (so the drive-by executable check still sees the real suffix).
+    """
+    # Last path component under either separator, then drop illegal/control
+    # characters (this also removes ':' — defusing ADS — and path separators).
+    base = name.replace("\\", "/").split("/")[-1]
+    cleaned = "".join(
+        ch for ch in base
+        if ch not in _BAD_FILENAME_CHARS and ord(ch) >= 0x20)
+    # Windows silently drops trailing dots/spaces; strip them so a name can't
+    # resolve to something other than what the extension check inspected.
+    cleaned = cleaned.strip().rstrip(". ").strip()
+    if not cleaned:
+        return "download"
+    # Reserved device name (bare or with an extension) -> prefix to neutralise.
+    if cleaned.split(".", 1)[0].lower() in _WIN_RESERVED:
+        cleaned = "_" + cleaned
+    return cleaned[:255]

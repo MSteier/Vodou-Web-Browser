@@ -154,6 +154,7 @@ from spoofcheck import (
     SENTINEL_HOST,
     download_risk,
     interstitial_html,
+    safe_download_name,
 )
 from spoofcheck import inspect as spoof_inspect
 from about import (
@@ -1635,7 +1636,10 @@ class BrowserWindow(QMainWindow):
         # Never accept silently: a page must not be able to drop files on
         # disk without the user agreeing (drive-by download).
         downloads = Path.home() / "Downloads"
-        safe_name = Path(item.downloadFileName()).name or "download"
+        # Sanitise the server-suggested name: strip directories, NTFS
+        # alternate-data-stream colons, reserved device names, and trailing
+        # dots/spaces (see spoofcheck.safe_download_name).
+        safe_name = safe_download_name(item.downloadFileName())
         origin = item.url().host() or "this page"
         risky = download_risk(safe_name)
         if risky:

@@ -51,8 +51,13 @@ def seal(data: bytes) -> bytes:
 
 
 def unseal(blob: bytes) -> bytes:
+    if sys.platform == "win32":
+        # On Windows the payload is always DPAPI-sealed. Do NOT honour the
+        # plaintext magic fallback here: accepting it would let anyone who can
+        # write the file plant an unauthenticated payload (e.g. a forged
+        # cookie for an allowlisted site — session fixation), sidestepping the
+        # tamper resistance DPAPI is here to provide.
+        return _dpapi(blob, protect=False)
     if blob.startswith(_MAGIC):
         return blob[len(_MAGIC):]
-    if sys.platform == "win32":
-        return _dpapi(blob, protect=False)
     raise OSError("unreadable sealed blob")
