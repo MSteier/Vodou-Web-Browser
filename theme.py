@@ -148,11 +148,7 @@ QToolBar QToolButton {{
 }}
 QToolBar QToolButton:hover {{ background: {p.elevated}; }}
 QToolBar QToolButton:pressed {{ background: {p.accent_dim}; }}
-
-QToolButton#lockButton[state="secure"]   {{ color: {p.ok}; }}
-QToolButton#lockButton[state="insecure"] {{ color: {p.danger}; }}
-QToolButton#lockButton[state="neutral"]  {{ color: {p.muted}; }}
-QToolButton#starButton {{ color: {p.accent}; font-size: 14pt; }}
+QToolBar QToolButton::menu-indicator {{ image: none; width: 0; }}
 
 QLineEdit {{
     background: {p.surface};
@@ -165,9 +161,10 @@ QLineEdit {{
 QLineEdit:focus {{ border: 1px solid {p.accent}; }}
 QLineEdit#urlBar {{
     border-radius: 16px;
-    padding: 6px 16px;
+    padding: 6px 14px;
     font-size: 10.5pt;
 }}
+QLineEdit#urlBar:focus {{ background: {p.elevated}; }}
 
 QTabWidget::pane {{ border: none; }}
 QTabWidget::tab-bar {{ left: 6px; }}  /* nudge the tab row right a few px */
@@ -195,7 +192,9 @@ QStatusBar {{
 }}
 QLabel#shieldLabel {{ color: {p.ok}; font-weight: 600; background: {p.bg}; }}
 QLabel#shieldLabel[paused="true"] {{ color: {p.muted}; }}
-QLabel#versionLabel {{ color: {p.accent}; text-decoration: underline; }}
+QLabel#versionLabel {{
+    color: {p.accent}; text-decoration: underline; background: {p.bg};
+}}
 QLabel#versionLabel:hover {{ color: {p.text}; }}
 
 QMenu {{

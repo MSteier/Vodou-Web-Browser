@@ -63,9 +63,10 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. The only outbound calls of Vodou's own are the two anonymous version checks described in *About & updates* |
-| Download manager | Every download is user-approved (no drive-by saves), then tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
+| Deceptive-site protection | Every address you navigate to is checked **locally** — no Safe Browsing or reputation lookup, so nothing about your browsing leaves the machine — for look-alike (homograph), mixed-alphabet/punycode, and typosquatting imitations of well-known brands. A suspected spoof is blocked with a full-screen warning that shows the real vs. deceptive address and its un-fakeable punycode spelling. See *Deceptive-site protection* |
+| Download manager | Every download is user-approved (no drive-by saves); executable/installer types (`.exe`, `.msi`, `.bat`, `.ps1`, `.dmg`, …) that can run code get a sterner, default-**No** warning. Approved downloads are tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
 | Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — the recorded blocking statistics, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute: exit deliberately keeps the cookie jar and the blocking history, so this is the only control that destroys them (and the only way to drop cookies without losing your open tabs) |
-| Certificate viewer | Padlock next to the address bar (green = verified HTTPS, red = unencrypted); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
+| Certificate viewer | A security pill **inside** the address bar (green closed padlock = verified HTTPS, red open padlock = unencrypted, muted info dot = internal page); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
 Extend the blocklist by adding domains (one per line) to
 `~/.vodou/blocklist.txt`.
@@ -123,6 +124,40 @@ The counts are aggregated history, so they are treated as browsing data:
 - **Capped at 90 days**; older days are pruned automatically.
 - **Ctrl+Shift+Del erases them** along with the rest of your history, and
   the window has its own *Reset statistics…* button.
+
+## Deceptive-site protection
+
+Phishing sites impersonate a real address to steal passwords and payment
+details. Vodou checks every main-frame navigation **entirely on the machine** —
+no Google Safe Browsing, no reputation service, nothing about where you go
+leaves your computer — against three heuristics computed from the hostname:
+
+- **Look-alike (homograph)** — confusable characters that collapse a domain
+  onto a brand it is not: Cyrillic `pаypal.com`, Greek letters, digit swaps
+  (`g00gle`, `paypa1`), and the `rn`→`m` ligature (`arnazon`).
+- **Mixed-alphabet / punycode** — a single label fusing Latin with
+  Cyrillic/Greek, or a domain that renders from punycode (`xn--`). This is
+  almost always an attack and needs no brand list.
+- **Typosquatting** — a one-character misspelling of a known brand
+  (`gooogle`, `faceook`), limited to longer brand names so ordinary domains
+  aren't false-flagged.
+
+Detection is heuristic and protects a **curated list of the most-impersonated
+brands** (big tech, mail, payments, banks, crypto), not the whole web, and
+errs toward silence over false alarms.
+
+A suspected spoof is **blocked before it loads** and replaced with a full-page
+warning that names the brand it imitates, shows the deceptive address, and —
+crucially — reveals its **punycode "true spelling"** (`xn--pypal-4ve.com`),
+the one form two identical-looking homographs can't share. **Go back (safe)**
+returns you to safety; **Continue anyway** trusts that host for the rest of
+the session only (the warning returns next launch). The whole page is
+generated locally with no network access, and the deceptive host is only ever
+displayed as escaped text, never executed.
+
+The check only runs on an actual navigation: a bare word with no dot typed in
+the address bar is a search, as in any browser — but clicking a search result
+that leads to a look-alike domain is still caught.
 
 ## Cookie exceptions
 
@@ -251,6 +286,11 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
 - **☰ menu → Appearance** — five built-in themes (*Vodou Violet*, *Blood
   Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*) plus a **dark / light**
   toggle. Each theme tints the whole chrome, so the switch is unmistakable.
+- The toolbar and address-bar icons are **crisp vectors drawn at runtime**
+  (no image files) and repaint in the active theme's colours when you switch
+  theme or mode — the bookmark star fills in the accent colour, the security
+  pill in semantic green/red. The footer centres the version tag, with the
+  tracker-blocked counter at the right.
 - Changes apply live and are remembered in `~/.vodou/theme.json`.
 - **Zoom** — `Ctrl` `+` / `Ctrl` `-` (or **Ctrl + mouse wheel**, or
   **☰ menu → Zoom**) steps page zoom along Chrome's ladder from 25% to
@@ -375,7 +415,13 @@ Reliability details (each cost real debugging time):
   the site's OAuth callback. Vodou keeps the Firefox identity for a 90-second
   grace period after the last auth-host navigation, so none of those hops
   (nor another tab navigating mid-flow) flips the identity — and reloads
-  pages — in the middle of the handshake. The first navigation after the
+  pages — in the middle of the handshake. Because Google's sign-in is a
+  single-page app (advancing from the email screen to the password screen
+  fires no navigation), that grace period is kept alive by the requests the
+  sign-in page itself makes while it's open — otherwise a slow password entry
+  could outlast it and the post-password redirect would flip the profile back
+  to Chrome mid-handshake, the cause of password sign-in taking several tries
+  where a near-instant passkey never did. The first navigation after the
   grace period quietly reverts to the generic Chrome identity. While the
   Firefox identity is active it is consistent *everywhere*: every request
   presents as Firefox with no Chrome client hints, and on the auth pages a

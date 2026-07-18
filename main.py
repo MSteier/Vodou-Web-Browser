@@ -98,7 +98,7 @@ import platform
 import secrets
 from urllib.parse import quote
 
-from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
@@ -134,6 +134,7 @@ from blockstats_ui import BlockingReportWindow
 from bookmarks import Bookmarks
 from cookies import CookieKeeper
 from cookies_ui import CookieSitesDialog
+from icons import icon_set, make_icon
 from bookmarks_ui import BookmarksManagerDialog
 from downloads_ui import DownloadsDialog
 from plugins import PluginManager, wrap_plugin_source
@@ -149,6 +150,12 @@ from privacy import (
 )
 from session import clear_snapshot, load_snapshot, save_snapshot
 from shred import shred_dir
+from spoofcheck import (
+    SENTINEL_HOST,
+    download_risk,
+    interstitial_html,
+)
+from spoofcheck import inspect as spoof_inspect
 from about import (
     REPO_URL,
     VERSION_DISPLAY,
@@ -156,7 +163,7 @@ from about import (
     UpdateChecker,
     engine_versions,
 )
-from theme import THEMES, apply_theme, load_prefs, save_prefs
+from theme import THEMES, apply_theme, build_palette, load_prefs, save_prefs
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
 from vault_ui import (
     EntryDialog,
@@ -254,12 +261,43 @@ class WebPage(QWebEnginePage):
 
     captured = pyqtSignal(str, str)  # username, password
 
-    def __init__(self, profile: QWebEngineProfile, capture_prefix: str,
-                 parent=None):
-        super().__init__(profile, parent)
-        self._capture_prefix = capture_prefix
+    def __init__(self, browser: "BrowserWindow", view: "WebView"):
+        super().__init__(browser.profile, view)
+        self.browser = browser
+        self._view = view
+        self._capture_prefix = browser.capture_prefix
+        # True while the deceptive-site interstitial occupies this page, so its
+        # own load and links aren't themselves re-inspected.
+        self._interstitial_active = False
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame) -> bool:
+        host = url.host()
+
+        # The interstitial's own buttons navigate to the reserved sentinel
+        # host; catch those two paths before anything else and never let them
+        # load. The interstitial's base URL (/warning) shares this host, so it
+        # must fall through and be allowed to render.
+        if is_main_frame and host == SENTINEL_HOST:
+            if url.path() in ("/continue", "/back"):
+                self._handle_interstitial_choice(url)
+                return False
+            return super().acceptNavigationRequest(url, nav_type,
+                                                   is_main_frame)
+
+        # Deceptive-site check: block a main-frame navigation to a look-alike /
+        # mixed-script / typosquatting host and show a warning in its place,
+        # unless the user already chose to continue to this host this session.
+        if (is_main_frame and not self._interstitial_active
+                and not self.browser.spoof_allowed(host)):
+            verdict = spoof_inspect(host)
+            if verdict is not None:
+                self._interstitial_active = True
+                pending = QUrl(url)
+                QTimer.singleShot(0, lambda p=pending, v=verdict:
+                                  self.browser.show_spoof_interstitial(
+                                      self._view, v, p))
+                return False
+
         # The identity must be right BEFORE the request leaves: letting the
         # navigation race the deferred switch meant the first sign-in attempt
         # could reach Google with a half-switched identity (headers vs
@@ -267,11 +305,24 @@ class WebPage(QWebEnginePage):
         # needed, hold this navigation, switch, then re-issue it. Mutating
         # the profile from inside this callback re-enters QtWebEngine and
         # aborts the process, hence the one-tick deferral.
-        if is_main_frame and ua_quirk_needed(self.profile(), url.host()):
+        if is_main_frame and ua_quirk_needed(self.profile(), host):
             QTimer.singleShot(
                 0, lambda u=QUrl(url): self._apply_ua_quirk(u))
             return False
         return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+    def _handle_interstitial_choice(self, url: QUrl) -> None:
+        """React to the interstitial's Go-back / Continue links."""
+        self._interstitial_active = False
+        view = self._view
+        pending = getattr(view, "_spoof_pending", None)
+        view._spoof_pending = None
+        if url.path() == "/continue" and pending is not None:
+            # Trust this host for the rest of the session, then proceed.
+            self.browser.spoof_allow(pending.host())
+            QTimer.singleShot(0, lambda t=QUrl(pending): self._reissue(t))
+        else:
+            QTimer.singleShot(0, lambda: self.browser.spoof_leave(view))
 
     def _apply_ua_quirk(self, url: QUrl) -> None:
         try:
@@ -381,6 +432,7 @@ class VersionLabel(QLabel):
         self.setText(f"Vodou v{VERSION_DISPLAY} — update available ⬆ ")
         self.setToolTip(f"Update available: {what}\n"
                         f"Click to open About Vodou and update")
+        self.browser._center_version()  # width changed; keep it centred
 
     def show_up_to_date(self, restart_needed: bool = False) -> None:
         """Confirmed-current state: after a check found nothing newer, or
@@ -395,6 +447,7 @@ class VersionLabel(QLabel):
             self.setText(f"Vodou v{VERSION_DISPLAY} — up to date ✓ ")
             self.setToolTip("You are using the most current version.\n"
                             f"Click to open the GitHub repository\n{REPO_URL}")
+        self.browser._center_version()  # width changed; keep it centred
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -414,7 +467,10 @@ class WebView(QWebEngineView):
         # Set on crash-restored background tabs: the URL to load the first
         # time the tab is actually activated (see _load_pending).
         self.pending_url: QUrl | None = None
-        page = WebPage(browser.profile, browser.capture_prefix, self)
+        # Set when a deceptive-site interstitial is showing in this tab: the
+        # real URL to load if the user chooses "Continue anyway".
+        self._spoof_pending: QUrl | None = None
+        page = WebPage(browser, self)
         page.certificateError.connect(self._on_certificate_error)
         self.setPage(page)
         self._apply_settings(page.settings())
@@ -497,6 +553,10 @@ class BrowserWindow(QMainWindow):
         self.interceptor = PrivacyInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.interceptor)
         self.profile.downloadRequested.connect(self._on_download)
+
+        # Hosts the user explicitly chose to visit past a deceptive-site
+        # warning. Session-only on purpose: the warning returns next launch.
+        self._spoof_allowed_hosts: set[str] = set()
 
         # Credential capture: random per-session token so pages can't forge
         # capture messages; script runs in the isolated ApplicationWorld.
@@ -593,6 +653,10 @@ class BrowserWindow(QMainWindow):
     # -- UI ---------------------------------------------------------------
 
     def _build_ui(self) -> None:
+        # Needed before any theme-colored icon is generated below; the
+        # Appearance menu loads the same prefs again later (harmless).
+        self._theme_name, self._mode = load_prefs()
+
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
@@ -619,46 +683,58 @@ class BrowserWindow(QMainWindow):
 
         toolbar = QToolBar("Navigation")
         toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(20, 20))
         self.addToolBar(toolbar)
 
-        def action(text: str, tip: str, slot, shortcut: str | None = None):
-            act = QAction(text, self)
+        # Toolbar/address-bar icons are painted vectors in the theme color
+        # (icons.py), not glyphs or image files. Build the cache first; every
+        # widget below pulls its icon from it, and a theme switch regenerates
+        # it (see _rebuild_icon_cache / _refresh_chrome_icons).
+        self._icon_targets: list[tuple[object, str]] = []
+        self._rebuild_icon_cache()
+
+        def action(icon_name: str, tip: str, slot,
+                   shortcut: str | None = None):
+            act = QAction(self)
             act.setToolTip(tip)
             act.triggered.connect(slot)
             if shortcut:
                 act.setShortcut(QKeySequence(shortcut))
             toolbar.addAction(act)
+            self._icon_targets.append((act, icon_name))
             return act
 
-        action("←", "Back (Alt+Left)", lambda: self.current_view().back())
-        action("→", "Forward (Alt+Right)",
+        action("back", "Back (Alt+Left)", lambda: self.current_view().back())
+        action("forward", "Forward (Alt+Right)",
                lambda: self.current_view().forward())
-        action("⟳", "Reload (Ctrl+R)", self.reload_page)
-        action("⌂", "Home", lambda: self.current_view().setUrl(QUrl(HOME_URL)))
-
-        self.lock_button = QToolButton()
-        self.lock_button.setObjectName("lockButton")
-        self.lock_button.setText("ⓘ")
-        self.lock_button.setProperty("state", "neutral")
-        self.lock_button.clicked.connect(self.show_certificate)
-        toolbar.addWidget(self.lock_button)
+        action("reload", "Reload (Ctrl+R)", self.reload_page)
+        action("home", "Home",
+               lambda: self.current_view().setUrl(QUrl(HOME_URL)))
 
         self.url_bar = QLineEdit()
         self.url_bar.setObjectName("urlBar")
         self.url_bar.setPlaceholderText(
             "Search SearXNG or enter address (HTTPS-first)")
         self.url_bar.returnPressed.connect(self._navigate)
+        # Security pill: the lock lives inside the address bar as a leading,
+        # clickable icon whose colour carries the state (green closed / red
+        # open / muted info). Clicking it shows the certificate.
+        self.lock_action = self.url_bar.addAction(
+            self._lock_icons["neutral"],
+            QLineEdit.ActionPosition.LeadingPosition)
+        self.lock_action.setToolTip("Internal page")
+        self.lock_action.triggered.connect(self.show_certificate)
+        self._lock_state = "neutral"
         toolbar.addWidget(self.url_bar)
 
         self.star_button = QToolButton()
         self.star_button.setObjectName("starButton")
-        self.star_button.setText("☆")
+        self.star_button.setIcon(self._star_off)
         self.star_button.setToolTip("Bookmark this page (Ctrl+D)")
         self.star_button.clicked.connect(self.toggle_bookmark)
         toolbar.addWidget(self.star_button)
 
         self.bookmarks_button = QToolButton()
-        self.bookmarks_button.setText("▤")
         self.bookmarks_button.setToolTip("Bookmarks")
         self.bookmarks_button.setPopupMode(
             QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -667,17 +743,19 @@ class BrowserWindow(QMainWindow):
             lambda: self._populate_bookmarks_menu(self._bookmarks_menu))
         self.bookmarks_button.setMenu(self._bookmarks_menu)
         toolbar.addWidget(self.bookmarks_button)
+        self._icon_targets.append((self.bookmarks_button, "bookmarks"))
 
-        action("＋", "New tab (Ctrl+T)", lambda: self.add_tab(QUrl(HOME_URL)))
-        action("🔑", "Fill saved login on this page (Ctrl+Shift+F)",
+        action("plus", "New tab (Ctrl+T)",
+               lambda: self.add_tab(QUrl(HOME_URL)))
+        action("key", "Fill saved login on this page (Ctrl+Shift+F)",
                self.fill_login)
-        action("💾", "Save a login for this site", self.save_login_for_site)
-        action("🗄", "Open password vault (Ctrl+Shift+V)", self.open_vault)
+        action("save", "Save a login for this site", self.save_login_for_site)
+        action("vault", "Open password vault (Ctrl+Shift+V)", self.open_vault)
 
         menu_button = QToolButton()
-        menu_button.setText("☰")
         menu_button.setToolTip("Menu")
         menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._icon_targets.append((menu_button, "menu"))
         menu = QMenu(menu_button)
         clear_action = menu.addAction("Clear history & memory\tCtrl+Shift+Del",
                                       self.clear_browsing_data)
@@ -728,22 +806,30 @@ class BrowserWindow(QMainWindow):
         help_menu.addAction("About Vodou…", self.show_about)
         menu_button.setMenu(menu)
         toolbar.addWidget(menu_button)
+        self._apply_static_icons()
 
-        # The shield counter floats as a direct child of the status bar
-        # (outside its layout) so it can sit dead-centre in the footer;
-        # an event filter re-centres it whenever the bar resizes.
-        self.shield_label = QLabel(" 🛡 0 trackers blocked ", self.statusBar())
+        # The version tag floats as a direct child of the status bar (outside
+        # its layout) so it can sit dead-centre in the footer; an event filter
+        # re-centres it whenever the bar resizes.
+        self.version_label = VersionLabel(self)
+        self.version_label.setParent(self.statusBar())
+        self.version_label.show()
+
+        # The tracker counter lives at the right as a permanent widget; the
+        # status-bar layout keeps it right-aligned as its text grows. Clicking
+        # it toggles tracker-blocking pause.
+        self.shield_label = QLabel(" 🛡 0 trackers blocked ")
         self.shield_label.setObjectName("shieldLabel")
         self.shield_label.setToolTip("Click to pause/resume tracker blocking")
         self.shield_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.shield_label.installEventFilter(self)  # click toggles pause
-        self.statusBar().installEventFilter(self)
+        self.statusBar().addPermanentWidget(self.shield_label)
 
-        self.version_label = VersionLabel(self)
-        self.statusBar().addPermanentWidget(self.version_label)
+        self.statusBar().installEventFilter(self)
         self.statusBar().showMessage(
             "Private session: history, cookies and cache are memory-only "
             "and erased on exit.", 8000)
+        self._center_version()
 
     def _build_shortcuts(self) -> None:
         bindings = {
@@ -938,7 +1024,8 @@ class BrowserWindow(QMainWindow):
             view = self.tabs.widget(i)
             url = view.pending_url or view.url()
             text = url.toString()
-            if text and url.scheme() in ("http", "https", "file"):
+            if (text and url.scheme() in ("http", "https", "file")
+                    and url.host() != SENTINEL_HOST):
                 if view is cur:
                     current = len(urls)
                 urls.append(text)
@@ -950,6 +1037,11 @@ class BrowserWindow(QMainWindow):
         view = self.tabs.widget(index)
         self._load_pending(view)
         if view is not None:
+            # A tab parked on the deceptive-site interstitial reflects the
+            # blocked host, not the internal sentinel URL.
+            if view.url().host() == SENTINEL_HOST:
+                self._on_url_changed(view, view.url())
+                return
             self.url_bar.setText(view.url().toString())
             self._update_security_indicator(view.url())
             self._update_star(view.url())
@@ -959,38 +1051,94 @@ class BrowserWindow(QMainWindow):
 
     def _on_url_changed(self, view: WebView, url: QUrl) -> None:
         self._schedule_session_save()
-        if view is self.current_view():
-            self.url_bar.setText(url.toString())
+        if view is not self.current_view():
+            return
+        # The deceptive-site interstitial: show the blocked host itself in the
+        # address bar (so the user sees what was refused) with a danger lock,
+        # not the internal sentinel URL the page is actually based on.
+        if url.host() == SENTINEL_HOST:
+            pending = view._spoof_pending
+            self.url_bar.setText(pending.toString() if pending else "")
             self.url_bar.setCursorPosition(0)
-            self._update_security_indicator(url)
-            self._update_star(url)
-            # Keep save/update offers alive across same-site navigation
-            # (logging in usually navigates); drop them when leaving.
-            if url.host().removeprefix("www.") != self.notify_bar.host:
-                self.notify_bar.hide()
+            self.lock_action.setIcon(self._lock_icons["insecure"])
+            self.lock_action.setToolTip("Deceptive site — blocked by Vodou")
+            self._lock_state = "insecure"
+            self.notify_bar.hide()
+            return
+        self.url_bar.setText(url.toString())
+        self.url_bar.setCursorPosition(0)
+        self._update_security_indicator(url)
+        self._update_star(url)
+        # Keep save/update offers alive across same-site navigation
+        # (logging in usually navigates); drop them when leaving.
+        if url.host().removeprefix("www.") != self.notify_bar.host:
+            self.notify_bar.hide()
+
+    # -- deceptive-site (spoof) protection --------------------------------
+
+    @staticmethod
+    def _norm_host(host: str) -> str:
+        return host.strip().rstrip(".").lower()
+
+    def spoof_allowed(self, host: str) -> bool:
+        return self._norm_host(host) in self._spoof_allowed_hosts
+
+    def spoof_allow(self, host: str) -> None:
+        self._spoof_allowed_hosts.add(self._norm_host(host))
+
+    def show_spoof_interstitial(self, view: "WebView", verdict,
+                                pending_url: QUrl) -> None:
+        """Replace the blocked page with a full-page deceptive-site warning.
+        The page is generated locally (inline CSS, escaped host/brand) and its
+        buttons navigate to the sentinel host handled in acceptNavigationRequest.
+        """
+        try:
+            page = view.page()
+        except RuntimeError:
+            return
+        view._spoof_pending = pending_url
+        p = build_palette(self._theme_name, self._mode)
+        colors = {
+            "bg": p.bg, "surface": p.surface, "text": p.text,
+            "muted": p.muted, "border": p.border, "danger": p.danger,
+            "ok": p.ok, "accent": p.accent, "on_accent": p.on_accent,
+        }
+        html = interstitial_html(verdict, colors)
+        # Base the page on the sentinel host so its identity is unambiguous and
+        # the address bar can show the deceptive host itself (_on_url_changed).
+        page.setHtml(html, QUrl(f"https://{SENTINEL_HOST}/warning"))
+        if view is self.current_view():
+            self.statusBar().showMessage(
+                "Blocked a suspected deceptive site.", 6000)
+
+    def spoof_leave(self, view: "WebView") -> None:
+        """'Go back (safe)': return to the previous page, or home if none."""
+        try:
+            if view.history().canGoBack():
+                view.back()
+            else:
+                view.setUrl(QUrl(HOME_URL))
+        except RuntimeError:
+            pass
 
     # -- security indicator / certificate viewer ---------------------------
 
     def _update_security_indicator(self, url: QUrl) -> None:
         scheme = url.scheme()
         if scheme == "https":
-            state, text = "secure", "🔒"
+            state = "secure"
             tip = (f"Secure connection to {url.host()}\n"
                    f"Click to view the certificate")
         elif scheme == "http":
-            state, text = "insecure", "🔓"
+            state = "insecure"
             tip = ("Not secure — this connection is unencrypted.\n"
                    "Anything you send can be read in transit.")
         else:
-            state, text = "neutral", "ⓘ"
+            state = "neutral"
             tip = "Internal page"
-        self.lock_button.setText(text)
-        self.lock_button.setToolTip(tip)
-        if self.lock_button.property("state") != state:
-            self.lock_button.setProperty("state", state)
-            style = self.lock_button.style()
-            style.unpolish(self.lock_button)
-            style.polish(self.lock_button)
+        self.lock_action.setIcon(self._lock_icons[state])
+        self.lock_action.setToolTip(tip)
+        self._lock_state = state
 
     def show_certificate(self) -> None:
         url = self.current_view().url()
@@ -1036,9 +1184,43 @@ class BrowserWindow(QMainWindow):
 
     # -- bookmarks --------------------------------------------------------
 
+    # -- theme-colored chrome icons ---------------------------------------
+
+    def _rebuild_icon_cache(self) -> None:
+        """(Re)generate the vector icon set in the active theme colours.
+
+        Called once at build time and again on every live theme/mode switch
+        so the chrome icons follow the theme. Static icons come straight from
+        the shared set; the state-dependent ones (a filled bookmark star in
+        the accent, the three security-pill locks) are pre-rendered here in
+        their state colours so the hot paths just swap a cached QIcon."""
+        p = build_palette(self._theme_name, self._mode)
+        self._icons = icon_set(p.text)
+        self._star_off = self._icons["star"]
+        self._star_on = make_icon("star-filled", p.accent)
+        self._lock_icons = {
+            "secure": make_icon("lock", p.ok),
+            "insecure": make_icon("lock-open", p.danger),
+            "neutral": make_icon("info", p.muted),
+        }
+
+    def _apply_static_icons(self) -> None:
+        for widget, name in self._icon_targets:
+            widget.setIcon(self._icons[name])
+
+    def _refresh_chrome_icons(self) -> None:
+        """Repaint every chrome icon after a theme switch, then restore the
+        state-dependent ones for the current page."""
+        self._rebuild_icon_cache()
+        self._apply_static_icons()
+        view = self.current_view()
+        if view is not None:
+            self._update_star(view.url())
+            self._update_security_indicator(view.url())
+
     def _update_star(self, url: QUrl) -> None:
         marked = self.bookmarks.contains(url.toString())
-        self.star_button.setText("★" if marked else "☆")
+        self.star_button.setIcon(self._star_on if marked else self._star_off)
         self.star_button.setToolTip(
             "Remove bookmark (Ctrl+D)" if marked
             else "Bookmark this page (Ctrl+D)")
@@ -1214,6 +1396,7 @@ class BrowserWindow(QMainWindow):
         app = QApplication.instance()
         apply_theme(app, self._theme_name, self._mode)
         save_prefs(self._theme_name, self._mode)
+        self._refresh_chrome_icons()
         self.statusBar().showMessage(
             f"Theme: {self._theme_name} · {self._mode.capitalize()} mode", 4000)
 
@@ -1429,18 +1612,17 @@ class BrowserWindow(QMainWindow):
         else:
             self.shield_label.setText(
                 f" 🛡 {self.blocked_count} trackers blocked ")
-        self._center_shield()  # the text grew — keep it centred
 
-    def _center_shield(self) -> None:
+    def _center_version(self) -> None:
         bar = self.statusBar()
-        self.shield_label.adjustSize()
-        self.shield_label.move(
-            (bar.width() - self.shield_label.width()) // 2,
-            (bar.height() - self.shield_label.height()) // 2)
+        self.version_label.adjustSize()
+        self.version_label.move(
+            (bar.width() - self.version_label.width()) // 2,
+            (bar.height() - self.version_label.height()) // 2)
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self.statusBar() and event.type() == QEvent.Type.Resize:
-            self._center_shield()
+            self._center_version()
         elif (obj is self.shield_label
                 and event.type() == QEvent.Type.MouseButtonRelease
                 and event.button() == Qt.MouseButton.LeftButton):
@@ -1455,11 +1637,24 @@ class BrowserWindow(QMainWindow):
         downloads = Path.home() / "Downloads"
         safe_name = Path(item.downloadFileName()).name or "download"
         origin = item.url().host() or "this page"
-        answer = plain_message(
-            self, QMessageBox.Icon.Question, "Download file?",
-            f"Save “{safe_name}” from {origin} to your Downloads folder?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
+        risky = download_risk(safe_name)
+        if risky:
+            # Executable/installer payloads are the sharp end of a drive-by
+            # download: a page handing you one of these can run code on your
+            # machine. Warn harder — Warning icon, blunt wording, default No.
+            answer = plain_message(
+                self, QMessageBox.Icon.Warning, "Dangerous download",
+                f"“{safe_name}” from {origin} is a {risky} file that can run "
+                f"programs on your computer.\n\nOnly keep it if you trust "
+                f"{origin} and meant to download it. Save it anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+        else:
+            answer = plain_message(
+                self, QMessageBox.Icon.Question, "Download file?",
+                f"Save “{safe_name}” from {origin} to your Downloads folder?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             item.cancel()
             return

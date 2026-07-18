@@ -119,6 +119,7 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
         return verdict
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
+        global _last_auth_nav
         host = info.requestUrl().host()
         verdict = self.is_tracker(host)
 
@@ -128,8 +129,24 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
             return
         info.setHttpHeader(b"DNT", b"1")
         info.setHttpHeader(b"Sec-GPC", b"1")
-        if (_firefox_mode or google_auth_host(host)
-                or google_auth_host(info.firstPartyUrl().host())):
+        # Keep the Firefox sign-in identity alive for as long as the user is
+        # actually on a Google auth page. Google's sign-in is a single-page
+        # app: advancing from the email screen to the password screen produces
+        # no main-frame navigation, so the identity's wall-clock hold
+        # (_identity_for) is only ever refreshed at initial page load. A slow
+        # password entry — the ceremony a passkey finishes in a second — can
+        # outlast the 90s hold; the next redirect to a non-auth host then
+        # flips the profile back to Chrome mid-handshake and Google rejects it
+        # ("browser may not be secure"). That's the retry-until-it-works
+        # symptom, and it hits password sign-in specifically. The sign-in page
+        # keeps making requests the whole time it's open, so refreshing the
+        # hold here — scoped to requests whose FIRST party is an auth host
+        # (you're on the sign-in page, not merely seeing a third-party Google
+        # widget on some other site) — pins Firefox until sign-in finishes.
+        on_auth_page = google_auth_host(info.firstPartyUrl().host())
+        if on_auth_page:
+            _last_auth_nav = time.monotonic()
+        if _firefox_mode or on_auth_page or google_auth_host(host):
             # Google-sign-in quirk: present as Firefox (see FIREFOX_USER_AGENT
             # below) on EVERY request while the Firefox identity is active,
             # not just on auth hosts. A sign-in flow crosses non-auth hosts
