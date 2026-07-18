@@ -166,14 +166,13 @@ QLineEdit#urlBar {{
 }}
 QLineEdit#urlBar:focus {{ background: {p.elevated}; }}
 
-QTabWidget::pane {{ border: none; }}
-QTabWidget::tab-bar {{ left: 6px; }}  /* nudge the tab row right a few px */
+QWidget#tabStrip {{ background: {p.bg}; }}
 QTabBar {{ background: {p.bg}; }}
 QTabBar::tab {{
     background: transparent;
     color: {p.muted};
     padding: 7px 14px;
-    margin: 4px 2px 0 2px;
+    margin: 0 2px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     max-width: 220px;
@@ -184,6 +183,38 @@ QTabBar::tab:selected {{
     color: {p.text};
     border-bottom: 2px solid {p.accent};
 }}
+
+QToolButton#newTabButton {{
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    padding: 4px 8px;
+    margin: 0 2px 0 4px;
+}}
+QToolButton#newTabButton:hover {{ background: {p.elevated}; }}
+QToolButton#newTabButton:pressed {{ background: {p.accent_dim}; }}
+
+/* Bookmarks bar under the address bar. */
+QToolBar#bookmarkBar {{
+    background: {p.bg};
+    border: none;
+    border-top: 1px solid {p.border};
+    padding: 2px 6px;
+    spacing: 1px;
+}}
+QToolBar#bookmarkBar QToolButton {{
+    background: transparent;
+    color: {p.muted};
+    border: none;
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 9pt;
+}}
+QToolBar#bookmarkBar QToolButton:hover {{
+    background: {p.elevated};
+    color: {p.text};
+}}
+QToolBar#bookmarkBar QToolButton:pressed {{ background: {p.accent_dim}; }}
 
 QStatusBar {{
     background: {p.bg};

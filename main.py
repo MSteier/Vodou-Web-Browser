@@ -121,7 +121,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
-    QTabWidget,
+    QStackedWidget,
+    QTabBar,
     QToolBar,
     QToolButton,
     QVBoxLayout,
@@ -134,6 +135,7 @@ from blockstats_ui import BlockingReportWindow
 from bookmarks import Bookmarks
 from cookies import CookieKeeper
 from cookies_ui import CookieSitesDialog
+from favicons import FaviconStore
 from icons import icon_set, make_icon
 from bookmarks_ui import BookmarksManagerDialog
 from downloads_ui import DownloadsDialog
@@ -148,6 +150,7 @@ from privacy import (
     apply_ua_quirk,
     ua_quirk_needed,
 )
+from safebrowsing import SafeBrowsing
 from session import clear_snapshot, load_snapshot, save_snapshot
 from shred import shred_dir
 from spoofcheck import (
@@ -285,12 +288,16 @@ class WebPage(QWebEnginePage):
             return super().acceptNavigationRequest(url, nav_type,
                                                    is_main_frame)
 
-        # Deceptive-site check: block a main-frame navigation to a look-alike /
-        # mixed-script / typosquatting host and show a warning in its place,
-        # unless the user already chose to continue to this host this session.
+        # Deceptive-site / Safe-Browsing check: block a main-frame navigation
+        # to a look-alike / mixed-script / typosquatting host, or one on the
+        # local reported-phishing/malware list, and show a warning in its
+        # place — unless the user already chose to continue this host this
+        # session. spoof_inspect is a cheap pure check; the Safe Browsing
+        # lookup is a cached in-memory set membership.
         if (is_main_frame and not self._interstitial_active
                 and not self.browser.spoof_allowed(host)):
-            verdict = spoof_inspect(host)
+            verdict = (spoof_inspect(host)
+                       or self.browser.safe_browsing.is_dangerous(host))
             if verdict is not None:
                 self._interstitial_active = True
                 pending = QUrl(url)
@@ -358,6 +365,44 @@ class WebPage(QWebEnginePage):
         # handler writes page console output (which routinely includes
         # user data) to stderr/logs. DevTools has its own console feed,
         # so nothing is lost for debugging.
+
+
+class BookmarkBar(QToolBar):
+    """A strip of the user's bookmarks under the address bar, kept in
+    alphabetical order. Being a QToolBar, it grows a '»' overflow menu on its
+    own when there are more bookmarks than fit the width."""
+
+    def __init__(self, bookmarks, open_url, favicon, fallback, parent=None):
+        super().__init__(parent)
+        self.setObjectName("bookmarkBar")
+        self.setMovable(False)
+        self.setFloatable(False)
+        self.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._bookmarks = bookmarks
+        self._open_url = open_url
+        self._favicon = favicon        # host -> QIcon | None (captured icons)
+        self._fallback = fallback      # () -> QIcon (generic globe)
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.clear()
+        items = sorted(
+            self._bookmarks.all(),
+            key=lambda b: ((b.title or b.url).strip().lower(), b.url.lower()))
+        for b in items:
+            host = QUrl(b.url).host().lower()
+            icon = self._favicon(host) if host else None
+            if icon is None or icon.isNull():
+                icon = self._fallback()
+            title = (b.title or b.url).strip()
+            label = title if len(title) <= 22 else title[:21] + "…"
+            # QAction text/tooltip are plain text, so an imported bookmark
+            # title carrying markup can't render as rich text here.
+            act = self.addAction(icon, label)
+            act.setToolTip(f"{title}\n{b.url}")
+            act.triggered.connect(lambda _=False, u=b.url: self._open_url(u))
+        self.setVisible(bool(items))
 
 
 class NotifyBar(QFrame):
@@ -559,6 +604,16 @@ class BrowserWindow(QMainWindow):
         # warning. Session-only on purpose: the warning returns next launch.
         self._spoof_allowed_hosts: set[str] = set()
 
+        # Local, privacy-preserving Safe Browsing: reported phishing/malware
+        # hosts are checked entirely offline (see safebrowsing.py). Started
+        # a little after launch so the first list fetch doesn't compete with
+        # the initial page load.
+        self.safe_browsing = SafeBrowsing(self)
+        self.safe_browsing.updated.connect(
+            lambda n: self.statusBar().showMessage(
+                f"Safe Browsing: {n:,} reported unsafe sites loaded.", 5000))
+        QTimer.singleShot(12000, self.safe_browsing.start)
+
         # Credential capture: random per-session token so pages can't forge
         # capture messages; script runs in the isolated ApplicationWorld.
         self.capture_prefix = f"__vodou_{secrets.token_urlsafe(16)}__:"
@@ -658,41 +713,80 @@ class BrowserWindow(QMainWindow):
         # Appearance menu loads the same prefs again later (harmless).
         self._theme_name, self._mode = load_prefs()
 
-        self.tabs = QTabWidget()
-        self.tabs.setTabsClosable(True)
-        self.tabs.setMovable(True)
-        self.tabs.setDocumentMode(True)
-        self.tabs.tabCloseRequested.connect(self.close_tab)
-        self.tabs.currentChanged.connect(self._on_tab_changed)
-        self.tabs.tabBar().tabMoved.connect(
-            lambda *_: self._schedule_session_save())
-
-        # Tabs on the left; the DevTools panel (added lazily) docks to the
-        # right of this splitter when developer tools are enabled.
-        self._split = QSplitter(Qt.Orientation.Horizontal)
-        self._split.setChildrenCollapsible(False)
-        self._split.addWidget(self.tabs)
-
-        self.notify_bar = NotifyBar()
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-        vbox.addWidget(self.notify_bar)
-        vbox.addWidget(self._split)
-        self.setCentralWidget(container)
-
-        toolbar = QToolBar("Navigation")
-        toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(20, 20))
-        self.addToolBar(toolbar)
-
         # Toolbar/address-bar icons are painted vectors in the theme color
         # (icons.py), not glyphs or image files. Build the cache first; every
         # widget below pulls its icon from it, and a theme switch regenerates
         # it (see _rebuild_icon_cache / _refresh_chrome_icons).
         self._icon_targets: list[tuple[object, str]] = []
         self._rebuild_icon_cache()
+
+        # The tab bar is decoupled from the page area (a QTabBar driving a
+        # QStackedWidget) so the address bar and bookmark bar can sit BETWEEN
+        # the tabs and the page — the vertical order top to bottom is:
+        # tabs · address bar · bookmarks bar · page.
+        self.tab_bar = QTabBar()
+        self.tab_bar.setObjectName("mainTabBar")
+        self.tab_bar.setTabsClosable(True)
+        self.tab_bar.setMovable(True)
+        self.tab_bar.setDocumentMode(True)
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setUsesScrollButtons(True)
+        self.tab_bar.setElideMode(Qt.TextElideMode.ElideRight)
+        self.tab_bar.currentChanged.connect(self._on_tab_changed)
+        self.tab_bar.tabCloseRequested.connect(self.close_tab)
+        self.tab_bar.tabMoved.connect(self._on_tab_moved)
+        self.tab_bar.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tab_bar.customContextMenuRequested.connect(self._tab_context_menu)
+        self.tab_stack = QStackedWidget()
+
+        # "+" opens a new tab, sitting just to the right of the last tab.
+        self.plus_button = QToolButton()
+        self.plus_button.setObjectName("newTabButton")
+        self.plus_button.setIcon(self._icons["plus"])
+        self.plus_button.setIconSize(QSize(18, 18))
+        self.plus_button.setToolTip("New tab (Ctrl+T)")
+        self.plus_button.clicked.connect(lambda: self.add_tab(QUrl(HOME_URL)))
+        self._icon_targets.append((self.plus_button, "plus"))
+
+        tab_strip = QWidget()
+        tab_strip.setObjectName("tabStrip")
+        strip = QHBoxLayout(tab_strip)
+        strip.setContentsMargins(6, 4, 6, 0)
+        strip.setSpacing(4)
+        strip.addWidget(self.tab_bar)
+        strip.addWidget(self.plus_button)
+        strip.addStretch(1)
+
+        # Page area: the stack of tab pages, with the DevTools panel docking to
+        # the right of this splitter when developer tools are enabled.
+        self._split = QSplitter(Qt.Orientation.Horizontal)
+        self._split.setChildrenCollapsible(False)
+        self._split.addWidget(self.tab_stack)
+
+        self.notify_bar = NotifyBar()
+        # Favicons for the bookmarks bar: captured from pages you browse /
+        # bookmark, cached only for bookmarked hosts (see favicons.py).
+        self.favicons = FaviconStore(Path.home() / ".vodou" / "favicons")
+        self._bmk_hosts: set[str] = set()
+        self.bookmark_bar = BookmarkBar(
+            self.bookmarks, self._open_bookmark, self.favicons.get,
+            lambda: self._bookmark_fallback)
+
+        toolbar = QToolBar("Navigation")
+        toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(20, 20))
+
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+        vbox.addWidget(tab_strip)          # tabs + "+"          (top)
+        vbox.addWidget(toolbar)            # address / navigation
+        vbox.addWidget(self.bookmark_bar)  # bookmarks bar
+        vbox.addWidget(self.notify_bar)    # save/fill offer bar
+        vbox.addWidget(self._split, 1)     # page area           (fills)
+        self.setCentralWidget(container)
 
         def action(icon_name: str, tip: str, slot,
                    shortcut: str | None = None):
@@ -746,8 +840,6 @@ class BrowserWindow(QMainWindow):
         toolbar.addWidget(self.bookmarks_button)
         self._icon_targets.append((self.bookmarks_button, "bookmarks"))
 
-        action("plus", "New tab (Ctrl+T)",
-               lambda: self.add_tab(QUrl(HOME_URL)))
         action("key", "Fill saved login on this page (Ctrl+Shift+F)",
                self.fill_login)
         action("save", "Save a login for this site", self.save_login_for_site)
@@ -783,6 +875,17 @@ class BrowserWindow(QMainWindow):
             "that break with blocking on. Blocking resumes on restart.")
         self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
         settings_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
+        self.safe_browsing_action = settings_menu.addAction(
+            "Safe Browsing")
+        self.safe_browsing_action.setCheckable(True)
+        self.safe_browsing_action.setChecked(self.safe_browsing.enabled)
+        self.safe_browsing_action.setToolTip(
+            "Warn before opening sites on public phishing/malware lists. "
+            "Checked entirely on your device — nothing about your browsing "
+            "is ever sent out.")
+        self.safe_browsing_action.toggled.connect(self._set_safe_browsing)
+        settings_menu.addAction("Safe Browsing status…",
+                                self.show_safe_browsing_status)
         menu.addSeparator()
         report = menu.addAction("Blocking report…", self.show_blocking_report)
         report.setToolTip(
@@ -831,11 +934,14 @@ class BrowserWindow(QMainWindow):
             "Private session: history, cookies and cache are memory-only "
             "and erased on exit.", 8000)
         self._center_version()
+        # Seed the bookmarked-host set and drop favicons for bookmarks that
+        # were removed in a previous session.
+        self._bookmarks_changed()
 
     def _build_shortcuts(self) -> None:
         bindings = {
             "Ctrl+T": lambda: self.add_tab(QUrl(HOME_URL)),
-            "Ctrl+W": lambda: self.close_tab(self.tabs.currentIndex()),
+            "Ctrl+W": lambda: self.close_tab(self.tab_bar.currentIndex()),
             "Ctrl+L": self._focus_url_bar,
             "Ctrl+R": self.reload_page,
             "F5": self.reload_page,
@@ -861,9 +967,10 @@ class BrowserWindow(QMainWindow):
         self.url_bar.selectAll()
 
     def _next_tab(self) -> None:
-        count = self.tabs.count()
+        count = self.tab_bar.count()
         if count:
-            self.tabs.setCurrentIndex((self.tabs.currentIndex() + 1) % count)
+            self.tab_bar.setCurrentIndex(
+                (self.tab_bar.currentIndex() + 1) % count)
 
     # -- tabs ---------------------------------------------------------------
 
@@ -871,14 +978,16 @@ class BrowserWindow(QMainWindow):
         view = WebView(self)
         if self._zoom != 1.0:
             view.setZoomFactor(self._zoom)
-        index = self.tabs.addTab(view, "New tab")
-        self.tabs.setCurrentIndex(index)
+        # Keep the tab bar and the page stack index-aligned: both append.
+        index = self.tab_stack.addWidget(view)
+        self.tab_bar.insertTab(index, "New tab")
+        self.tab_bar.setCurrentIndex(index)
+        self.tab_stack.setCurrentIndex(index)
 
         view.urlChanged.connect(lambda u, v=view: self._on_url_changed(v, u))
         view.titleChanged.connect(lambda t, v=view: self._on_title_changed(v, t))
         view.iconChanged.connect(
-            lambda icon, v=view: self.tabs.setTabIcon(
-                self.tabs.indexOf(v), icon))
+            lambda icon, v=view: self._on_icon_changed(v, icon))
         view.page().fullScreenRequested.connect(self._on_fullscreen)
         view.loadFinished.connect(
             lambda ok, v=view: self._maybe_offer_fill(v, ok))
@@ -890,16 +999,77 @@ class BrowserWindow(QMainWindow):
         return view
 
     def close_tab(self, index: int) -> None:
-        if self.tabs.count() == 1:
+        if self.tab_bar.count() == 1:
             self.close()
             return
-        view = self.tabs.widget(index)
-        self.tabs.removeTab(index)
-        view.deleteLater()
+        view = self.tab_stack.widget(index)
+        self.tab_bar.removeTab(index)
+        if view is not None:
+            self.tab_stack.removeWidget(view)
+            view.deleteLater()
+        self._schedule_session_save()
+
+    def _tab_context_menu(self, pos) -> None:
+        """Right-click on the tab bar: act on the tab under the cursor."""
+        index = self.tab_bar.tabAt(pos)
+        menu = QMenu(self)
+        menu.addAction("New tab", lambda: self.add_tab(QUrl(HOME_URL)))
+        if index >= 0:
+            menu.addSeparator()
+            menu.addAction("Close tab", lambda i=index: self.close_tab(i))
+            others = menu.addAction(
+                "Close other tabs", lambda i=index: self._close_other_tabs(i))
+            others.setEnabled(self.tab_bar.count() > 1)
+        menu.exec(self.tab_bar.mapToGlobal(pos))
+
+    def _close_other_tabs(self, keep_index: int) -> None:
+        # Close by widget identity so shifting indices can't close the wrong
+        # tab as the list shrinks.
+        keep = self.tab_stack.widget(keep_index)
+        for i in range(self.tab_bar.count() - 1, -1, -1):
+            if self.tab_stack.widget(i) is not keep:
+                self.close_tab(i)
+
+    def _on_tab_moved(self, frm: int, to: int) -> None:
+        """A dragged tab: reorder the page stack to match, keeping the two
+        index-aligned, then re-sync the current page."""
+        view = self.tab_stack.widget(frm)
+        if view is not None:
+            self.tab_stack.removeWidget(view)
+            self.tab_stack.insertWidget(to, view)
+        self.tab_stack.setCurrentIndex(self.tab_bar.currentIndex())
         self._schedule_session_save()
 
     def current_view(self) -> WebView:
-        return self.tabs.currentWidget()
+        return self.tab_stack.currentWidget()
+
+    def _open_bookmark(self, url: str) -> None:
+        self.add_tab(QUrl(url))
+
+    def _on_icon_changed(self, view: WebView, icon) -> None:
+        index = self.tab_stack.indexOf(view)
+        if index >= 0:
+            self.tab_bar.setTabIcon(index, icon)
+        # Capture the favicon for the bookmarks bar, but only for hosts the
+        # user has bookmarked — never a broader record of where you've been.
+        host = view.url().host().lower()
+        if host in self._bmk_hosts and self.favicons.put(host, icon):
+            self.bookmark_bar.refresh()
+
+    def _bookmarked_hosts(self) -> set[str]:
+        hosts = set()
+        for b in self.bookmarks.all():
+            host = QUrl(b.url).host().lower()
+            if host:
+                hosts.add(host)
+        return hosts
+
+    def _bookmarks_changed(self) -> None:
+        """Keep the bookmarks bar, the host set, and the favicon cache in step
+        after any add / remove / import."""
+        self._bmk_hosts = self._bookmarked_hosts()
+        self.favicons.prune(self._bmk_hosts)
+        self.bookmark_bar.refresh()
 
     def reload_page(self) -> None:
         """Reload the current tab, bypassing the HTTP cache.
@@ -969,6 +1139,31 @@ class BrowserWindow(QMainWindow):
                 "Reload a site (or sign in again) to capture its cookies.",
                 6000)
 
+    def _set_safe_browsing(self, on: bool) -> None:
+        self.safe_browsing.set_enabled(on)
+        self.statusBar().showMessage(
+            "Safe Browsing on — updating the list…" if on
+            else "Safe Browsing off.", 5000)
+
+    def show_safe_browsing_status(self) -> None:
+        sb = self.safe_browsing
+        when = sb.last_updated()
+        when_txt = when.strftime("%d %b %Y, %H:%M") if when else "not yet"
+        state = "on" if sb.enabled else "off"
+        plain_message(
+            self, QMessageBox.Icon.Information, "Safe Browsing",
+            f"Safe Browsing is {state}.\n\n"
+            f"Reported unsafe sites loaded: {sb.count():,}\n"
+            f"List last updated: {when_txt}\n\n"
+            "Sites are checked entirely on your device against public "
+            "phishing/malware lists — nothing about your browsing is ever "
+            "sent out. The only network activity is a periodic anonymous "
+            "download of the public lists.\n\n"
+            "Add your own hosts in ~/.vodou/safebrowsing_extra.txt, or set "
+            "custom list URLs in ~/.vodou/safebrowsing_sources.txt.",
+            QMessageBox.StandardButton.Ok, QMessageBox.StandardButton.Ok)
+        sb.refresh()
+
     # -- crash recovery ---------------------------------------------------
 
     def _offer_crash_restore(self) -> bool:
@@ -1001,10 +1196,10 @@ class BrowserWindow(QMainWindow):
             view = self.add_tab(None)
             view.pending_url = QUrl(u)
             # Label the unloaded tab with its host so it's recognizable.
-            self.tabs.setTabText(self.tabs.indexOf(view),
-                                 view.pending_url.host() or u)
-        self.tabs.setCurrentIndex(current)
-        self._load_pending(self.tabs.widget(current))
+            self.tab_bar.setTabText(self.tab_stack.indexOf(view),
+                                    view.pending_url.host() or u)
+        self.tab_bar.setCurrentIndex(current)
+        self._load_pending(self.tab_stack.widget(current))
         return True
 
     @staticmethod
@@ -1020,9 +1215,9 @@ class BrowserWindow(QMainWindow):
     def _write_session(self) -> None:
         urls: list[str] = []
         current = 0
-        cur = self.tabs.currentWidget()
-        for i in range(self.tabs.count()):
-            view = self.tabs.widget(i)
+        cur = self.tab_stack.currentWidget()
+        for i in range(self.tab_stack.count()):
+            view = self.tab_stack.widget(i)
             url = view.pending_url or view.url()
             text = url.toString()
             if (text and url.scheme() in ("http", "https", "file")
@@ -1035,7 +1230,10 @@ class BrowserWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         self.notify_bar.hide()
         self._schedule_session_save()
-        view = self.tabs.widget(index)
+        if index < 0:
+            return
+        self.tab_stack.setCurrentIndex(index)
+        view = self.tab_stack.widget(index)
         self._load_pending(view)
         if view is not None:
             # A tab parked on the deceptive-site interstitial reflects the
@@ -1173,9 +1371,10 @@ class BrowserWindow(QMainWindow):
         CertificateDialog(host, probe, self).exec()
 
     def _on_title_changed(self, view: WebView, title: str) -> None:
-        index = self.tabs.indexOf(view)
+        index = self.tab_stack.indexOf(view)
         short = title if len(title) <= 25 else title[:24] + "…"
-        self.tabs.setTabText(index, short or "New tab")
+        self.tab_bar.setTabText(index, short or "New tab")
+        self.tab_bar.setTabToolTip(index, title)
         if view is self.current_view():
             self.setWindowTitle(f"{title} — Vodou (private)")
 
@@ -1199,6 +1398,8 @@ class BrowserWindow(QMainWindow):
         self._icons = icon_set(p.text)
         self._star_off = self._icons["star"]
         self._star_on = make_icon("star-filled", p.accent)
+        # Generic mark for a bookmark with no captured favicon yet.
+        self._bookmark_fallback = make_icon("globe", p.muted)
         self._lock_icons = {
             "secure": make_icon("lock", p.ok),
             "insecure": make_icon("lock-open", p.danger),
@@ -1214,6 +1415,7 @@ class BrowserWindow(QMainWindow):
         state-dependent ones for the current page."""
         self._rebuild_icon_cache()
         self._apply_static_icons()
+        self.bookmark_bar.refresh()  # recolour the globe fallback
         view = self.current_view()
         if view is not None:
             self._update_star(view.url())
@@ -1234,7 +1436,12 @@ class BrowserWindow(QMainWindow):
                 "This page can't be bookmarked.", 3000)
             return
         now_marked = self.bookmarks.toggle(view.title() or url, url)
+        if now_marked:
+            # Grab the page's current favicon right away so the new bookmark
+            # isn't stuck on the generic globe until the next visit.
+            self.favicons.put(view.url().host().lower(), view.icon())
         self._update_star(view.url())
+        self._bookmarks_changed()
         self.statusBar().showMessage(
             "Bookmarked." if now_marked else "Bookmark removed.", 3000)
 
@@ -1263,6 +1470,7 @@ class BrowserWindow(QMainWindow):
         BookmarksManagerDialog(self.bookmarks, self, open_url=open_url).exec()
         # A rename/delete/add may change whether the current page is marked.
         self._update_star(self.current_view().url())
+        self._bookmarks_changed()
 
     # -- import -----------------------------------------------------------
 
@@ -1282,6 +1490,7 @@ class BrowserWindow(QMainWindow):
             return
         added = self.bookmarks.add_many(found)
         self._update_star(self.current_view().url())
+        self._bookmarks_changed()
         QMessageBox.information(
             self, "Bookmarks imported",
             f"Found {len(found)} bookmark(s) in the file.\n"
@@ -1563,8 +1772,8 @@ class BrowserWindow(QMainWindow):
         self.profile.clearAllVisitedLinks()
         # Clear each tab's in-memory back/forward navigation history so the
         # trail of pages you moved through this session is dropped too.
-        for i in range(self.tabs.count()):
-            view = self.tabs.widget(i)
+        for i in range(self.tab_stack.count()):
+            view = self.tab_stack.widget(i)
             if view is not None:
                 view.history().clear()
         self.statusBar().showMessage("History and memory cleared.", 6000)

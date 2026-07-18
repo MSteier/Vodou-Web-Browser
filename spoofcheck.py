@@ -332,8 +332,8 @@ def interstitial_html(verdict: SpoofVerdict, colors: dict) -> str:
   <div class="card">
     <div class="badge">&#9888;</div>
     <h1>{headline}</h1>
-    <p>{detail} Deceptive sites imitate real ones to steal passwords and
-       payment details.</p>
+    <p>{detail} Sites like this are used to steal passwords and payment
+       details or to deliver malware.</p>
     {compare}
     <div class="actions">
       <a class="btn safe" href="{BACK_URL}">Go back (safe)</a>

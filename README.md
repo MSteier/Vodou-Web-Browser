@@ -62,8 +62,9 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
-| No telemetry | Nothing about you or your browsing is ever sent anywhere. The only outbound calls of Vodou's own are the two anonymous version checks described in *About & updates* |
-| Deceptive-site protection | Every address you navigate to is checked **locally** — no Safe Browsing or reputation lookup, so nothing about your browsing leaves the machine — for look-alike (homograph), mixed-alphabet/punycode, and typosquatting imitations of well-known brands. A suspected spoof is blocked with a full-screen warning that shows the real vs. deceptive address and its un-fakeable punycode spelling. See *Deceptive-site protection* |
+| No telemetry | Nothing about you or your browsing is ever sent anywhere. Vodou's only outbound calls of its own are the two anonymous version checks (*About & updates*) and the anonymous periodic download of the public Safe Browsing lists (*Safe Browsing*) — public files fetched by IP, carrying no identifiers and no browsing data |
+| Deceptive-site protection | Every address you navigate to is checked **locally** for look-alike (homograph), mixed-alphabet/punycode, and typosquatting imitations of well-known brands. A suspected spoof is blocked with a full-screen warning that shows the real vs. deceptive address and its un-fakeable punycode spelling. See *Deceptive-site protection* |
+| Safe Browsing (local) | Navigations are checked **entirely on your device** against public phishing/malware **domain** lists — no per-URL lookup, so nothing about your browsing is ever sent out. A reported host is blocked with the same full-screen warning. See *Safe Browsing* |
 | Download manager | Every download is user-approved (no drive-by saves); executable/installer types (`.exe`, `.msi`, `.bat`, `.ps1`, `.dmg`, …) that can run code get a sterner, default-**No** warning. Approved downloads are tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
 | Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — this session's blocking counts, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute for the cookies: exit deliberately keeps the saved cookie jar, so this is the only control that destroys it (and the only way to drop cookies without losing your open tabs) |
 | Certificate viewer | A security pill **inside** the address bar (green closed padlock = verified HTTPS, red open padlock = unencrypted, muted info dot = internal page); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
@@ -161,6 +162,39 @@ The check only runs on an actual navigation: a bare word with no dot typed in
 the address bar is a search, as in any browser — but clicking a search result
 that leads to a look-alike domain is still caught.
 
+## Safe Browsing
+
+Where the deceptive-site check reasons about a name, Safe Browsing checks it
+against **public lists of already-reported phishing and malware domains** —
+and it does so **without the privacy cost that "safe browsing" usually
+carries.** The mainstream approach sends every URL you visit to a server for a
+verdict, which is a browsing log by another name. Vodou never does that:
+
+- **Checked entirely on your device.** The bad-domain lists are downloaded and
+  held in memory; each navigation is a local set-membership test. **No URL, no
+  hash, and no hash prefix ever leaves your machine.**
+- **The only network activity** is an anonymous, periodic download of the
+  public lists (on startup and every 12 hours), fetched by IP like any public
+  file — the same kind of request as the version check, carrying nothing about
+  your browsing. The merged list is cached at `~/.vodou/safebrowsing.dat` so
+  protection is live at startup, and a failed refresh keeps the cache rather
+  than dropping cover.
+- A reported host is **blocked before it loads** with the same full-screen
+  warning as the deceptive-site check; **Continue anyway** trusts it for the
+  session only.
+
+Honest limits, stated plainly: this is **domain-level, not per-URL** (a bad
+path on an otherwise-fine host isn't caught), and it's **periodically
+refreshed**, so a brand-new phishing domain can slip the window until the next
+update. It layers with the deceptive-site detection, which needs no list.
+
+- **☰ menu → Settings → Safe Browsing** toggles it (on by default);
+  **Safe Browsing status…** shows the host count and last update.
+- Default sources are no-API-key public feeds (abuse.ch URLhaus for malware,
+  the Phishing.Database ACTIVE list for phishing). Point it elsewhere by
+  listing URLs in `~/.vodou/safebrowsing_sources.txt`, or add your own hosts
+  in `~/.vodou/safebrowsing_extra.txt`.
+
 ## Cookie exceptions
 
 Memory-only cookies are the right default, but they also forget the logins
@@ -251,6 +285,15 @@ Bookmarks are the one thing kept between sessions — saved as plain JSON at
 
 - **☆ / Ctrl+D** — bookmark (or un-bookmark) the current page; the star fills
   in when a page is saved.
+- **Bookmarks bar** — a strip under the address bar listing your bookmarks,
+  kept in **alphabetical order automatically**, with a `»` overflow menu when
+  there are more than fit. Clicking one opens it in a **new tab**. It hides
+  itself when you have no bookmarks.
+  - **Favicons** on the bar are captured from pages **as you browse** and at
+    the moment you bookmark — never fetched from a third-party favicon service
+    (which would leak your bookmark list). They're cached only for hosts you
+    have bookmarked (under `~/.vodou/favicons/`) and pruned when a bookmark is
+    removed; a bookmark with no captured icon yet shows a generic globe.
 - **▤ toolbar dropdown** and the **☰ menu → Bookmarks** submenu both list your
   bookmarks and rebuild each time they open.
 - **Manage bookmarks…** — a full manager to add, edit (rename / change URL),
@@ -288,6 +331,11 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
 
 ## Appearance
 
+- **Window layout**, top to bottom: the **tab bar** (with a **+** button just
+  to the right of the last tab), then the **address bar**, then the
+  **bookmarks bar**, then the page. Tabs can be dragged to reorder, and
+  **right-clicking a tab** offers *New tab*, *Close tab* (the one you clicked),
+  and *Close other tabs*.
 - **☰ menu → Appearance** — five built-in themes (*Vodou Violet*, *Blood
   Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*) plus a **dark / light**
   toggle. Each theme tints the whole chrome, so the switch is unmistakable.

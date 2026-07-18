@@ -200,6 +200,15 @@ def _lock_body(p: QPainter, c: QColor, open_: bool) -> None:
     p.drawEllipse(QPointF(12, 15), 1.2, 1.2)
 
 
+def _globe(p: QPainter, c: QColor) -> None:
+    # Fallback "site" mark for a bookmark with no captured favicon.
+    p.setPen(_pen(c, 1.5))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawEllipse(QRectF(4, 4, 16, 16))
+    p.drawLine(QPointF(4, 12), QPointF(20, 12))   # equator
+    p.drawEllipse(QRectF(9, 4, 6, 16))            # meridian
+
+
 def _info(p: QPainter, c: QColor) -> None:
     p.setPen(_pen(c, 1.8))
     p.setBrush(Qt.BrushStyle.NoBrush)
@@ -224,6 +233,7 @@ _GLYPHS = {
     "vault": _vault,
     "lock": _lock,
     "lock-open": _lock_open,
+    "globe": _globe,
     "info": _info,
 }
 
