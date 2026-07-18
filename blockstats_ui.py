@@ -21,7 +21,7 @@ Chart design notes (deliberate, not incidental):
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import datetime
 
 from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
@@ -36,16 +36,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from blockstats import RETENTION_DAYS, BlockStats
+from blockstats import PERIODS, BlockStats
 from theme import build_palette, load_prefs
-
-# The filter row's periods. Nothing longer than the retention window, or the
-# report would quietly show a partial picture as if it were whole.
-PERIODS: tuple[tuple[str, int], ...] = (
-    ("Last 7 days", 7),
-    ("Last 30 days", 30),
-    (f"Last {RETENTION_DAYS} days", RETENTION_DAYS),
-)
 
 BAR_MAX_W = 24     # never fill the band; the leftover is air
 BAR_GAP = 2        # surface gap between touching columns
@@ -86,19 +78,38 @@ def _bar_path(rect: QRectF) -> QPainterPath:
 
 
 class DayColumns(QWidget):
-    """Blocked-per-day columns for the selected period."""
+    """Blocked-per-bucket columns (minute, hour, or day) for the period."""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self._points: list[tuple[date, int]] = []
+        self._points: list[tuple[datetime, int]] = []
+        self._bucket = "day"
         self._pal = build_palette(*load_prefs())
         self.setMinimumHeight(230)
         self.setMouseTracking(True)  # hover figures without clicking
 
-    def set_data(self, points: list[tuple[date, int]]) -> None:
+    def set_data(self, points: list[tuple[datetime, int]],
+                 bucket: str) -> None:
         self._points = points
+        self._bucket = bucket
         self._pal = build_palette(*load_prefs())
         self.update()
+
+    def _hover_text(self, when: datetime, n: int) -> str:
+        if self._bucket == "minute":
+            stamp = when.strftime("%H:%M")
+        elif self._bucket == "hour":
+            stamp = when.strftime("%a %H:00")
+        else:
+            stamp = when.strftime("%a %d %b %Y")
+        return f"{stamp}\n{n:,} blocked"
+
+    def _axis_fmt(self) -> str:
+        if self._bucket == "minute":
+            return "%H:%M"
+        if self._bucket == "hour":
+            return "%H:00"
+        return "%a" if len(self._points) <= 7 else "%d %b"
 
     # -- geometry shared by painting and hit-testing ---------------------
 
@@ -121,8 +132,8 @@ class DayColumns(QWidget):
         if i is None:
             self.setToolTip("")
         else:
-            day, n = self._points[i]
-            self.setToolTip(f"{day:%a %d %b %Y}\n{n:,} blocked")
+            when, n = self._points[i]
+            self.setToolTip(self._hover_text(when, n))
         super().mouseMoveEvent(event)
 
     # -- painting --------------------------------------------------------
@@ -183,19 +194,19 @@ class DayColumns(QWidget):
                            plot.bottom() - height - 16, tw + 12, 14),
                     int(Qt.AlignmentFlag.AlignCenter), text)
 
-        self._paint_day_labels(painter, plot, band, metrics)
+        self._paint_axis_labels(painter, plot, band, metrics)
 
-    def _paint_day_labels(self, painter, plot, band, metrics) -> None:
+    def _paint_axis_labels(self, painter, plot, band, metrics) -> None:
         """Sparse x labels — enough to orient, never enough to collide."""
         p = self._pal
         n = len(self._points)
-        fmt = "%a" if n <= 7 else "%d %b"
-        # Keep ~6 labels regardless of period, and always show the last day.
+        fmt = self._axis_fmt()
+        # Keep ~6 labels regardless of period, and always show the last bucket.
         step = max(1, round(n / 6))
         painter.setPen(QColor(p.muted))
         for i in range(n - 1, -1, -step):
-            day = self._points[i][0]
-            text = day.strftime(fmt)
+            when = self._points[i][0]
+            text = when.strftime(fmt)
             tw = metrics.horizontalAdvance(text)
             x = plot.left() + i * band + band / 2
             if x - tw / 2 < plot.left() - 4:
@@ -297,9 +308,9 @@ class BlockingReportWindow(QDialog):
         # One filter row above everything it scopes.
         filters = QHBoxLayout()
         self.period = QComboBox()
-        for label, days in PERIODS:
-            self.period.addItem(label, days)
-        self.period.setCurrentIndex(1)  # 30 days
+        for period in PERIODS:
+            self.period.addItem(period.label, period)
+        self.period.setCurrentIndex(1)  # Past 24 hours
         self.period.currentIndexChanged.connect(self.refresh)
         filters.addWidget(QLabel("Period:"))
         filters.addWidget(self.period)
@@ -350,28 +361,35 @@ class BlockingReportWindow(QDialog):
         self.refresh()
 
     def refresh(self) -> None:
-        days = self.period.currentData()
-        total = self.stats.total(days)
+        period = self.period.currentData()
+        total = self.stats.total(period)
         self.hero.setText(f"{total:,}")
-        average = round(total / days) if days else 0
-        parts = [f"trackers and ads blocked in the last {days} days",
-                 f"about {average:,} per day"]
-        busiest = self.stats.busiest_day(days)
+        average = round(total / period.count) if period.count else 0
+        parts = [f"trackers and ads blocked in the {period.label.lower()}",
+                 f"about {average:,} per {period.unit}"]
+        busiest = self.stats.busiest(period)
         if busiest:
-            # %-d is a POSIX-ism and raises on Windows — keep the zero.
-            parts.append(f"busiest {busiest[0]:%d %b} ({busiest[1]:,})")
+            parts.append(
+                f"busiest {self._busiest_label(busiest[0], period)} "
+                f"({busiest[1]:,})")
         self.hero_sub.setText(" · ".join(parts))
 
-        self.columns.set_data(self.stats.totals_by_day(days))
-        self.top.set_data(self.stats.top_hosts(days))
+        self.chart_title.setText(f"Requests blocked per {period.unit}")
+        self.columns.set_data(self.stats.series(period), period.bucket)
+        self.top.set_data(self.stats.top_hosts(period))
+        self.footnote.setText(self._footnote(period))
 
-        since = self.stats.tracked_since()
-        note = (f"Counts are kept per day for {RETENTION_DAYS} days, "
-                "encrypted on disk, and never include the pages you "
-                "visited. Clearing browsing data erases them.")
-        if since:
-            note = f"Recording since {since:%d %b %Y}. " + note
-        self.footnote.setText(note)
+    @staticmethod
+    def _busiest_label(when: datetime, period) -> str:
+        if period.bucket == "minute":
+            return when.strftime("%H:%M")
+        return when.strftime("%a %H:00")
+
+    def _footnote(self, period) -> str:
+        return ("Blocking counts are kept in memory for this session only and "
+                "are never written to disk — they go when Vodou closes, like "
+                "cookies and history, and never include the pages you "
+                "visited. Clearing browsing data drops them immediately.")
 
     def _reset(self) -> None:
         box = QMessageBox(self)

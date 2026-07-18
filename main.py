@@ -956,7 +956,7 @@ class BrowserWindow(QMainWindow):
             self._vault_dialog.close()
         if self._report_window is not None:
             self._report_window.close()
-        self.block_stats.flush()  # don't lose the last few blocks
+        # Blocking stats are in-memory only; they simply go with the process.
         super().closeEvent(event)
 
     def manage_cookie_sites(self) -> None:
@@ -1543,9 +1543,10 @@ class BrowserWindow(QMainWindow):
         each open tab's back/forward navigation memory.
 
         Not redundant with quitting, despite the memory-only session: exit
-        deliberately *keeps* the saved cookie jar and the blocking history
-        (closeEvent flushes both), so this is the only control that destroys
-        them — and the only way to drop cookies without losing open tabs.
+        deliberately *keeps* the saved cookie jar for allowlisted sites, so
+        this is the only control that destroys it — and the only way to drop
+        cookies without losing open tabs. (Blocking stats are in-memory only
+        now, so they also go on exit; clearing just drops them sooner.)
 
         The engine clears its on-disk cache with ordinary deletion here (it
         holds the files open, so they can't be overwritten mid-session);
@@ -1567,9 +1568,9 @@ class BrowserWindow(QMainWindow):
             if view is not None:
                 view.history().clear()
         self.statusBar().showMessage("History and memory cleared.", 6000)
-        # This summary must name the *persistent* stores too. Quitting keeps
-        # them (closeEvent flushes both), so this is the only control that
-        # destroys them — saying "nothing was written to disk" here, as an
+        # This summary must name the *persistent* cookie jar too. Quitting
+        # keeps it (closeEvent flushes it), so this is the only control that
+        # destroys it — saying "nothing was written to disk" here, as an
         # earlier version did, would be a lie about data the user may be
         # relying on.
         QMessageBox.information(
@@ -1582,7 +1583,7 @@ class BrowserWindow(QMainWindow):
             "  •  Saved cookies for your allowlisted sites — those sites "
             "are signed out too, though the exceptions list itself is "
             "kept\n"
-            "  •  Recorded blocking statistics\n\n"
+            "  •  Blocking statistics (this session's counts)\n\n"
             "The disk cache is securely shredded when Vodou closes.")
 
     # -- privacy status -------------------------------------------------

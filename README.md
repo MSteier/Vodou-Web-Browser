@@ -65,7 +65,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. The only outbound calls of Vodou's own are the two anonymous version checks described in *About & updates* |
 | Deceptive-site protection | Every address you navigate to is checked **locally** — no Safe Browsing or reputation lookup, so nothing about your browsing leaves the machine — for look-alike (homograph), mixed-alphabet/punycode, and typosquatting imitations of well-known brands. A suspected spoof is blocked with a full-screen warning that shows the real vs. deceptive address and its un-fakeable punycode spelling. See *Deceptive-site protection* |
 | Download manager | Every download is user-approved (no drive-by saves); executable/installer types (`.exe`, `.msi`, `.bat`, `.ps1`, `.dmg`, …) that can run code get a sterner, default-**No** warning. Approved downloads are tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
-| Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — the recorded blocking statistics, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute: exit deliberately keeps the cookie jar and the blocking history, so this is the only control that destroys them (and the only way to drop cookies without losing your open tabs) |
+| Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — this session's blocking counts, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute for the cookies: exit deliberately keeps the saved cookie jar, so this is the only control that destroys it (and the only way to drop cookies without losing your open tabs) |
 | Certificate viewer | A security pill **inside** the address bar (green closed padlock = verified HTTPS, red open padlock = unencrypted, muted info dot = internal page); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
 Extend the blocklist by adding domains (one per line) to
@@ -109,21 +109,23 @@ covers the whole folder at exit.
 
 **☰ menu → Blocking report…** opens a native window (not a page) charting
 what the blocker actually did: a headline total for the period, a column
-chart of requests blocked per day, and a ranked list of the trackers that
-came up most. A period selector — 7, 30, or 90 days — scopes the whole
-window, figures stay live while it's open, and hovering any column gives
-that day's exact figure. It follows the active theme in dark and light.
+chart of requests blocked, and a ranked list of the trackers that came up
+most. The period selector picks the window *and* its bar size — **Past
+hour** (per-minute) or **Past 24 hours** (per-hour) — figures stay live while
+it's open, and hovering any column gives its exact figure. It follows the
+active theme in dark and light.
 
-The counts are aggregated history, so they are treated as browsing data:
+Because which trackers you meet implies where you were, the counts are
+treated as browsing data — and kept the same way as your history:
 
-- **Aggregates only.** Per day, per blocked host, a count. No URLs, no
-  times beyond the date, no record of which site you were on, no ordering.
-- **Encrypted at rest** with Windows DPAPI, like the cookie jar — and with
-  the same honest limit (software running as you can read it). Plaintext on
-  non-Windows platforms.
-- **Capped at 90 days**; older days are pruned automatically.
-- **Ctrl+Shift+Del erases them** along with the rest of your history, and
-  the window has its own *Reset statistics…* button.
+- **In memory only.** Nothing about what was blocked is ever written to
+  disk. The counts live in RAM and die with the process, exactly like
+  cookies and history — so there is no persisted record of when you browse.
+- **Bounded to the session**, per blocked host, per minute. No URLs, no
+  record of which site you were on, no ordering. That 24-hour in-memory
+  buffer is why the longest period the report offers is the past 24 hours.
+- **Ctrl+Shift+Del drops them immediately**, and the window has its own
+  *Reset statistics…* button; otherwise they simply go when Vodou closes.
 
 ## Deceptive-site protection
 
