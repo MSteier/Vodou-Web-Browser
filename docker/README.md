@@ -63,6 +63,34 @@ and uncomment the `deploy:` block on the `ollama` service in
 `docker compose up -d`) and keep using your native Ollama on `:11434` — Vodou
 can't tell the difference. Running both would collide on port 11434.
 
+## Using your own nginx (instead of Caddy)
+
+Caddy is included so this works out of the box. If you'd rather terminate TLS
+with your **own nginx** (or any other reverse proxy), you must **remove — or
+comment out — the `caddy` service in `docker-compose.yml` before running
+`docker compose up`.** Do not run both.
+
+If both start, they fight over port 443 and each presents a *different*
+certificate for `localhost` (nginx's cert vs. Caddy's internal-CA cert), which
+shows up as a port collision and/or a certificate error. Use exactly one TLS
+terminator.
+
+With Caddy removed, expose the SearXNG container to your nginx (e.g. publish it
+on the host by adding `ports: ["127.0.0.1:8081:8080"]` to the `searxng`
+service), then have nginx proxy the sub-path — matching `SEARXNG_BASE_URL`:
+
+```nginx
+location /searxng/ {
+    proxy_pass         http://127.0.0.1:8081/;   # trailing slash strips /searxng
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Forwarded-Proto https;
+    proxy_set_header   X-Forwarded-For   $remote_addr;
+}
+```
+
+Vodou still opens `https://localhost/searxng` and trusts the localhost
+certificate either way.
+
 ## Notes & gotchas
 
 - **Port 443/80 must be free.** Caddy binds them for `https://localhost`. If

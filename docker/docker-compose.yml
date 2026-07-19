@@ -54,6 +54,10 @@ services:
       driver: "json-file"
       options: { max-size: "1m", max-file: "1" }
 
+  # TLS terminator. If you use your OWN nginx (or another reverse proxy) for
+  # SSL, REMOVE or comment out this whole service before `docker compose up` —
+  # running both fights over port 443 and causes a certificate clash. See
+  # "Using your own nginx (instead of Caddy)" in README.md.
   caddy:
     container_name: vodou-caddy
     image: docker.io/library/caddy:2-alpine
