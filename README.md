@@ -5,6 +5,17 @@
 A privacy-centric web browser with a built-in encrypted password manager.
 Python + PyQt6 on Qt WebEngine (the Chromium engine).
 
+## Screenshots
+
+| Home & private search | Browsing with full chrome |
+| --- | --- |
+| ![Vodou's home page with local SearXNG search](docs/vodou-home.png) | ![Vodou browsing a live page](docs/vodou-browsing.png) |
+
+Tabs above the address bar, a security pill **inside** the address bar (green
+padlock = verified HTTPS), an alphabetical bookmarks bar with favicons, the ✦
+on-device AI-summary button, and a live tracker-blocking counter + version tag
+in the footer.
+
 ## Installation
 
 **Requirements**
