@@ -1,0 +1,32 @@
+# TLS reverse proxy for Vodou's search backend.
+#
+# Serves https://localhost/searxng/ with a certificate from Caddy's own
+# internal CA. Vodou trusts localhost certificates (CERT_EXEMPT_HOSTS), so
+# nothing needs to be installed in a system trust store.
+#
+# Requests are stripped of the /searxng prefix and forwarded to the SearXNG
+# container, which generates its own links under /searxng/ via
+# SEARXNG_BASE_URL — the standard sub-path deployment.
+{
+	# Local-only; no automatic public ACME/Let's Encrypt.
+	auto_https disable_redirects
+}
+
+{$SEARXNG_HOSTNAME:localhost} {
+	tls internal
+
+	# Bare paths -> the search UI under /searxng/
+	redir /searxng /searxng/ 308
+	redir / /searxng/ 308
+
+	handle_path /searxng/* {
+		reverse_proxy searxng:8080 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+}
+
+# Plain HTTP -> HTTPS
+http://{$SEARXNG_HOSTNAME:localhost} {
+	redir https://{host}{uri} 308
+}

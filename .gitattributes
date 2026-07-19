@@ -1,0 +1,9 @@
+# Files that run inside Linux containers or as POSIX shell scripts must keep
+# LF line endings, or a CRLF checkout on Windows breaks them (a `\r` in the
+# shebang line, YAML, or Caddyfile).
+*.sh            text eol=lf
+setup.sh        text eol=lf
+Caddyfile       text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+docker/**       text eol=lf

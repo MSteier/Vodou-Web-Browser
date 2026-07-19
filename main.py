@@ -207,7 +207,24 @@ def migrate_config_dir(old: Path = LEGACY_VAULT_DIR,
         return True
     return False
 
-HOME_URL = "https://localhost/searxng"
+def _searxng_base() -> str:
+    """Where Vodou's search lives. Defaults to the bundled Docker stack
+    (https://localhost/searxng); override with the VODOU_SEARXNG_URL
+    environment variable or ~/.vodou/config.json {"searxng_url": "..."} to
+    point at your own SearXNG. See docker/README.md."""
+    url = os.environ.get("VODOU_SEARXNG_URL", "").strip()
+    if not url:
+        try:
+            data = json.loads(
+                (Path.home() / ".vodou" / "config.json").read_text("utf-8"))
+            url = str(data.get("searxng_url", "")).strip()
+        except (OSError, ValueError, TypeError):
+            url = ""
+    return (url or "https://localhost/searxng").rstrip("/")
+
+
+SEARXNG_BASE = _searxng_base()
+HOME_URL = SEARXNG_BASE
 
 # On-disk half of the hybrid profile: capped HTTP cache + site storage.
 # Created by the engine at startup, shredded on every exit and at the next
@@ -217,7 +234,7 @@ PROFILE_DIR = Path.home() / ".vodou" / "profile"
 # Chrome's zoom ladder; the engine accepts factors from 0.25 to 5.0.
 ZOOM_LEVELS = (0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0,
                1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0)
-SEARCH_URL = "https://localhost/searxng/search?q={}"
+SEARCH_URL = SEARXNG_BASE + "/search?q={}"
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
 # SearXNG instance). Certificate errors anywhere else are still fatal.

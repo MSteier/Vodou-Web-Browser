@@ -1,0 +1,125 @@
+# Vodou's backend services, reproducibly. This stands up everything Vodou
+# talks to on your machine, so the browser works the same on any host:
+#
+#   * searxng  — the private metasearch engine Vodou uses for search
+#   * redis    — valkey, SearXNG's cache/limiter backend
+#   * caddy    — a TLS reverse proxy that serves https://localhost/searxng
+#                (self-signed via Caddy's internal CA; Vodou already trusts
+#                 localhost certificates, so no cert install is needed)
+#   * ollama   — local LLM server for the optional AI search summaries
+#                (only started with the "ai" profile — see below)
+#
+# Quick start:
+#   1. cp .env.example .env         (once)
+#   2. ./setup.sh   (or ./setup.ps1 on Windows)   — generates a secret key
+#   3. docker compose up -d                        — search only
+#      docker compose --profile ai up -d           — search + AI summaries
+#
+# Then run Vodou (see ../README.md). It defaults to https://localhost/searxng
+# and http://127.0.0.1:11434, which is exactly what this stack serves.
+
+services:
+  redis:
+    container_name: vodou-redis
+    image: docker.io/valkey/valkey:8-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: unless-stopped
+    networks: [vodou]
+    volumes:
+      - valkey-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [SETGID, SETUID, DAC_OVERRIDE]
+    logging:
+      driver: "json-file"
+      options: { max-size: "1m", max-file: "1" }
+
+  searxng:
+    container_name: vodou-searxng
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    depends_on: [redis]
+    networks: [vodou]
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=https://${SEARXNG_HOSTNAME:-localhost}/searxng/
+      - GRANIAN_WORKERS=${SEARXNG_WORKERS:-2}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
+    logging:
+      driver: "json-file"
+      options: { max-size: "1m", max-file: "1" }
+
+  caddy:
+    container_name: vodou-caddy
+    image: docker.io/library/caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [searxng]
+    networks: [vodou]
+    ports:
+      - "443:443"      # https://localhost/searxng  (what Vodou opens)
+      - "80:80"        # redirects to https
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data:rw
+      - caddy-config:/config:rw
+    environment:
+      - SEARXNG_HOSTNAME=${SEARXNG_HOSTNAME:-localhost}
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    logging:
+      driver: "json-file"
+      options: { max-size: "1m", max-file: "1" }
+
+  # --- Optional: local LLM for AI search summaries -----------------------
+  # Started only with:  docker compose --profile ai up -d
+  ollama:
+    container_name: vodou-ollama
+    image: docker.io/ollama/ollama:latest
+    profiles: ["ai"]
+    restart: unless-stopped
+    networks: [vodou]
+    ports:
+      - "11434:11434"   # http://127.0.0.1:11434  (Vodou's AI endpoint)
+    volumes:
+      - ollama-data:/root/.ollama
+    logging:
+      driver: "json-file"
+      options: { max-size: "1m", max-file: "1" }
+    # GPU acceleration (NVIDIA): install the nvidia-container-toolkit on the
+    # host, then uncomment. Without this Ollama runs on CPU (slower but works).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # One-shot: pulls the default summary model into the ollama volume, then
+  # exits. Runs only under the "ai" profile alongside the ollama service.
+  ollama-init:
+    container_name: vodou-ollama-init
+    image: docker.io/ollama/ollama:latest
+    profiles: ["ai"]
+    depends_on: [ollama]
+    networks: [vodou]
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'sleep 4; echo "Pulling ${OLLAMA_MODEL:-llama3.2} (first run only)…"; ollama pull ${OLLAMA_MODEL:-llama3.2}'
+    restart: "no"
+
+networks:
+  vodou:
+
+volumes:
+  valkey-data:
+  caddy-data:
+  caddy-config:
+  ollama-data:

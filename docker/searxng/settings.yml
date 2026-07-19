@@ -1,0 +1,37 @@
+# SearXNG settings for the Vodou backend bundle. Mirrors the tuning Vodou is
+# developed against. secret_key is a placeholder — run setup.sh / setup.ps1
+# to fill it with a unique random value before first start.
+
+use_default_settings:
+  engines:
+    # Tor/onion engines fail without a Tor proxy and spam errors at startup.
+    remove:
+      - ahmia
+      - torch
+
+server:
+  # base_url comes from the SEARXNG_BASE_URL environment variable (compose).
+  secret_key: "__REPLACE_WITH_RANDOM_SECRET__"
+  limiter: false        # no rate limiting for local, single-user queries
+  image_proxy: true
+
+ui:
+  default_theme: simple
+  theme_args:
+    simple_style: black
+  static_use_hash: true
+
+search:
+  formats:
+    - html
+    - json            # Vodou reads results from the page, but JSON is handy
+
+valkey:
+  url: valkey://redis:6379/0
+
+outgoing:
+  request_timeout: 2.0      # drop slow engines so results return quickly
+  max_request_timeout: 5.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true

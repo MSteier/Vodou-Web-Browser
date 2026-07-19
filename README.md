@@ -43,10 +43,26 @@ python main.py
 > `python -m pip install pip-system-certs` once, then retry — it teaches pip to
 > trust your system certificate store.
 
-**Optional — private search:** the home page and default search point at a local
+**Optional — private search & local AI (one command):** the home page and
+default search point at a local
 [SearXNG](https://github.com/searxng/searxng) instance
-(`https://localhost/searxng`). Vodou works fine without it (just type full URLs),
-but running SearXNG locally keeps your searches off third-party engines.
+(`https://localhost/searxng`), and the AI summaries use a local
+[Ollama](https://ollama.com). Vodou works fine without either (just type full
+URLs), but the [`docker/`](docker/) bundle stands up the whole backend
+reproducibly so it works the same on any machine:
+
+```bash
+cd docker
+cp .env.example .env
+./setup.sh                        # Windows: ./setup.ps1  — makes a secret key
+docker compose up -d              # search only
+# ...or search + local AI summaries (also pulls the default model):
+docker compose --profile ai up -d
+```
+
+See [`docker/README.md`](docker/README.md) for details (GPU, custom models,
+port conflicts). To point Vodou at a search instance elsewhere, set
+`VODOU_SEARXNG_URL` or `~/.vodou/config.json` `{"searxng_url": "…"}`.
 
 **Optional — desktop shortcut / icon:** the repo ships `vodou.ico` for creating a
 desktop or Start-menu shortcut that points at `python main.py`.
