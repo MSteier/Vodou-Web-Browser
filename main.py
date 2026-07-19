@@ -123,6 +123,7 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QTabBar,
+    QTextBrowser,
     QToolBar,
     QToolButton,
     QVBoxLayout,
@@ -149,6 +150,14 @@ from privacy import (
     PrivacyInterceptor,
     apply_ua_quirk,
     ua_quirk_needed,
+)
+from ai_search import (
+    OllamaSummarizer,
+    is_search_results,
+    load_config as load_ai_config,
+    query_from_url,
+    results_script,
+    save_config as save_ai_config,
 )
 from safebrowsing import SafeBrowsing
 from session import clear_snapshot, load_snapshot, save_snapshot
@@ -614,6 +623,18 @@ class BrowserWindow(QMainWindow):
                 f"Safe Browsing: {n:,} reported unsafe sites loaded.", 5000))
         QTimer.singleShot(12000, self.safe_browsing.start)
 
+        # On-demand AI summaries of search results via a local Ollama instance
+        # (see ai_search.py). Entirely on-device; Vodou is only an HTTP client
+        # of Ollama and never alters its models or config. Built lazily.
+        self.ai_cfg = load_ai_config()
+        self.ai_summarizer = OllamaSummarizer(self)
+        self.ai_summarizer.chunk.connect(self._on_ai_chunk)
+        self.ai_summarizer.thinking.connect(self._on_ai_thinking)
+        self.ai_summarizer.finished.connect(self._on_ai_finished)
+        self.ai_summarizer.failed.connect(self._on_ai_failed)
+        self._ai_panel = None
+        self._ai_last: tuple[str, list] | None = None
+
         # Credential capture: random per-session token so pages can't forge
         # capture messages; script runs in the isolated ApplicationWorld.
         self.capture_prefix = f"__vodou_{secrets.token_urlsafe(16)}__:"
@@ -822,6 +843,18 @@ class BrowserWindow(QMainWindow):
         self._lock_state = "neutral"
         toolbar.addWidget(self.url_bar)
 
+        # AI-summary button: accent-coloured sparkle, sits just right of the
+        # address bar (before the bookmark star). Icon set directly rather than
+        # through the theme-text set so it keeps the accent colour; a theme
+        # switch repaints it in _refresh_chrome_icons.
+        self.ai_action = QAction(self)
+        self.ai_action.setIcon(self._ai_icon)
+        self.ai_action.setToolTip(
+            "Summarize these search results with local AI (Ollama) — "
+            "on-device, nothing sent out")
+        self.ai_action.triggered.connect(self.summarize_search)
+        toolbar.addAction(self.ai_action)
+
         self.star_button = QToolButton()
         self.star_button.setObjectName("starButton")
         self.star_button.setIcon(self._star_off)
@@ -886,6 +919,16 @@ class BrowserWindow(QMainWindow):
         self.safe_browsing_action.toggled.connect(self._set_safe_browsing)
         settings_menu.addAction("Safe Browsing status…",
                                 self.show_safe_browsing_status)
+        self.ai_search_action = settings_menu.addAction(
+            "AI search summaries (Ollama)")
+        self.ai_search_action.setCheckable(True)
+        self.ai_search_action.setChecked(bool(self.ai_cfg.get("enabled")))
+        self.ai_search_action.setToolTip(
+            "Show a 'Summarize' button on search results that summarizes them "
+            "with your local Ollama model. Runs entirely on your device; "
+            "nothing about your search is ever sent out.")
+        self.ai_search_action.toggled.connect(self._set_ai_search)
+        settings_menu.addAction("AI summary options…", self.show_ai_options)
         menu.addSeparator()
         report = menu.addAction("Blocking report…", self.show_blocking_report)
         report.setToolTip(
@@ -1116,6 +1159,7 @@ class BrowserWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         clear_copied_secrets()  # no passwords left on the clipboard
+        self.ai_summarizer.cancel()  # drop any in-flight Ollama request
         self._session_timer.stop()
         clear_snapshot()  # clean exit — a leftover file means "crashed"
         self.cookie_keeper.flush()  # capture last cookie updates in the jar
@@ -1398,6 +1442,9 @@ class BrowserWindow(QMainWindow):
         self._icons = icon_set(p.text)
         self._star_off = self._icons["star"]
         self._star_on = make_icon("star-filled", p.accent)
+        # AI-summary sparkle: painted in the accent colour so it stands out
+        # from the monochrome navigation icons.
+        self._ai_icon = make_icon("sparkle", p.accent)
         # Generic mark for a bookmark with no captured favicon yet.
         self._bookmark_fallback = make_icon("globe", p.muted)
         self._lock_icons = {
@@ -1415,6 +1462,7 @@ class BrowserWindow(QMainWindow):
         state-dependent ones for the current page."""
         self._rebuild_icon_cache()
         self._apply_static_icons()
+        self.ai_action.setIcon(self._ai_icon)  # accent-coloured, set directly
         self.bookmark_bar.refresh()  # recolour the globe fallback
         view = self.current_view()
         if view is not None:
@@ -1746,6 +1794,197 @@ class BrowserWindow(QMainWindow):
         self._devtools_panel.hide()
         self._devtools_open = False
         self._devtools_esc.setEnabled(False)
+
+    # -- AI search summaries (local Ollama) --------------------------------
+
+    def _ensure_ai_panel(self) -> None:
+        """Build the docked summary panel once, lazily (mirrors DevTools)."""
+        if self._ai_panel is not None:
+            return
+        header = QWidget()
+        header.setObjectName("aiHeader")
+        header.setFixedHeight(32)
+        hb = QHBoxLayout(header)
+        hb.setContentsMargins(12, 0, 6, 0)
+        hb.setSpacing(6)
+        title = QLabel("AI SUMMARY")
+        title.setObjectName("aiTitle")
+        self._ai_model_label = QLabel(str(self.ai_cfg.get("model", "")))
+        self._ai_model_label.setObjectName("aiModel")
+        close_btn = QToolButton()
+        close_btn.setObjectName("aiClose")
+        close_btn.setText("✕")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setToolTip("Close the summary panel")
+        close_btn.clicked.connect(self._close_ai_panel)
+        hb.addWidget(title)
+        hb.addWidget(self._ai_model_label)
+        hb.addStretch()
+        hb.addWidget(close_btn)
+
+        self._ai_status = QLabel("")
+        self._ai_status.setObjectName("aiStatus")
+        self._ai_status.setWordWrap(True)
+
+        self._ai_text = QTextBrowser()
+        self._ai_text.setObjectName("aiSummary")
+        self._ai_text.setOpenExternalLinks(False)
+        # Clicking a citation link opens it in a new tab rather than trying to
+        # load inside the read-only summary view.
+        self._ai_text.setOpenLinks(False)
+        self._ai_text.anchorClicked.connect(
+            lambda u: self.add_tab(QUrl(u)))
+
+        bar = QHBoxLayout()
+        bar.setContentsMargins(10, 4, 10, 8)
+        bar.setSpacing(6)
+        self._ai_regen = QPushButton("Regenerate")
+        self._ai_regen.clicked.connect(self.summarize_search)
+        self._ai_stop = QPushButton("Stop")
+        self._ai_stop.clicked.connect(self._stop_ai)
+        self._ai_stop.setEnabled(False)
+        bar.addWidget(self._ai_regen)
+        bar.addWidget(self._ai_stop)
+        bar.addStretch()
+
+        self._ai_panel = QWidget()
+        self._ai_panel.setObjectName("aiPanel")
+        pv = QVBoxLayout(self._ai_panel)
+        pv.setContentsMargins(0, 0, 0, 0)
+        pv.setSpacing(0)
+        pv.addWidget(header)
+        pv.addWidget(self._ai_status)
+        pv.addWidget(self._ai_text, 1)
+        pv.addLayout(bar)
+        self._split.addWidget(self._ai_panel)
+        self._ai_panel.hide()
+
+    def _show_ai_panel(self) -> None:
+        self._ensure_ai_panel()
+        self._ai_model_label.setText(str(self.ai_cfg.get("model", "")))
+        self._ai_panel.show()
+        total = self._split.width() or self.width() or 1280
+        self._split.setSizes([int(total * 0.62), int(total * 0.38)])
+
+    def _close_ai_panel(self) -> None:
+        self.ai_summarizer.cancel()
+        if self._ai_panel is not None:
+            self._ai_panel.hide()
+
+    def summarize_search(self) -> None:
+        """Read the current search results and summarize them with Ollama."""
+        if not self.ai_cfg.get("enabled"):
+            self.statusBar().showMessage(
+                "AI search summaries are off — enable them in "
+                "☰ → Settings.", 6000)
+            return
+        view = self.current_view()
+        if view is None:
+            return
+        url = view.url()
+        if not is_search_results(url):
+            self.statusBar().showMessage(
+                "Run a search first, then use the ✨ button to summarize the "
+                "results.", 6000)
+            return
+        query = query_from_url(url)
+        self._show_ai_panel()
+        self._ai_text.clear()
+        self._set_ai_status("Reading the results on this page…")
+        self._ai_stop.setEnabled(True)
+        self._ai_regen.setEnabled(False)
+        script = results_script(self.ai_cfg.get("max_results", 6))
+        view.page().runJavaScript(
+            script, APP_WORLD,
+            lambda res, q=query: self._on_ai_results(q, res))
+
+    def _on_ai_results(self, query: str, results) -> None:
+        if not results:
+            self._set_ai_status(
+                "Couldn't find any results to summarize on this page.")
+            self._ai_stop.setEnabled(False)
+            self._ai_regen.setEnabled(True)
+            return
+        self._ai_last = (query, results)
+        model = self.ai_cfg.get("model", "")
+        self._set_ai_status(
+            f"Summarizing {len(results)} results with {model} — on your "
+            f"device…")
+        self.ai_summarizer.summarize(query, results, self.ai_cfg)
+
+    def _stop_ai(self) -> None:
+        self.ai_summarizer.cancel()
+        self._set_ai_status("Stopped.")
+        self._ai_stop.setEnabled(False)
+        self._ai_regen.setEnabled(True)
+
+    def _set_ai_status(self, text: str) -> None:
+        if self._ai_panel is not None:
+            self._ai_status.setText(text)
+
+    def _on_ai_chunk(self, text: str) -> None:
+        if self._ai_panel is None:
+            return
+        self._ai_text.setMarkdown(text)
+        sb = self._ai_text.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _on_ai_thinking(self, thinking: bool) -> None:
+        if thinking:
+            self._set_ai_status("Reasoning…")
+        else:
+            self._set_ai_status("Writing the summary…")
+
+    def _on_ai_finished(self, text: str) -> None:
+        if self._ai_panel is None:
+            return
+        self._ai_text.setMarkdown(
+            text or "*(the model returned an empty summary)*")
+        self._set_ai_status(
+            f"Done · {self.ai_cfg.get('model', '')} · on-device")
+        self._ai_stop.setEnabled(False)
+        self._ai_regen.setEnabled(True)
+
+    def _on_ai_failed(self, message: str) -> None:
+        if self._ai_panel is None:
+            return
+        self._set_ai_status("Summary failed.")
+        self._ai_text.setMarkdown(f"**Couldn't summarize.** {message}")
+        self._ai_stop.setEnabled(False)
+        self._ai_regen.setEnabled(True)
+
+    def _set_ai_search(self, on: bool) -> None:
+        self.ai_cfg["enabled"] = bool(on)
+        save_ai_config(self.ai_cfg)
+        if not on:
+            self._close_ai_panel()
+        self.statusBar().showMessage(
+            f"AI search summaries {'on' if on else 'off'}.", 4000)
+
+    def show_ai_options(self) -> None:
+        cfg = self.ai_cfg
+        from ai_search import CONFIG_FILE
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("AI summary options")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(
+            "AI search summaries run entirely on your device: Vodou reads the "
+            "results from the local SearXNG page and sends them to your local "
+            "Ollama instance. Nothing about your search leaves the machine, "
+            "and Vodou never changes Ollama's models or settings.\n\n"
+            f"Enabled:      {'yes' if cfg.get('enabled') else 'no'}\n"
+            f"Model:        {cfg.get('model')}\n"
+            f"Ollama URL:   {cfg.get('endpoint')}\n"
+            f"Results used: {cfg.get('max_results')}\n"
+            f"Keep-alive:   {cfg.get('keep_alive')}  "
+            "(how long Ollama keeps the model in memory after a summary)\n\n"
+            "Change any of these by editing:\n"
+            f"{CONFIG_FILE}\n\n"
+            "Tip: set \"model\" to whichever model you already keep loaded to "
+            "avoid a VRAM swap.")
+        box.exec()
 
     def clear_browsing_data(self) -> None:
         """Wipe the cache, cookies, visited-link history, blocking stats, and

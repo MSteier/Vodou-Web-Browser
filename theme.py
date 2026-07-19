@@ -335,6 +335,60 @@ QPushButton#notifyAccept {{
     font-weight: 600;
 }}
 QPushButton#notifyAccept:hover {{ background: {p.accent_hover}; }}
+
+QWidget#aiPanel {{
+    background: {p.surface};
+    border-left: 1px solid {p.border};
+}}
+QWidget#aiHeader {{
+    background: {p.bg};
+    border-top: 1px solid {p.border};
+    border-left: 1px solid {p.border};
+    border-bottom: 1px solid {p.border};
+}}
+QLabel#aiTitle {{
+    color: {p.accent};
+    font-size: 8.5pt;
+    font-weight: 700;
+    letter-spacing: 1px;
+}}
+QLabel#aiModel {{
+    color: {p.muted};
+    font-size: 8.5pt;
+    font-family: 'Consolas', monospace;
+}}
+QToolButton#aiClose {{
+    color: {p.muted};
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    font-size: 11pt;
+}}
+QToolButton#aiClose:hover {{
+    background: {p.danger};
+    color: {p.on_accent};
+}}
+QLabel#aiStatus {{
+    color: {p.muted};
+    font-size: 9pt;
+    padding: 8px 12px 4px 12px;
+}}
+QTextBrowser#aiSummary {{
+    background: {p.surface};
+    color: {p.text};
+    border: none;
+    padding: 4px 12px;
+    font-size: 10.5pt;
+}}
+QWidget#aiPanel QPushButton {{
+    background: {p.elevated};
+    color: {p.text};
+    border: 1px solid {p.border};
+    border-radius: 6px;
+    padding: 4px 12px;
+}}
+QWidget#aiPanel QPushButton:hover {{ background: {p.accent}; color: {p.on_accent}; }}
+QWidget#aiPanel QPushButton:disabled {{ color: {p.muted}; background: {p.surface}; }}
 """
 
 

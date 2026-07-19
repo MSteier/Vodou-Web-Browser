@@ -209,6 +209,26 @@ def _globe(p: QPainter, c: QColor) -> None:
     p.drawEllipse(QRectF(9, 4, 6, 16))            # meridian
 
 
+def _sparkle(p: QPainter, c: QColor) -> None:
+    # AI-summary mark: a four-point sparkle with a small companion star.
+    p.setPen(_pen(c, 1.5))
+    p.setBrush(c)
+
+    def star(cx, cy, r):
+        # A four-pointed star: points out to r, waist pulled in to r*0.36.
+        pts = [(0, -1), (0.36, -0.36), (1, 0), (0.36, 0.36),
+               (0, 1), (-0.36, 0.36), (-1, 0), (-0.36, -0.36)]
+        path = QPainterPath()
+        for i, (dx, dy) in enumerate(pts):
+            x, y = cx + dx * r, cy + dy * r
+            path.moveTo(x, y) if i == 0 else path.lineTo(x, y)
+        path.closeSubpath()
+        p.drawPath(path)
+
+    star(10.5, 10.5, 6.2)   # main sparkle
+    star(17.5, 17, 3.0)     # small companion
+
+
 def _info(p: QPainter, c: QColor) -> None:
     p.setPen(_pen(c, 1.8))
     p.setBrush(Qt.BrushStyle.NoBrush)
@@ -235,6 +255,7 @@ _GLYPHS = {
     "lock-open": _lock_open,
     "globe": _globe,
     "info": _info,
+    "sparkle": _sparkle,
 }
 
 
