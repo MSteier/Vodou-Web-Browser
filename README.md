@@ -13,6 +13,10 @@ Python + PyQt6 on Qt WebEngine (the Chromium engine).
 - **pip**
 - Windows, macOS, or Linux (the bundled Qt WebEngine build is platform-specific
   but installs automatically via pip)
+- **[Docker](https://docs.docker.com/get-docker/)** (Docker Desktop on
+  Windows/macOS) — only if you want the built-in private search and AI
+  summaries; see *Optional — private search & local AI* below. Vodou itself
+  runs without it.
 
 **Install**
 
@@ -59,6 +63,13 @@ docker compose up -d              # search only
 # ...or search + local AI summaries (also pulls the default model):
 docker compose --profile ai up -d
 ```
+
+**Start the backend *before* launching Vodou** (or search will fail until it's
+up — Vodou opens `https://localhost/searxng` on startup). A good first-run
+order is: bring the stack up with `docker compose up -d`, wait a few seconds
+for the containers to be healthy, then `python main.py`. The stack keeps
+running in the background across restarts, so this is a one-time thing per
+boot (or set the containers to start on login in Docker Desktop).
 
 See [`docker/README.md`](docker/README.md) for details (GPU, custom models,
 port conflicts). To point Vodou at a search instance elsewhere, set
