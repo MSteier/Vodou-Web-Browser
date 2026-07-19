@@ -205,6 +205,10 @@ guarantee as the rest of Vodou: your search never leaves the machine.
 - Run a search (local SearXNG as usual), then click the **✨ button** in the
   toolbar. A side panel opens and streams a concise summary of the top results,
   with citations you can click to open a source in a new tab.
+- A **model dropdown** at the top of the panel lists the models installed in
+  your local Ollama (refreshed each time the panel opens, so anything you
+  `ollama pull` later shows up). Pick one and click **Regenerate**; your choice
+  is saved for next time.
 - **How it stays private:** Vodou reads the top results straight from the
   rendered SearXNG page (no SearXNG configuration needed) and sends them, with
   your query, to Ollama on `127.0.0.1`. SearXNG is local and Ollama is local,

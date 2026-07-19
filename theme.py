@@ -352,10 +352,24 @@ QLabel#aiTitle {{
     font-weight: 700;
     letter-spacing: 1px;
 }}
-QLabel#aiModel {{
-    color: {p.muted};
+QComboBox#aiModelCombo {{
+    color: {p.text};
+    background: {p.elevated};
+    border: 1px solid {p.border};
+    border-radius: 6px;
+    padding: 1px 6px;
     font-size: 8.5pt;
     font-family: 'Consolas', monospace;
+    min-width: 120px;
+}}
+QComboBox#aiModelCombo:hover {{ border-color: {p.accent}; }}
+QComboBox#aiModelCombo::drop-down {{ border: none; width: 16px; }}
+QComboBox#aiModelCombo QAbstractItemView {{
+    background: {p.surface};
+    color: {p.text};
+    border: 1px solid {p.border};
+    selection-background-color: {p.accent};
+    selection-color: {p.on_accent};
 }}
 QToolButton#aiClose {{
     color: {p.muted};

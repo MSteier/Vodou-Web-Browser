@@ -186,6 +186,29 @@ class OllamaSummarizer(QObject):
     def busy(self) -> bool:
         return self._reply is not None
 
+    def list_models(self, cfg: dict, callback) -> None:
+        """Fetch the models installed in the local Ollama (GET /api/tags) and
+        hand the callback a list of their names. Empty list on any failure —
+        the picker simply keeps whatever it already had."""
+        endpoint = str(cfg.get("endpoint", DEFAULTS["endpoint"])).rstrip("/")
+        reply = self._nam.get(QNetworkRequest(QUrl(endpoint + "/api/tags")))
+        reply.finished.connect(lambda r=reply: self._on_models(r, callback))
+
+    @staticmethod
+    def _on_models(reply: QNetworkReply, callback) -> None:
+        names: list[str] = []
+        try:
+            if reply.error() == QNetworkReply.NetworkError.NoError:
+                data = json.loads(
+                    bytes(reply.readAll()).decode("utf-8", "replace"))
+                names = [m["name"] for m in data.get("models", [])
+                         if isinstance(m, dict) and m.get("name")]
+        except (ValueError, TypeError, KeyError):
+            pass
+        finally:
+            reply.deleteLater()
+        callback(names)
+
     def summarize(self, query: str, results: list[dict], cfg: dict) -> None:
         self.cancel()
         self._raw = ""

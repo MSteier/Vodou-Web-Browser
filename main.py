@@ -110,6 +110,7 @@ from PyQt6.QtWebEngineCore import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -1809,8 +1810,15 @@ class BrowserWindow(QMainWindow):
         hb.setSpacing(6)
         title = QLabel("AI SUMMARY")
         title.setObjectName("aiTitle")
-        self._ai_model_label = QLabel(str(self.ai_cfg.get("model", "")))
-        self._ai_model_label.setObjectName("aiModel")
+        # Model picker, populated from the local Ollama's installed models.
+        self._ai_model_combo = QComboBox()
+        self._ai_model_combo.setObjectName("aiModelCombo")
+        self._ai_model_combo.setToolTip(
+            "Model used to summarize — the list is your local Ollama's "
+            "installed models")
+        self._populate_model_combo([self.ai_cfg.get("model", "")])
+        self._ai_model_combo.currentTextChanged.connect(
+            self._on_ai_model_changed)
         close_btn = QToolButton()
         close_btn.setObjectName("aiClose")
         close_btn.setText("✕")
@@ -1819,7 +1827,7 @@ class BrowserWindow(QMainWindow):
         close_btn.setToolTip("Close the summary panel")
         close_btn.clicked.connect(self._close_ai_panel)
         hb.addWidget(title)
-        hb.addWidget(self._ai_model_label)
+        hb.addWidget(self._ai_model_combo)
         hb.addStretch()
         hb.addWidget(close_btn)
 
@@ -1862,10 +1870,45 @@ class BrowserWindow(QMainWindow):
 
     def _show_ai_panel(self) -> None:
         self._ensure_ai_panel()
-        self._ai_model_label.setText(str(self.ai_cfg.get("model", "")))
+        # Refresh the model list from Ollama each time the panel opens (cheap,
+        # and picks up models installed since last time).
+        self.ai_summarizer.list_models(self.ai_cfg, self._on_ai_models_listed)
         self._ai_panel.show()
         total = self._split.width() or self.width() or 1280
         self._split.setSizes([int(total * 0.62), int(total * 0.38)])
+
+    def _populate_model_combo(self, models: list) -> None:
+        """Fill the picker with `models`, keeping the configured model selected
+        (and present even if Ollama didn't list it)."""
+        combo = self._ai_model_combo
+        current = str(self.ai_cfg.get("model", ""))
+        names = list(dict.fromkeys(m for m in (models or []) if m))
+        if current and current not in names:
+            names.insert(0, current)
+        combo.blockSignals(True)   # don't treat repopulation as a user choice
+        combo.clear()
+        combo.addItems(names)
+        idx = combo.findText(current)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+
+    def _on_ai_models_listed(self, names: list) -> None:
+        if self._ai_panel is None or not names:
+            return
+        self._populate_model_combo(names)
+
+    def _on_ai_model_changed(self, name: str) -> None:
+        name = (name or "").strip()
+        if not name or name == self.ai_cfg.get("model"):
+            return
+        self.ai_cfg["model"] = name
+        save_ai_config(self.ai_cfg)
+        # If a summary is already on screen, nudge the user to re-run with the
+        # newly chosen model.
+        if self._ai_last is not None and not self.ai_summarizer.busy:
+            self._set_ai_status(
+                f"Model set to {name} — click Regenerate to re-summarize.")
 
     def _close_ai_panel(self) -> None:
         self.ai_summarizer.cancel()
