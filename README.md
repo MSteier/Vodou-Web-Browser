@@ -394,8 +394,13 @@ installed.
 PyQt / Python versions, and offers an **Update Vodou & engine** button that
 updates both parts of the browser in one click: it pulls the latest Vodou
 from GitHub (`git pull --ff-only`, so a locally modified checkout is never
-silently merged), then upgrades the bundled Chromium/Qt engine via pip. The
-summary tells you what was updated or that you're already current.
+silently merged), then upgrades the bundled Chromium/Qt engine via pip. When
+an update is actually applied, the summary spells out **what** changed — the
+new Vodou version (e.g. `1.10.0 → 1.11.0`), a bulleted list of the changes
+that came in (read from the local git log, nothing sent anywhere), and the
+new engine package versions — and gives a clear per-part verdict: *applied
+successfully*, *partly applied*, *failed*, or *nothing needed updating*. It no
+longer reports "you're already current" when something was in fact updated.
 
 The footer shows the running version (click it to open the GitHub repo).
 About ten seconds after startup, Vodou checks whether a newer version of

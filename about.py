@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.10.0"
+APP_VERSION = "1.11.0"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -91,6 +91,18 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 
 def is_newer(remote: str, local: str) -> bool:
     return _version_tuple(remote) > _version_tuple(local)
+
+
+def _read_local_app_version() -> str:
+    """APP_VERSION as it stands in about.py *on disk*. After a git pull this is
+    the newly pulled value, while the APP_VERSION constant above is still the
+    version the running process started with. Empty string when unreadable."""
+    try:
+        text = (_REPO_DIR / "about.py").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', text)
+    return match.group(1) if match else ""
 
 
 class UpdateChecker(QObject):
@@ -265,6 +277,13 @@ class AboutDialog(QDialog):
         self.update_btn.setText("Updating…")
         self.status.show()
         self._results: list[str] = []
+        # Real flags, so "was something applied?" never depends on matching the
+        # wording of a status string.
+        self._app_updated = False
+        self._engine_updated = False
+        # Commit the running process started on — compared against HEAD after
+        # the pull to tell an actual update apart from "already current".
+        self._git_old_head = _git_head()
         self._start_git()
 
     def _start_proc(self, on_finished, on_error, program: str,
@@ -314,11 +333,56 @@ class AboutDialog(QDialog):
         out, self._proc = self._output, None
         if exit_code != 0:
             tail = (out.strip().splitlines() or ["unknown git error"])[-1]
-            self._results.append(f"Vodou app: update failed — {tail}")
-        elif "Already up to date" in out:
+            self._results.append(f"Vodou app: update FAILED — {tail}")
+            self._start_pip()
+            return
+        new_head = _git_head()
+        already = "Already up to date" in out or (
+            self._git_old_head and new_head == self._git_old_head)
+        if already:
             self._results.append("Vodou app: already the current version.")
+            self._start_pip()
+            return
+        # A real update landed. Report the version change, then fetch the list
+        # of commits that came in so the summary can say what actually changed.
+        self._app_updated = True
+        new_version = _read_local_app_version()
+        if new_version and new_version != APP_VERSION:
+            self._results.append(
+                f"Vodou app: UPDATED {APP_VERSION} → {new_version} "
+                "(restart to apply).")
         else:
-            self._results.append("Vodou app: updated — restart to apply.")
+            self._results.append("Vodou app: UPDATED (restart to apply).")
+        if self._git_old_head and new_head:
+            self._start_git_log(self._git_old_head, new_head)
+        else:
+            self._start_pip()
+
+    # step 1b: list the commits the pull brought in ("what changed")
+    def _start_git_log(self, old_head: str, new_head: str) -> None:
+        self.status.setText("Reading what changed…")
+        self._start_proc(
+            self._git_log_finished, self._git_log_error, "git",
+            ["log", "--no-merges", "--pretty=format:%s",
+             f"{old_head}..{new_head}"], str(_REPO_DIR))
+
+    def _git_log_error(self, _error) -> None:
+        if self._proc is None:
+            return
+        self._proc = None  # a missing changelog must not stop the engine step
+        self._start_pip()
+
+    def _git_log_finished(self, _exit_code: int, _status) -> None:
+        self._read_output()
+        out, self._proc = self._output, None
+        subjects = [s.strip() for s in out.splitlines() if s.strip()]
+        if subjects:
+            shown = subjects[:8]
+            lines = "\n".join(f"   • {s}" for s in shown)
+            extra = len(subjects) - len(shown)
+            if extra > 0:
+                lines += f"\n   • …and {extra} more change(s)"
+            self._results.append("What changed:\n" + lines)
         self._start_pip()
 
     # step 2: the engine
@@ -339,6 +403,20 @@ class AboutDialog(QDialog):
             "python -m pip install --upgrade " + " ".join(_ENGINE_PACKAGES))
         self._finish()
 
+    @staticmethod
+    def _parse_pip_installed(out: str) -> str:
+        """The engine/toolkit packages pip reports it actually installed, e.g.
+        'PyQt6-6.9.0, PyQt6-WebEngine-6.9.0'. Empty when nothing was upgraded."""
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("Successfully installed"):
+                tokens = line[len("Successfully installed"):].split()
+                ours = [t for t in tokens if any(
+                    t.lower().startswith(pkg.lower() + "-")
+                    for pkg in _ENGINE_PACKAGES)]
+                return ", ".join(ours or tokens)
+        return ""
+
     def _pip_finished(self, exit_code: int, _status) -> None:
         self._read_output()
         out, self._proc = self._output, None
@@ -349,10 +427,15 @@ class AboutDialog(QDialog):
                 hint = (" This looks like your antivirus intercepting TLS; "
                         "installing 'pip-system-certs' fixes it.")
             self._results.append(
-                f"Engine: update failed (exit code {exit_code}).{hint}\n"
+                f"Engine: update FAILED (exit code {exit_code}).{hint}\n"
                 f"{tail}")
-        elif "Successfully installed" in out:
-            self._results.append("Engine: updated — restart to apply.")
+            self._finish()
+            return
+        installed = self._parse_pip_installed(out)
+        if installed:
+            self._engine_updated = True
+            self._results.append(
+                f"Engine: UPDATED to {installed} (restart to apply).")
         else:
             self._results.append("Engine: already the current version.")
         self._finish()
@@ -362,22 +445,38 @@ class AboutDialog(QDialog):
         self.update_btn.setText("Update Vodou && engine…")
         self.status.hide()
         summary = "\n\n".join(self._results)
-        updated = any("restart to apply" in r for r in self._results)
-        trouble = any("failed" in r or "could not" in r
+        updated = self._app_updated or self._engine_updated
+        trouble = any(("FAILED" in r) or ("could not" in r)
                       for r in self._results)
-        if trouble:
-            icon, title, text = (QMessageBox.Icon.Warning,
-                                 "Update finished with problems", summary)
+
+        # Which parts were actually applied, for a plain-language verdict.
+        parts = []
+        if self._app_updated:
+            parts.append("Vodou")
+        if self._engine_updated:
+            parts.append("the engine")
+        what = " and ".join(parts)
+        verb = "were" if len(parts) > 1 else "was"
+        restart = "Close and reopen Vodou to start using the new version."
+
+        if updated and trouble:
+            icon, title = QMessageBox.Icon.Warning, "Update partly applied"
+            text = (f"Some parts updated, but not everything succeeded — "
+                    f"{what} {verb} updated.\n\n{summary}\n\n{restart}")
+        elif trouble:
+            icon, title = QMessageBox.Icon.Warning, "Update failed"
+            text = (f"The update did not complete and nothing was changed.\n\n"
+                    f"{summary}")
         elif updated:
-            icon, title, text = (
-                QMessageBox.Icon.Information, "Update completed",
-                f"Update completed.\n\n{summary}\n\n"
-                f"Close and reopen Vodou to start using the new version.")
+            icon, title = (QMessageBox.Icon.Information,
+                           "Update applied successfully")
+            text = (f"Update applied successfully — {what} {verb} updated.\n\n"
+                    f"{summary}\n\n{restart}")
         else:
-            icon, title, text = (
-                QMessageBox.Icon.Information, "No update needed",
-                "You are using the most current version of the "
-                f"application.\n\n{summary}")
+            icon, title = QMessageBox.Icon.Information, "No update needed"
+            text = ("You are already running the most current version of "
+                    f"Vodou and its engine — nothing needed updating.\n\n"
+                    f"{summary}")
         box = QMessageBox(self)
         box.setIcon(icon)
         box.setWindowTitle(title)
