@@ -61,7 +61,7 @@ python main.py
 **Optional — private search & local AI (one command):** the home page and
 default search point at a local
 [SearXNG](https://github.com/searxng/searxng) instance
-(`https://localhost/searxng`), and the AI summaries use a local
+(`https://localhost/searxng`), and the local AI features use a local
 [Ollama](https://ollama.com). Vodou works fine without either (just type full
 URLs), but the [`docker/`](docker/) bundle stands up the whole backend
 reproducibly so it works the same on any machine:
@@ -71,7 +71,7 @@ cd docker
 cp .env.example .env
 ./setup.sh                        # Windows: ./setup.ps1  — makes a secret key
 docker compose up -d              # search only
-# ...or search + local AI summaries (also pulls the default model):
+# ...or search + local AI (also pulls the default model):
 docker compose --profile ai up -d
 ```
 
@@ -100,8 +100,8 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
-| No telemetry | Nothing about you or your browsing is ever sent anywhere. Vodou's only outbound calls of its own are the two anonymous version checks (*About & updates*) and the anonymous periodic download of the public Safe Browsing lists (*Safe Browsing*) — public files fetched by IP, carrying no identifiers and no browsing data. The optional AI search summaries talk only to a **local** Ollama instance, so they add no off-device traffic either |
-| AI search summaries (local) | Optional, off-by-default: a ✨ button on a search-results page summarizes the top results using your **own local [Ollama](https://ollama.com) instance**. Vodou reads the results from the local SearXNG page and streams a summary into a side panel — SearXNG is local, Ollama is local, so nothing about your search leaves the machine. Vodou is only an HTTP client of Ollama and never changes its models or config. See *AI search summaries* |
+| No telemetry | Nothing about you or your browsing is ever sent anywhere. Vodou's only outbound calls of its own are the two anonymous version checks (*About & updates*) and the anonymous periodic download of the public Safe Browsing lists (*Safe Browsing*) — public files fetched by IP, carrying no identifiers and no browsing data. The optional local AI features talk only to a **local** Ollama instance, so they add no off-device traffic either |
+| Local AI (summaries + chat) | Optional, off-by-default, powered by your **own local [Ollama](https://ollama.com) instance**: the ✨ button summarizes a search-results page, and **Ctrl+Shift+A** opens the same panel as a general chat you can ask anything. Summaries are read from the local SearXNG page; chat sends only what you type — never the page, its address, or your history. SearXNG is local, Ollama is local, so nothing leaves the machine, and Vodou is only an HTTP client of Ollama and never changes its models or config. See *Local AI* |
 | Deceptive-site protection | Every address you navigate to is checked **locally** for look-alike (homograph), mixed-alphabet/punycode, and typosquatting imitations of well-known brands. A suspected spoof is blocked with a full-screen warning that shows the real vs. deceptive address and its un-fakeable punycode spelling. See *Deceptive-site protection* |
 | Safe Browsing (local) | Navigations are checked **entirely on your device** against public phishing/malware **domain** lists — no per-URL lookup, so nothing about your browsing is ever sent out. A reported host is blocked with the same full-screen warning. See *Safe Browsing* |
 | Download manager | Every download is user-approved (no drive-by saves); executable/installer types (`.exe`, `.msi`, `.bat`, `.ps1`, `.dmg`, …) that can run code get a sterner, default-**No** warning. Approved downloads are tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
@@ -234,35 +234,51 @@ update. It layers with the deceptive-site detection, which needs no list.
   listing URLs in `~/.vodou/safebrowsing_sources.txt`, or add your own hosts
   in `~/.vodou/safebrowsing_extra.txt`.
 
-## AI search summaries
+## Local AI: search summaries and ask-anything
 
-An optional, **on-device** summary of your search results, produced by your
-own local [Ollama](https://ollama.com) instance. It keeps the same privacy
-guarantee as the rest of Vodou: your search never leaves the machine.
+Two optional, **on-device** features powered by your own local
+[Ollama](https://ollama.com) instance: a summary of your search results, and a
+general-purpose chat. Both keep the same privacy guarantee as the rest of
+Vodou — nothing leaves the machine.
 
-- Run a search (local SearXNG as usual), then click the **✨ button** in the
-  toolbar. A side panel opens and streams a concise summary of the top results,
-  with citations you can click to open a source in a new tab.
+**Summarize search results.** Run a search (local SearXNG as usual), then click
+the **✨ button** in the toolbar. A side panel opens and streams a concise
+summary of the top results, with citations you can click to open a source in a
+new tab.
+
+**Ask anything.** Press **Ctrl+Shift+A** (or ☰ → *Ask local AI…*, or the ✨
+button when you're not on a results page) to open the same panel as a chat.
+Type a question, press Enter, and the answer streams back. The conversation is
+multi-turn, so follow-ups keep their context; **New chat** forgets it and
+starts over.
+
+- **Follow-ups on a summary work too:** after summarizing, just type a question
+  — the summary carries into the conversation, so *"which of those looks most
+  trustworthy?"* has the context it needs.
 - A **model dropdown** at the top of the panel lists the models installed in
   your local Ollama (refreshed each time the panel opens, so anything you
-  `ollama pull` later shows up). Pick one and click **Regenerate**; your choice
-  is saved for next time.
-- **How it stays private:** Vodou reads the top results straight from the
-  rendered SearXNG page (no SearXNG configuration needed) and sends them, with
-  your query, to Ollama on `127.0.0.1`. SearXNG is local and Ollama is local,
-  so nothing about the search is transmitted off-device. Vodou is purely an
-  HTTP client of Ollama's API — it never changes Ollama's models, config, or
-  environment, so anything else you run against Ollama keeps working unchanged.
+  `ollama pull` later shows up). It applies to both modes and your choice is
+  saved for next time.
+- **How it stays private:** for summaries, Vodou reads the top results straight
+  from the rendered SearXNG page (no SearXNG configuration needed) and sends
+  them, with your query, to Ollama on `127.0.0.1`. In ask mode it sends **only
+  what you type** — never the page you're on, its address, or your history.
+  SearXNG is local and Ollama is local, so nothing is transmitted off-device.
+  Vodou is purely an HTTP client of Ollama's API — it never changes Ollama's
+  models, config, or environment, so anything else you run against Ollama keeps
+  working unchanged.
 - **On-demand only**, so it never loads a model behind your back. Reasoning
   models (e.g. `deepseek-r1`) show a *Reasoning…* indicator while they think;
-  their `<think>` scratchpad is hidden and only the final summary is shown.
-- **☰ menu → Settings → AI search summaries (Ollama)** toggles the feature
-  (off by default); **AI summary options…** shows the current model, endpoint,
-  and config-file path.
+  their `<think>` scratchpad is hidden and only the final answer is shown.
+  **Stop** ends a reply early and keeps whatever arrived.
+- **☰ menu → Settings → Local AI (Ollama)** toggles the feature (off by
+  default); **Local AI options…** shows the current model, endpoint, and
+  config-file path.
 - Configure it in `~/.vodou/ai_search.json` — `model`, `endpoint`,
-  `max_results`, `keep_alive` (how long Ollama keeps the model resident after a
-  summary), and `temperature`. Tip: set `model` to whichever model you already
-  keep loaded to avoid a VRAM swap.
+  `max_results`, `max_turns` (how many past chat messages are resent with each
+  question), `keep_alive` (how long Ollama keeps the model resident
+  afterwards), and `temperature`. Tip: set `model` to whichever model you
+  already keep loaded to avoid a VRAM swap.
 
 ## Cookie exceptions
 

@@ -1,24 +1,34 @@
-"""On-device AI summaries of search results, via a local Ollama instance.
+"""On-device AI, via a local Ollama instance: search summaries, and chat.
 
 Vodou's search already stays on your machine (a local SearXNG instance). This
-adds an optional, on-demand summary of the results, produced **entirely
-locally** by talking to Ollama over HTTP on 127.0.0.1. Nothing about your
-search leaves the device: SearXNG is local, Ollama is local, and Vodou is only
+adds two optional, on-demand features, both produced **entirely locally** by
+talking to Ollama over HTTP on 127.0.0.1:
+
+  * **Summarize** the results on a SearXNG page.
+  * **Ask** the model anything, as a normal multi-turn conversation.
+
+Nothing leaves the device: SearXNG is local, Ollama is local, and Vodou is only
 a client of Ollama's HTTP API — it never changes Ollama's models, config, or
 environment, so any other tools you run against Ollama keep working unchanged.
+Ask mode sends *only what you type* — no page content, URL, or history is ever
+attached to a question.
 
 How it fits together:
   * Vodou reads the top results straight from the rendered SearXNG page (no
     SearXNG configuration needed), see RESULTS_JS.
   * It POSTs them, with the query, to Ollama's /api/chat and streams the reply
-    into a side dock.
+    into a side dock. Ask mode POSTs the conversation to the same endpoint.
   * Reasoning models (e.g. deepseek-r1) emit a <think>…</think> block first;
-    that reasoning is hidden and only the final summary is shown.
+    that reasoning is hidden and only the final answer is shown.
 
 Config lives in ~/.vodou/ai_search.json (all keys optional):
   { "enabled": true, "endpoint": "http://127.0.0.1:11434",
     "model": "deepseek-r1:8b", "max_results": 6,
-    "keep_alive": "5m", "temperature": 0.3 }
+    "keep_alive": "5m", "temperature": 0.3, "max_turns": 12 }
+
+`max_turns` caps how many past chat messages are resent with each question —
+older turns drop off so a long conversation can't grow the prompt without
+bound (and slow the model down).
 
 `keep_alive` is passed straight to Ollama: it's how long Ollama keeps the model
 resident after Vodou's request. A short value means Vodou's use frees VRAM soon
@@ -44,6 +54,7 @@ DEFAULTS = {
     "max_results": 6,
     "keep_alive": "5m",
     "temperature": 0.3,
+    "max_turns": 12,
 }
 
 
@@ -150,6 +161,32 @@ def build_prompt(query: str, results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Ask mode. Deliberately minimal: the model has no tools, no page access and no
+# network, so the one thing worth insisting on is that it says when it doesn't
+# know rather than inventing an answer the user can't easily check.
+ASK_SYSTEM = (
+    "You are a helpful assistant running locally inside Vodou, a privacy "
+    "browser. Answer clearly and concisely, and use Markdown when it helps. "
+    "You cannot browse the web, open pages, or see what the user is looking "
+    "at — you only know what is in this conversation. If you are unsure or "
+    "the answer may be out of date, say so plainly instead of guessing, and "
+    "suggest what the user could search for."
+)
+
+
+def build_chat_messages(history: list[dict], cfg: dict) -> list[dict]:
+    """Assemble the /api/chat payload for ask mode: the system prompt plus the
+    last `max_turns` messages of `history` (oldest dropped first, so a long
+    conversation doesn't grow the prompt without bound)."""
+    try:
+        limit = max(2, int(cfg.get("max_turns", DEFAULTS["max_turns"])))
+    except (TypeError, ValueError):
+        limit = DEFAULTS["max_turns"]
+    recent = [m for m in history
+              if isinstance(m, dict) and m.get("role") and m.get("content")]
+    return [{"role": "system", "content": ASK_SYSTEM}] + recent[-limit:]
+
+
 _THINK_CLOSED = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
@@ -164,8 +201,10 @@ def split_reasoning(raw: str) -> tuple[str, bool]:
     return cleaned.strip(), False
 
 
-class OllamaSummarizer(QObject):
-    """Streams a summary from a local Ollama model. One request at a time."""
+class OllamaClient(QObject):
+    """Streams a reply from a local Ollama model — a search summary
+    (`summarize`) or a free-form conversation (`chat`). One request at a time:
+    starting either cancels whatever was already running."""
 
     # full visible text so far (reasoning stripped)
     chunk = pyqtSignal(str)
@@ -210,6 +249,16 @@ class OllamaSummarizer(QObject):
         callback(names)
 
     def summarize(self, query: str, results: list[dict], cfg: dict) -> None:
+        """Summarize search results — a one-shot request, no history."""
+        self._start([{"role": "user",
+                      "content": build_prompt(query, results)}], cfg)
+
+    def chat(self, history: list[dict], cfg: dict) -> None:
+        """Answer the conversation in `history` (a list of {role, content},
+        ending with the user's newest question)."""
+        self._start(build_chat_messages(history, cfg), cfg)
+
+    def _start(self, messages: list[dict], cfg: dict) -> None:
         self.cancel()
         self._raw = ""
         self._netbuf = b""
@@ -222,8 +271,7 @@ class OllamaSummarizer(QObject):
                       "application/json")
         body = json.dumps({
             "model": cfg.get("model", DEFAULTS["model"]),
-            "messages": [
-                {"role": "user", "content": build_prompt(query, results)}],
+            "messages": messages,
             "stream": True,
             "keep_alive": cfg.get("keep_alive", DEFAULTS["keep_alive"]),
             "options": {
@@ -308,4 +356,4 @@ class OllamaSummarizer(QObject):
                     "(start it with `ollama serve`)")
         if error == C.OperationCanceledError:
             return "Cancelled."
-        return fallback or "The summary request failed."
+        return fallback or "The request to Ollama failed."

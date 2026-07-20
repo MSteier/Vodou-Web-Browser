@@ -9,7 +9,7 @@ same on any machine without hand-configuring SearXNG, a TLS proxy, and Ollama.
 | `searxng` | Private metasearch engine | via Caddy below |
 | `redis` (valkey) | SearXNG's cache/limiter backend | internal only |
 | `caddy` | TLS reverse proxy, self-signed via its internal CA | `https://localhost/searxng` |
-| `ollama` *(optional)* | Local LLM for AI search summaries | `http://127.0.0.1:11434` |
+| `ollama` *(optional)* | Local LLM for AI summaries and chat | `http://127.0.0.1:11434` |
 
 Vodou trusts `localhost` certificates, so Caddy's self-signed cert needs **no**
 trust-store install.

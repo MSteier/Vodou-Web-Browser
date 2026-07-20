@@ -394,6 +394,15 @@ QTextBrowser#aiSummary {{
     padding: 4px 12px;
     font-size: 10.5pt;
 }}
+QLineEdit#aiInput {{
+    background: {p.elevated};
+    color: {p.text};
+    border: 1px solid {p.border};
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 10.5pt;
+}}
+QLineEdit#aiInput:focus {{ border-color: {p.accent}; }}
 QWidget#aiPanel QPushButton {{
     background: {p.elevated};
     color: {p.text};
@@ -403,6 +412,9 @@ QWidget#aiPanel QPushButton {{
 }}
 QWidget#aiPanel QPushButton:hover {{ background: {p.accent}; color: {p.on_accent}; }}
 QWidget#aiPanel QPushButton:disabled {{ color: {p.muted}; background: {p.surface}; }}
+/* Send is the panel's primary action, so it carries the accent by default. */
+QPushButton#aiSend {{ background: {p.accent}; color: {p.on_accent}; border-color: {p.accent}; }}
+QPushButton#aiSend:disabled {{ color: {p.muted}; background: {p.surface}; border-color: {p.border}; }}
 """
 
 

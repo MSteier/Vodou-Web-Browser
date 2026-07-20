@@ -153,7 +153,7 @@ from privacy import (
     ua_quirk_needed,
 )
 from ai_search import (
-    OllamaSummarizer,
+    OllamaClient,
     is_search_results,
     load_config as load_ai_config,
     query_from_url,
@@ -641,17 +641,21 @@ class BrowserWindow(QMainWindow):
                 f"Safe Browsing: {n:,} reported unsafe sites loaded.", 5000))
         QTimer.singleShot(12000, self.safe_browsing.start)
 
-        # On-demand AI summaries of search results via a local Ollama instance
-        # (see ai_search.py). Entirely on-device; Vodou is only an HTTP client
-        # of Ollama and never alters its models or config. Built lazily.
+        # On-demand local AI via a local Ollama instance (see ai_search.py):
+        # summaries of search results, and free-form "ask anything" chat.
+        # Entirely on-device; Vodou is only an HTTP client of Ollama and never
+        # alters its models or config. The panel is built lazily.
         self.ai_cfg = load_ai_config()
-        self.ai_summarizer = OllamaSummarizer(self)
-        self.ai_summarizer.chunk.connect(self._on_ai_chunk)
-        self.ai_summarizer.thinking.connect(self._on_ai_thinking)
-        self.ai_summarizer.finished.connect(self._on_ai_finished)
-        self.ai_summarizer.failed.connect(self._on_ai_failed)
+        self.ai_client = OllamaClient(self)
+        self.ai_client.chunk.connect(self._on_ai_chunk)
+        self.ai_client.thinking.connect(self._on_ai_thinking)
+        self.ai_client.finished.connect(self._on_ai_finished)
+        self.ai_client.failed.connect(self._on_ai_failed)
         self._ai_panel = None
-        self._ai_last: tuple[str, list] | None = None
+        self._ai_mode = "ask"                    # "ask" | "summary"
+        self._ai_last: tuple[str, list] | None = None   # last summarized search
+        self._ai_chat: list[dict] = []           # ask-mode conversation
+        self._ai_stream = ""                     # reply being streamed in
 
         # Credential capture: random per-session token so pages can't forge
         # capture messages; script runs in the isolated ApplicationWorld.
@@ -861,16 +865,16 @@ class BrowserWindow(QMainWindow):
         self._lock_state = "neutral"
         toolbar.addWidget(self.url_bar)
 
-        # AI-summary button: accent-coloured sparkle, sits just right of the
+        # Local-AI button: accent-coloured sparkle, sits just right of the
         # address bar (before the bookmark star). Icon set directly rather than
         # through the theme-text set so it keeps the accent colour; a theme
         # switch repaints it in _refresh_chrome_icons.
         self.ai_action = QAction(self)
         self.ai_action.setIcon(self._ai_icon)
         self.ai_action.setToolTip(
-            "Summarize these search results with local AI (Ollama) — "
-            "on-device, nothing sent out")
-        self.ai_action.triggered.connect(self.summarize_search)
+            "Local AI (Ctrl+Shift+A) — summarize these search results, or "
+            "ask anything. On-device; nothing sent out.")
+        self.ai_action.triggered.connect(self.open_ai_panel)
         toolbar.addAction(self.ai_action)
 
         self.star_button = QToolButton()
@@ -938,20 +942,21 @@ class BrowserWindow(QMainWindow):
         settings_menu.addAction("Safe Browsing status…",
                                 self.show_safe_browsing_status)
         self.ai_search_action = settings_menu.addAction(
-            "AI search summaries (Ollama)")
+            "Local AI (Ollama)")
         self.ai_search_action.setCheckable(True)
         self.ai_search_action.setChecked(bool(self.ai_cfg.get("enabled")))
         self.ai_search_action.setToolTip(
-            "Show a 'Summarize' button on search results that summarizes them "
-            "with your local Ollama model. Runs entirely on your device; "
-            "nothing about your search is ever sent out.")
+            "Enable the ✨ button: summarize search results, and ask your "
+            "local Ollama model anything. Runs entirely on your device; "
+            "nothing is ever sent out.")
         self.ai_search_action.toggled.connect(self._set_ai_search)
-        settings_menu.addAction("AI summary options…", self.show_ai_options)
+        settings_menu.addAction("Local AI options…", self.show_ai_options)
         menu.addSeparator()
         report = menu.addAction("Blocking report…", self.show_blocking_report)
         report.setToolTip(
             "Charts of how many trackers and ads were blocked per day, "
             "and which ones came up most")
+        menu.addAction("Ask local AI…\tCtrl+Shift+A", self.ask_ai)
         menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
         menu.addSeparator()
         menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
@@ -1006,6 +1011,7 @@ class BrowserWindow(QMainWindow):
             "Ctrl+L": self._focus_url_bar,
             "Ctrl+R": self.reload_page,
             "F5": self.reload_page,
+            "Ctrl+Shift+A": self.ask_ai,
             "Ctrl+Shift+F": self.fill_login,
             "Ctrl+Shift+V": self.open_vault,
             "Ctrl+Shift+Del": self.clear_browsing_data,
@@ -1177,7 +1183,7 @@ class BrowserWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         clear_copied_secrets()  # no passwords left on the clipboard
-        self.ai_summarizer.cancel()  # drop any in-flight Ollama request
+        self.ai_client.cancel()  # drop any in-flight Ollama request
         self._session_timer.stop()
         clear_snapshot()  # clean exit — a leftover file means "crashed"
         self.cookie_keeper.flush()  # capture last cookie updates in the jar
@@ -1813,10 +1819,11 @@ class BrowserWindow(QMainWindow):
         self._devtools_open = False
         self._devtools_esc.setEnabled(False)
 
-    # -- AI search summaries (local Ollama) --------------------------------
+    # -- Local AI: search summaries and ask-anything (Ollama) ---------------
 
     def _ensure_ai_panel(self) -> None:
-        """Build the docked summary panel once, lazily (mirrors DevTools)."""
+        """Build the docked AI panel once, lazily (mirrors DevTools). The same
+        panel serves both modes: summaries and free-form chat."""
         if self._ai_panel is not None:
             return
         header = QWidget()
@@ -1825,14 +1832,14 @@ class BrowserWindow(QMainWindow):
         hb = QHBoxLayout(header)
         hb.setContentsMargins(12, 0, 6, 0)
         hb.setSpacing(6)
-        title = QLabel("AI SUMMARY")
+        title = QLabel("LOCAL AI")
         title.setObjectName("aiTitle")
+        self._ai_title = title
         # Model picker, populated from the local Ollama's installed models.
         self._ai_model_combo = QComboBox()
         self._ai_model_combo.setObjectName("aiModelCombo")
         self._ai_model_combo.setToolTip(
-            "Model used to summarize — the list is your local Ollama's "
-            "installed models")
+            "Model to use — the list is your local Ollama's installed models")
         self._populate_model_combo([self.ai_cfg.get("model", "")])
         self._ai_model_combo.currentTextChanged.connect(
             self._on_ai_model_changed)
@@ -1861,16 +1868,37 @@ class BrowserWindow(QMainWindow):
         self._ai_text.anchorClicked.connect(
             lambda u: self.add_tab(QUrl(u)))
 
+        # Ask box. Always available, in either mode — typing a question while a
+        # summary is on screen continues from that summary as a conversation.
+        ask_row = QHBoxLayout()
+        ask_row.setContentsMargins(10, 6, 10, 0)
+        ask_row.setSpacing(6)
+        self._ai_input = QLineEdit()
+        self._ai_input.setObjectName("aiInput")
+        self._ai_input.setPlaceholderText("Ask anything…")
+        self._ai_input.setClearButtonEnabled(True)
+        self._ai_input.returnPressed.connect(self._send_ai_question)
+        self._ai_send = QPushButton("Send")
+        self._ai_send.setObjectName("aiSend")
+        self._ai_send.clicked.connect(self._send_ai_question)
+        ask_row.addWidget(self._ai_input, 1)
+        ask_row.addWidget(self._ai_send)
+
         bar = QHBoxLayout()
         bar.setContentsMargins(10, 4, 10, 8)
         bar.setSpacing(6)
         self._ai_regen = QPushButton("Regenerate")
+        self._ai_regen.setToolTip("Summarize this page's results again")
         self._ai_regen.clicked.connect(self.summarize_search)
         self._ai_stop = QPushButton("Stop")
         self._ai_stop.clicked.connect(self._stop_ai)
         self._ai_stop.setEnabled(False)
+        self._ai_clear = QPushButton("New chat")
+        self._ai_clear.setToolTip("Forget this conversation and start over")
+        self._ai_clear.clicked.connect(self._clear_ai_chat)
         bar.addWidget(self._ai_regen)
         bar.addWidget(self._ai_stop)
+        bar.addWidget(self._ai_clear)
         bar.addStretch()
 
         self._ai_panel = QWidget()
@@ -1881,6 +1909,7 @@ class BrowserWindow(QMainWindow):
         pv.addWidget(header)
         pv.addWidget(self._ai_status)
         pv.addWidget(self._ai_text, 1)
+        pv.addLayout(ask_row)
         pv.addLayout(bar)
         self._split.addWidget(self._ai_panel)
         self._ai_panel.hide()
@@ -1889,10 +1918,25 @@ class BrowserWindow(QMainWindow):
         self._ensure_ai_panel()
         # Refresh the model list from Ollama each time the panel opens (cheap,
         # and picks up models installed since last time).
-        self.ai_summarizer.list_models(self.ai_cfg, self._on_ai_models_listed)
+        self.ai_client.list_models(self.ai_cfg, self._on_ai_models_listed)
         self._ai_panel.show()
         total = self._split.width() or self.width() or 1280
         self._split.setSizes([int(total * 0.62), int(total * 0.38)])
+
+    def _set_ai_mode(self, mode: str) -> None:
+        """Switch the panel between "summary" and "ask" presentation."""
+        # A reply still streaming belongs to the old mode — its chunks would be
+        # routed into the wrong view, so drop the request with the mode.
+        if mode != self._ai_mode and self.ai_client.busy:
+            self.ai_client.cancel()
+        self._ai_mode = mode
+        if self._ai_panel is None:
+            return
+        summary = mode == "summary"
+        self._ai_title.setText("AI SUMMARY" if summary else "ASK AI")
+        # Regenerate only means something for a summary of a results page.
+        self._ai_regen.setVisible(summary)
+        self._ai_clear.setVisible(not summary)
 
     def _populate_model_combo(self, models: list) -> None:
         """Fill the picker with `models`, keeping the configured model selected
@@ -1921,23 +1965,57 @@ class BrowserWindow(QMainWindow):
             return
         self.ai_cfg["model"] = name
         save_ai_config(self.ai_cfg)
-        # If a summary is already on screen, nudge the user to re-run with the
-        # newly chosen model.
-        if self._ai_last is not None and not self.ai_summarizer.busy:
+        if self.ai_client.busy:
+            return
+        # Nudge the user about what the new model applies to.
+        if self._ai_mode == "summary" and self._ai_last is not None:
             self._set_ai_status(
                 f"Model set to {name} — click Regenerate to re-summarize.")
+        else:
+            self._set_ai_status(f"Model set to {name}.")
 
     def _close_ai_panel(self) -> None:
-        self.ai_summarizer.cancel()
+        self.ai_client.cancel()
         if self._ai_panel is not None:
             self._ai_panel.hide()
 
+    def _ai_enabled(self) -> bool:
+        """True if local AI is switched on; otherwise nudge and return False."""
+        if self.ai_cfg.get("enabled"):
+            return True
+        self.statusBar().showMessage(
+            "Local AI is off — enable it in ☰ → Settings → Local AI.", 6000)
+        return False
+
+    def open_ai_panel(self) -> None:
+        """The ✨ button: summarize if this is a results page, else ask."""
+        view = self.current_view()
+        if view is not None and is_search_results(view.url()):
+            self.summarize_search()
+        else:
+            self.ask_ai()
+
+    def ask_ai(self) -> None:
+        """Open the panel in ask mode with the question box focused."""
+        if not self._ai_enabled():
+            return
+        self._show_ai_panel()
+        # Coming from a finished summary, keep it as the conversation's opening
+        # so follow-ups still have that context.
+        if self._ai_mode == "summary" and not self.ai_client.busy:
+            self._carry_summary_into_chat()
+        self._set_ai_mode("ask")
+        self._render_ai_chat()
+        if not self._ai_chat:
+            self._set_ai_status(
+                f"Ask {self.ai_cfg.get('model', '')} anything — runs on your "
+                "device, and only what you type is sent to it.")
+        self._ai_input.setFocus()
+        self._ai_input.selectAll()
+
     def summarize_search(self) -> None:
         """Read the current search results and summarize them with Ollama."""
-        if not self.ai_cfg.get("enabled"):
-            self.statusBar().showMessage(
-                "AI search summaries are off — enable them in "
-                "☰ → Settings.", 6000)
+        if not self._ai_enabled():
             return
         view = self.current_view()
         if view is None:
@@ -1950,10 +2028,12 @@ class BrowserWindow(QMainWindow):
             return
         query = query_from_url(url)
         self._show_ai_panel()
+        self._set_ai_mode("summary")
         self._ai_text.clear()
         self._set_ai_status("Reading the results on this page…")
         self._ai_stop.setEnabled(True)
         self._ai_regen.setEnabled(False)
+        self._ai_send.setEnabled(False)
         script = results_script(self.ai_cfg.get("max_results", 6))
         view.page().runJavaScript(
             script, APP_WORLD,
@@ -1965,19 +2045,93 @@ class BrowserWindow(QMainWindow):
                 "Couldn't find any results to summarize on this page.")
             self._ai_stop.setEnabled(False)
             self._ai_regen.setEnabled(True)
+            self._ai_send.setEnabled(True)
             return
         self._ai_last = (query, results)
         model = self.ai_cfg.get("model", "")
         self._set_ai_status(
             f"Summarizing {len(results)} results with {model} — on your "
             f"device…")
-        self.ai_summarizer.summarize(query, results, self.ai_cfg)
+        self.ai_client.summarize(query, results, self.ai_cfg)
+
+    # -- ask mode ----------------------------------------------------------
+
+    def _send_ai_question(self) -> None:
+        """Send whatever is in the ask box as the next turn of the chat."""
+        if self._ai_panel is None or not self._ai_enabled():
+            return
+        question = self._ai_input.text().strip()
+        if not question or self.ai_client.busy:
+            return
+        # Asking from a finished summary carries it over, so follow-up
+        # questions about those results have the context they need.
+        if self._ai_mode == "summary":
+            self._carry_summary_into_chat()
+        self._set_ai_mode("ask")
+        self._ai_input.clear()
+        self._ai_chat.append({"role": "user", "content": question})
+        self._ai_stream = ""
+        self._render_ai_chat()
+        self._set_ai_status(
+            f"Asking {self.ai_cfg.get('model', '')} — on your device…")
+        self._ai_stop.setEnabled(True)
+        self._ai_send.setEnabled(False)
+        self.ai_client.chat(self._ai_chat, self.ai_cfg)
+
+    def _carry_summary_into_chat(self) -> None:
+        """Seed the conversation with the summary that's on screen, so the
+        model can answer follow-ups about it."""
+        summary = self._ai_text.toPlainText().strip()
+        if not summary or self._ai_chat:
+            return
+        query = self._ai_last[0] if self._ai_last else ""
+        self._ai_chat = [
+            {"role": "user",
+             "content": (f'I searched for "{query}" and you summarized the '
+                         "results. I have follow-up questions about that "
+                         "summary.")},
+            {"role": "assistant", "content": summary},
+        ]
+
+    def _clear_ai_chat(self) -> None:
+        self.ai_client.cancel()
+        self._ai_chat = []
+        self._ai_stream = ""
+        self._ai_text.clear()
+        self._set_ai_status("New chat — previous conversation forgotten.")
+        self._ai_stop.setEnabled(False)
+        self._ai_send.setEnabled(True)
+        self._ai_input.setFocus()
+
+    def _render_ai_chat(self) -> None:
+        """Redraw the whole ask-mode transcript, including any reply currently
+        streaming in."""
+        if self._ai_panel is None:
+            return
+        blocks = []
+        for msg in self._ai_chat:
+            if msg["role"] == "user":
+                blocks.append(f"**You:** {msg['content']}")
+            else:
+                blocks.append(msg["content"])
+        if self._ai_stream:
+            blocks.append(self._ai_stream)
+        self._ai_text.setMarkdown("\n\n---\n\n".join(blocks))
+        sb = self._ai_text.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def _stop_ai(self) -> None:
-        self.ai_summarizer.cancel()
+        self.ai_client.cancel()
+        # Keep a partial answer in the transcript rather than dropping it.
+        if self._ai_mode == "ask" and self._ai_stream:
+            self._ai_chat.append(
+                {"role": "assistant", "content": self._ai_stream})
+            self._ai_stream = ""
+            self._render_ai_chat()
         self._set_ai_status("Stopped.")
         self._ai_stop.setEnabled(False)
         self._ai_regen.setEnabled(True)
+        self._ai_send.setEnabled(True)
 
     def _set_ai_status(self, text: str) -> None:
         if self._ai_panel is not None:
@@ -1986,6 +2140,10 @@ class BrowserWindow(QMainWindow):
     def _on_ai_chunk(self, text: str) -> None:
         if self._ai_panel is None:
             return
+        if self._ai_mode == "ask":
+            self._ai_stream = text
+            self._render_ai_chat()
+            return
         self._ai_text.setMarkdown(text)
         sb = self._ai_text.verticalScrollBar()
         sb.setValue(sb.maximum())
@@ -1993,26 +2151,46 @@ class BrowserWindow(QMainWindow):
     def _on_ai_thinking(self, thinking: bool) -> None:
         if thinking:
             self._set_ai_status("Reasoning…")
+        elif self._ai_mode == "ask":
+            self._set_ai_status("Answering…")
         else:
             self._set_ai_status("Writing the summary…")
 
     def _on_ai_finished(self, text: str) -> None:
         if self._ai_panel is None:
             return
-        self._ai_text.setMarkdown(
-            text or "*(the model returned an empty summary)*")
+        if self._ai_mode == "ask":
+            self._ai_chat.append({
+                "role": "assistant",
+                "content": text or "*(the model returned an empty answer)*"})
+            self._ai_stream = ""
+            self._render_ai_chat()
+            self._ai_input.setFocus()
+        else:
+            self._ai_text.setMarkdown(
+                text or "*(the model returned an empty summary)*")
         self._set_ai_status(
             f"Done · {self.ai_cfg.get('model', '')} · on-device")
         self._ai_stop.setEnabled(False)
         self._ai_regen.setEnabled(True)
+        self._ai_send.setEnabled(True)
 
     def _on_ai_failed(self, message: str) -> None:
         if self._ai_panel is None:
             return
-        self._set_ai_status("Summary failed.")
-        self._ai_text.setMarkdown(f"**Couldn't summarize.** {message}")
+        if self._ai_mode == "ask":
+            # Drop the unanswered question so a retry doesn't double it up.
+            if self._ai_chat and self._ai_chat[-1]["role"] == "user":
+                self._ai_chat.pop()
+            self._ai_stream = ""
+            self._render_ai_chat()
+            self._set_ai_status(f"Couldn't answer. {message}")
+        else:
+            self._set_ai_status("Summary failed.")
+            self._ai_text.setMarkdown(f"**Couldn't summarize.** {message}")
         self._ai_stop.setEnabled(False)
         self._ai_regen.setEnabled(True)
+        self._ai_send.setEnabled(True)
 
     def _set_ai_search(self, on: bool) -> None:
         self.ai_cfg["enabled"] = bool(on)
@@ -2020,26 +2198,29 @@ class BrowserWindow(QMainWindow):
         if not on:
             self._close_ai_panel()
         self.statusBar().showMessage(
-            f"AI search summaries {'on' if on else 'off'}.", 4000)
+            f"Local AI {'on' if on else 'off'}.", 4000)
 
     def show_ai_options(self) -> None:
         cfg = self.ai_cfg
         from ai_search import CONFIG_FILE
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("AI summary options")
+        box.setWindowTitle("Local AI options")
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(
-            "AI search summaries run entirely on your device: Vodou reads the "
-            "results from the local SearXNG page and sends them to your local "
-            "Ollama instance. Nothing about your search leaves the machine, "
-            "and Vodou never changes Ollama's models or settings.\n\n"
+            "Local AI runs entirely on your device, against your own Ollama "
+            "instance. Vodou never changes Ollama's models or settings.\n\n"
+            "  • Summarize — reads the results off the local SearXNG page and "
+            "sends those to Ollama.\n"
+            "  • Ask — sends only what you type. Never the page you're on, "
+            "its address, or your history.\n\n"
             f"Enabled:      {'yes' if cfg.get('enabled') else 'no'}\n"
             f"Model:        {cfg.get('model')}\n"
             f"Ollama URL:   {cfg.get('endpoint')}\n"
             f"Results used: {cfg.get('max_results')}\n"
+            f"Chat memory:  {cfg.get('max_turns')} messages\n"
             f"Keep-alive:   {cfg.get('keep_alive')}  "
-            "(how long Ollama keeps the model in memory after a summary)\n\n"
+            "(how long Ollama keeps the model in memory afterwards)\n\n"
             "Change any of these by editing:\n"
             f"{CONFIG_FILE}\n\n"
             "Tip: set \"model\" to whichever model you already keep loaded to "
