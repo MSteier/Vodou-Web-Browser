@@ -53,7 +53,13 @@ DEFAULT_SOURCES = (
 )
 
 REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000   # re-fetch every 12 hours
-MAX_HOSTS = 300_000                          # bound memory / file size
+# Bounds memory / file size. Truncation in _commit is arbitrary — it keeps
+# whatever the set happens to iterate first, not the newest or worst hosts —
+# so a cap the feeds actually reach silently drops real coverage. 300k was
+# below the combined size of the default feeds and was being hit exactly;
+# 500k clears them with room to grow. Roughly 29 bytes/host on disk, several
+# times that resident, so this is ~14 MB cached and ~55 MB in memory.
+MAX_HOSTS = 500_000
 _VERDICT_CACHE_MAX = 8192
 
 # Never treat these as blockable even if a list is malformed.
