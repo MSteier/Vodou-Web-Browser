@@ -274,7 +274,12 @@ def to_url(text: str) -> QUrl:
     text = text.strip()
     if not text:
         return QUrl(HOME_URL)
-    if text.startswith(("http://", "https://", "about:", "file:")):
+    # chrome:// reaches the engine's own diagnostic pages (chrome://gpu is the
+    # one worth knowing — it reports what's hardware-accelerated and which
+    # driver workarounds are active). Without it here, such an address has no
+    # dot and no known scheme, so it falls through to the search branch below
+    # and gets sent to SearXNG as a query instead of opening.
+    if text.startswith(("http://", "https://", "about:", "file:", "chrome://")):
         return QUrl(text)
     looks_like_host = " " not in text and (
         "." in text or text.startswith("localhost"))
