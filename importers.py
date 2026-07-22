@@ -22,6 +22,10 @@ from vault import Entry, normalize_site
 # Bounds so a malicious CSV can't bloat the vault or a single field.
 MAX_FIELD = 8192
 MAX_ROWS = 100_000
+# Same idea for the bookmark side, which parses an equally untrusted file:
+# without a cap, one crafted HTML file becomes an unbounded bookmarks.json
+# (and an unbounded bookmarks bar to render on every startup).
+MAX_BOOKMARKS = 20_000
 
 # Header aliases -> canonical field. Matched case-insensitively.
 _URL_KEYS = {"url", "login_uri", "website", "web site", "login url", "hostname"}
@@ -31,10 +35,46 @@ _PASS_KEYS = {"password", "login_password", "pass"}
 _NOTE_KEYS = {"note", "notes", "comment", "comments"}
 
 
+# Leading characters that make a spreadsheet treat a cell as a formula rather
+# than text. Tab and CR count because Excel strips them before parsing.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _defuse_formula(value: str) -> str:
+    """Neutralise a spreadsheet formula hiding in an exported field.
+
+    Vault fields are not all self-authored: parse_password_csv imports them
+    from an arbitrary file, so a site/username/note can begin with '=' and
+    become a live formula (=HYPERLINK, =cmd|…) the moment the export is opened
+    in Excel or LibreOffice. A leading apostrophe is the standard escape.
+
+    It has to be applied to the password column too — a crafted password is as
+    good an injection vector as a crafted note — which makes the escape
+    lossy unless it is reversible. _refuse_formula is that inverse, and the
+    pair is what keeps an exported password importing back as itself.
+    """
+    return "'" + value if value.startswith(_FORMULA_LEAD) else value
+
+
+def _refuse_formula(value: str) -> str:
+    """Undo _defuse_formula: drop a leading apostrophe, but only when it is
+    shielding a formula character.
+
+    Conditioning on the *next* character is what makes this safe to run over
+    every import. A password that genuinely starts with an apostrophe ("'ok")
+    is left alone; only the exact shape this exporter produces ("'=…") is
+    unwrapped. The one value it still mangles is a password literally starting
+    "'=" in a CSV from some other tool — rare enough to accept, and the
+    alternative was exporting live formulas.
+    """
+    return (value[1:] if len(value) >= 2 and value[0] == "'"
+            and value[1] in _FORMULA_LEAD else value)
+
+
 def _pick(row: dict[str, str], keys: set[str]) -> str:
     for header, value in row.items():
         if header and header.strip().lower() in keys and value:
-            return value.strip()[:MAX_FIELD]
+            return _refuse_formula(value.strip())[:MAX_FIELD]
     return ""
 
 
@@ -81,7 +121,8 @@ def write_password_csv(path: Path, entries: list[Entry]) -> None:
         writer.writerow(["name", "url", "username", "password", "note"])
         for e in entries:
             url = e.site if "://" in e.site else f"https://{e.site}"
-            writer.writerow([e.site, url, e.username, e.password, e.notes])
+            writer.writerow([_defuse_formula(v) for v in
+                             (e.site, url, e.username, e.password, e.notes)])
 
 
 class _BookmarkHTMLParser(HTMLParser):
@@ -92,19 +133,24 @@ class _BookmarkHTMLParser(HTMLParser):
         self._title_parts: list[str] = []
 
     def handle_starttag(self, tag, attrs):
-        if tag.lower() == "a":
+        if tag.lower() == "a" and len(self.bookmarks) < MAX_BOOKMARKS:
             href = dict(attrs).get("href", "")
-            if href and href.lower().startswith(("http://", "https://")):
+            # Bounded here as well as by bookmarks.MAX_URL, so an absurd href
+            # is never even held in memory.
+            if (href and len(href) <= MAX_FIELD
+                    and href.lower().startswith(("http://", "https://"))):
                 self._href = href
                 self._title_parts = []
 
     def handle_data(self, data):
-        if self._href is not None:
+        # A title is a display label; cap the accumulated text so one <a> with
+        # megabytes of body content can't be collected in full.
+        if self._href is not None and len(self._title_parts) < 64:
             self._title_parts.append(data)
 
     def handle_endtag(self, tag):
         if tag.lower() == "a" and self._href is not None:
-            title = "".join(self._title_parts).strip()
+            title = "".join(self._title_parts).strip()[:MAX_FIELD]
             self.bookmarks.append(Bookmark(title=title or self._href,
                                            url=self._href))
             self._href = None

@@ -26,6 +26,16 @@ _CHUNK = 1024 * 1024  # overwrite in 1 MiB slices, never file-size buffers
 
 def _shred_file(path: Path) -> bool:
     """Overwrite one file with random bytes, then delete it."""
+    # A symlink must be unlinked, never opened: "r+b" would follow it and
+    # overwrite whatever it points at. Nothing Vodou writes under the profile
+    # is a link, so one here was planted — and the shredder is the last thing
+    # that should be turned into an arbitrary-file-destruction primitive.
+    try:
+        if path.is_symlink():
+            path.unlink()
+            return True
+    except OSError:
+        return False
     for attempt in (1, 2):
         try:
             size = path.stat().st_size

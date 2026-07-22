@@ -1,13 +1,15 @@
 """About dialog: version info, update check, and a one-click updater.
 
-Vodou has two independently updatable parts:
+Vodou has three independently updatable parts:
   * the app itself — this git checkout; updated with `git pull`
   * the engine — the Chromium/Qt build bundled in the PyQt6-WebEngine
     package; updated with `pip install --upgrade`
+  * the malicious-site definitions — the local Safe Browsing host lists,
+    refreshed straight from their public feeds (see safebrowsing.py)
 
-UpdateChecker discovers newer versions of either (GitHub raw for the app's
-APP_VERSION, PyPI's JSON API for the engine) without blocking the UI, and
-AboutDialog's single button updates both in sequence. Both subprocesses run
+UpdateChecker discovers newer versions of the first two (GitHub raw for the
+app's APP_VERSION, PyPI's JSON API for the engine) without blocking the UI, and
+AboutDialog's single button updates all three in sequence. Both subprocesses run
 through QProcess so the UI stays responsive.
 """
 
@@ -26,6 +28,7 @@ from PyQt6.QtCore import (
     QProcess,
     QSize,
     Qt,
+    QTimer,
     QUrl,
     pyqtSignal,
 )
@@ -41,7 +44,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.14.1"
+APP_VERSION = "1.14.2"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -158,6 +161,11 @@ class UpdateChecker(QObject):
 # matching Qt/Chromium binaries; PyQt6 keeps the widget layer in step.
 _ENGINE_PACKAGES = ["PyQt6", "PyQt6-WebEngine"]
 
+# How long the definitions step waits for the feeds before giving up on them.
+# SafeBrowsing.refresh() is fire-and-forget and stays silent when every feed
+# fails, so the wait must be bounded or the summary would never appear.
+_DEFINITIONS_TIMEOUT_MS = 60_000
+
 
 def engine_versions() -> dict[str, str]:
     """Best-effort version strings for the About screen."""
@@ -188,12 +196,19 @@ class AboutDialog(QDialog):
     # its footer version tag after a one-click update run.
     update_finished = pyqtSignal(bool, bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, safe_browsing=None):
         super().__init__(parent)
         self.setWindowTitle("About Vodou")
         self.setMinimumWidth(420)
         self._proc: QProcess | None = None
         self._output = ""
+        # The live SafeBrowsing instance, so the update run can refresh the
+        # malicious-site definitions too. None when the caller has none, in
+        # which case that step is simply skipped.
+        self._safe_browsing = safe_browsing
+        self._defs_timer: QTimer | None = None
+        self._defs_done = True
+        self._defs_before = 0
 
         outer = QVBoxLayout(self)
 
@@ -241,9 +256,9 @@ class AboutDialog(QDialog):
         buttons = QHBoxLayout()
         self.update_btn = QPushButton("Update Vodou && engine…")
         self.update_btn.setToolTip(
-            "One click updates both parts: pulls the latest Vodou from "
-            "GitHub, then upgrades the bundled Chromium engine and Qt "
-            "toolkit via pip")
+            "One click updates every part: pulls the latest Vodou from "
+            "GitHub, upgrades the bundled Chromium engine and Qt toolkit via "
+            "pip, then re-downloads the malicious-site definitions")
         self.update_btn.clicked.connect(self._update_all)
         buttons.addWidget(self.update_btn)
         buttons.addStretch()
@@ -261,9 +276,11 @@ class AboutDialog(QDialog):
         box.setWindowTitle("Update Vodou & engine")
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(
-            "This updates both parts of the browser in one go:\n\n"
+            "This updates every part of the browser in one go:\n\n"
             "1. Vodou itself — pulls the latest version from GitHub\n"
-            "2. The engine — upgrades the bundled Chromium/Qt via pip\n\n"
+            "2. The engine — upgrades the bundled Chromium/Qt via pip\n"
+            "3. Malicious-site definitions — re-downloads the phishing and "
+            "malware lists\n\n"
             "An engine update can download a few hundred MB. Vodou stays "
             "usable while it runs; you'll get a summary when it finishes.\n\n"
             "Update now?")
@@ -276,15 +293,30 @@ class AboutDialog(QDialog):
         self.update_btn.setEnabled(False)
         self.update_btn.setText("Updating…")
         self.status.show()
-        self._results: list[str] = []
+        # (line, is_already_current) — the flag lets _finish drop "nothing to
+        # do here" notes once some other part did update.
+        self._results: list[tuple[str, bool]] = []
         # Real flags, so "was something applied?" never depends on matching the
         # wording of a status string.
         self._app_updated = False
         self._engine_updated = False
+        # Definitions are data, not code: they count as "something updated"
+        # for the wording, but they never call for a restart.
+        self._defs_updated = False
         # Commit the running process started on — compared against HEAD after
         # the pull to tell an actual update apart from "already current".
         self._git_old_head = _git_head()
         self._start_git()
+
+    def _note(self, text: str) -> None:
+        """Record a summary line about something that happened."""
+        self._results.append((text, False))
+
+    def _note_already_current(self, text: str) -> None:
+        """Record a 'this part needed nothing' line. Shown only when no part
+        updated at all — after a real update, telling the user they already
+        have the current version reads as a contradiction of the headline."""
+        self._results.append((text, True))
 
     def _start_proc(self, on_finished, on_error, program: str,
                     args: list[str], workdir: str | None = None) -> None:
@@ -308,12 +340,12 @@ class AboutDialog(QDialog):
     # step 1: the app itself
     def _start_git(self) -> None:
         if not (_REPO_DIR / ".git").exists():
-            self._results.append(
+            self._note(
                 "Vodou app: skipped — this copy is not a git checkout. "
                 f"Get updates from {REPO_URL}")
             self._start_pip()
             return
-        self.status.setText("Step 1/2: updating Vodou from GitHub…")
+        self.status.setText("Step 1/3: updating Vodou from GitHub…")
         # --ff-only so a locally modified checkout is never merged or
         # rebased behind the user's back — it fails loudly instead.
         self._start_proc(self._git_finished, self._git_error,
@@ -323,7 +355,7 @@ class AboutDialog(QDialog):
         if self._proc is None:
             return
         self._proc = None
-        self._results.append(
+        self._note(
             "Vodou app: could not run git — update manually from "
             f"{REPO_URL}")
         self._start_pip()
@@ -333,14 +365,15 @@ class AboutDialog(QDialog):
         out, self._proc = self._output, None
         if exit_code != 0:
             tail = (out.strip().splitlines() or ["unknown git error"])[-1]
-            self._results.append(f"Vodou app: update FAILED — {tail}")
+            self._note(f"Vodou app: update FAILED — {tail}")
             self._start_pip()
             return
         new_head = _git_head()
         already = "Already up to date" in out or (
             self._git_old_head and new_head == self._git_old_head)
         if already:
-            self._results.append("Vodou app: already the current version.")
+            self._note_already_current(
+                "Vodou app: already the current version.")
             self._start_pip()
             return
         # A real update landed. Report the version change, then fetch the list
@@ -348,11 +381,11 @@ class AboutDialog(QDialog):
         self._app_updated = True
         new_version = _read_local_app_version()
         if new_version and new_version != APP_VERSION:
-            self._results.append(
+            self._note(
                 f"Vodou app: UPDATED {APP_VERSION} → {new_version} "
                 "(restart to apply).")
         else:
-            self._results.append("Vodou app: UPDATED (restart to apply).")
+            self._note("Vodou app: UPDATED (restart to apply).")
         if self._git_old_head and new_head:
             self._start_git_log(self._git_old_head, new_head)
         else:
@@ -382,12 +415,12 @@ class AboutDialog(QDialog):
             extra = len(subjects) - len(shown)
             if extra > 0:
                 lines += f"\n   • …and {extra} more change(s)"
-            self._results.append("What changed:\n" + lines)
+            self._note("What changed:\n" + lines)
         self._start_pip()
 
     # step 2: the engine
     def _start_pip(self) -> None:
-        self.status.setText("Step 2/2: checking the Chromium engine on PyPI — "
+        self.status.setText("Step 2/3: checking the Chromium engine on PyPI — "
                             "this can take a few minutes…")
         self._start_proc(self._pip_finished, self._pip_error,
                          sys.executable,
@@ -398,10 +431,10 @@ class AboutDialog(QDialog):
         if self._proc is None:
             return
         self._proc = None
-        self._results.append(
+        self._note(
             "Engine: could not launch pip — update manually with:  "
             "python -m pip install --upgrade " + " ".join(_ENGINE_PACKAGES))
-        self._finish()
+        self._start_definitions()
 
     @staticmethod
     def _parse_pip_installed(out: str) -> str:
@@ -426,43 +459,126 @@ class AboutDialog(QDialog):
             if "CERTIFICATE_VERIFY_FAILED" in out or "SSLError" in out:
                 hint = (" This looks like your antivirus intercepting TLS; "
                         "installing 'pip-system-certs' fixes it.")
-            self._results.append(
+            self._note(
                 f"Engine: update FAILED (exit code {exit_code}).{hint}\n"
                 f"{tail}")
-            self._finish()
+            self._start_definitions()
             return
         installed = self._parse_pip_installed(out)
         if installed:
             self._engine_updated = True
-            self._results.append(
-                f"Engine: UPDATED to {installed} (restart to apply).")
+            self._note(f"Engine: UPDATED to {installed} (restart to apply).")
         else:
-            self._results.append("Engine: already the current version.")
+            self._note_already_current("Engine: already the current version.")
+        self._start_definitions()
+
+    # step 3: the malicious-site definitions
+    def _start_definitions(self) -> None:
+        """Re-download the Safe Browsing host lists as part of the run.
+
+        These go stale far faster than the app or the engine — phishing
+        domains live hours — so a user who updates everything else and is
+        still checking against week-old lists has the weakest part left
+        untouched.
+        """
+        sb = self._safe_browsing
+        if sb is None:
+            self._finish()
+            return
+        if not sb.enabled:
+            self._note("Malicious-site definitions: skipped — Safe Browsing "
+                       "is turned off.")
+            self._finish()
+            return
+        self.status.setText(
+            "Step 3/3: refreshing the malicious-site definitions…")
+        self._defs_before = sb.count()
+        self._defs_done = False
+        sb.updated.connect(self._on_definitions_updated)
+        self._defs_timer = QTimer(self)
+        self._defs_timer.setSingleShot(True)
+        self._defs_timer.timeout.connect(
+            lambda: self._definitions_done(False))
+        self._defs_timer.start(_DEFINITIONS_TIMEOUT_MS)
+        sb.refresh()
+
+    def _on_definitions_updated(self, _count: int) -> None:
+        self._definitions_done(True)
+
+    def _definitions_done(self, refreshed: bool) -> None:
+        # The signal and the timeout race; whichever lands first wins.
+        if self._defs_done:
+            return
+        self._defs_done = True
+        if self._defs_timer is not None:
+            self._defs_timer.stop()
+            self._defs_timer = None
+        sb = self._safe_browsing
+        try:
+            sb.updated.disconnect(self._on_definitions_updated)
+        except TypeError:
+            pass
+        if refreshed:
+            now = sb.count()
+            delta = now - self._defs_before
+            if delta:
+                self._defs_updated = True
+                self._note(f"Malicious-site definitions: UPDATED — "
+                           f"{now:,} sites known ({delta:+,}).")
+            else:
+                self._note_already_current(
+                    f"Malicious-site definitions: already current — "
+                    f"{now:,} sites known.")
+        else:
+            # Deliberately worded to avoid the FAILED / "could not" markers
+            # _finish scans for. safebrowsing.py's whole design is that a bad
+            # feed keeps the existing cache rather than dropping protection,
+            # so a transient feed outage must not turn a clean app + engine
+            # update into "Update failed".
+            self._note(
+                "Malicious-site definitions: not refreshed this time — the "
+                f"lists were unreachable. The {self._defs_before:,} sites "
+                "already downloaded stay in effect, and Vodou retries every "
+                "12 hours.")
         self._finish()
 
     def _finish(self) -> None:
         self.update_btn.setEnabled(True)
         self.update_btn.setText("Update Vodou && engine…")
         self.status.hide()
-        summary = "\n\n".join(self._results)
-        updated = self._app_updated or self._engine_updated
-        trouble = any(("FAILED" in r) or ("could not" in r)
-                      for r in self._results)
+        # Only new code needs a restart; refreshed definitions take effect at
+        # once, so they must not raise the restart prompt.
+        restart_needed = self._app_updated or self._engine_updated
+        updated = restart_needed or self._defs_updated
+        # Once anything did update, drop the "already the current version"
+        # notes — they contradict the headline the user is reading.
+        lines = [text for text, is_current in self._results
+                 if not (updated and is_current)]
+        summary = "\n\n".join(lines)
+        trouble = any(("FAILED" in text) or ("could not" in text)
+                      for text, _ in self._results)
 
         # Which parts were actually applied, for a plain-language verdict.
-        parts = []
+        # Each carries whether it takes a plural verb on its own, so a
+        # definitions-only run doesn't read "the definitions was updated".
+        parts: list[tuple[str, bool]] = []
         if self._app_updated:
-            parts.append("Vodou")
+            parts.append(("Vodou", False))
         if self._engine_updated:
-            parts.append("the engine")
-        what = " and ".join(parts)
-        verb = "were" if len(parts) > 1 else "was"
-        restart = "Close and reopen Vodou to start using the new version."
+            parts.append(("the engine", False))
+        if self._defs_updated:
+            parts.append(("the malicious-site definitions", True))
+        labels = [label for label, _ in parts]
+        what = (" and ".join(labels) if len(labels) < 3
+                else ", ".join(labels[:-1]) + " and " + labels[-1])
+        verb = "were" if len(parts) > 1 or (parts and parts[0][1]) else "was"
+        restart = ("\n\nClose and reopen Vodou to start using the new version."
+                   if restart_needed else "")
 
         if updated and trouble:
             icon, title = QMessageBox.Icon.Warning, "Update partly applied"
             text = (f"Some parts updated, but not everything succeeded — "
-                    f"{what} {verb} updated.\n\n{summary}\n\n{restart}")
+                    f"{what} {verb} updated.\n\n{summary}{restart}")
         elif trouble:
             icon, title = QMessageBox.Icon.Warning, "Update failed"
             text = (f"The update did not complete and nothing was changed.\n\n"
@@ -471,7 +587,7 @@ class AboutDialog(QDialog):
             icon, title = (QMessageBox.Icon.Information,
                            "Update applied successfully")
             text = (f"Update applied successfully — {what} {verb} updated.\n\n"
-                    f"{summary}\n\n{restart}")
+                    f"{summary}{restart}")
         else:
             icon, title = QMessageBox.Icon.Information, "No update needed"
             text = ("You are already running the most current version of "
@@ -485,4 +601,6 @@ class AboutDialog(QDialog):
         # let QMessageBox's rich-text auto-detection interpret it.
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.exec()
-        self.update_finished.emit(updated, trouble)
+        # Deliberately restart_needed, not updated: the footer tag is about
+        # the running code, which a definitions refresh does not change.
+        self.update_finished.emit(restart_needed, trouble)

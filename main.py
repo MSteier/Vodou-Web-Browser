@@ -207,6 +207,28 @@ def migrate_config_dir(old: Path = LEGACY_VAULT_DIR,
         return True
     return False
 
+def secure_config_dir(path: Path = VAULT_DIR) -> None:
+    """Create ~/.vodou owner-only, before anything else writes into it.
+
+    A dozen modules create this directory on demand with plain
+    mkdir(parents=True), which takes the process umask — typically 0o755 on
+    POSIX, i.e. readable by every other local account. What sits inside is not
+    all encrypted: dpapi.py falls back to writing the cookie jar in PLAINTEXT
+    off Windows, session.json holds open-tab URLs, and even the vault leaks its
+    salt and ciphertext to anyone who can copy it for an offline attack.
+    Doing this once here fixes all of them, because mkdir(exist_ok=True) never
+    changes the mode of a directory that already exists.
+
+    A no-op on Windows, where the profile inherits the user's ACL already.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            os.chmod(path, 0o700)
+    except OSError:
+        pass  # a locked or exotic filesystem must not stop the browser
+
+
 def _searxng_base() -> str:
     """Where Vodou's search lives. Defaults to the bundled Docker stack
     (https://localhost/searxng); override with the VODOU_SEARXNG_URL
@@ -1688,7 +1710,10 @@ class BrowserWindow(QMainWindow):
             f"Theme: {self._theme_name} · {self._mode.capitalize()} mode", 4000)
 
     def show_about(self) -> None:
-        dialog = AboutDialog(self)
+        # Hand it the live SafeBrowsing instance so the one-click update
+        # refreshes the malicious-site definitions along with the app and
+        # engine — those lists go stale fastest of the three.
+        dialog = AboutDialog(self, safe_browsing=self.safe_browsing)
         dialog.update_finished.connect(self._on_update_finished)
         dialog.exec()
 
@@ -2208,6 +2233,11 @@ class BrowserWindow(QMainWindow):
     def show_ai_options(self) -> None:
         cfg = self.ai_cfg
         from ai_search import CONFIG_FILE
+        # A non-local endpoint in the config file was overridden at load time
+        # rather than honoured; say so, or the setting would look ignored.
+        rejected = ("\n              ⚠ the address in the config file was not "
+                    "on this machine, so it was ignored"
+                    if cfg.get("endpoint_rejected") else "")
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle("Local AI options")
@@ -2221,7 +2251,7 @@ class BrowserWindow(QMainWindow):
             "its address, or your history.\n\n"
             f"Enabled:      {'yes' if cfg.get('enabled') else 'no'}\n"
             f"Model:        {cfg.get('model')}\n"
-            f"Ollama URL:   {cfg.get('endpoint')}\n"
+            f"Ollama URL:   {cfg.get('endpoint')}{rejected}\n"
             f"Results used: {cfg.get('max_results')}\n"
             f"Chat memory:  {cfg.get('max_turns')} messages\n"
             f"Keep-alive:   {cfg.get('keep_alive')}  "
@@ -2626,6 +2656,9 @@ class BrowserWindow(QMainWindow):
 
 def main() -> None:
     migrate_config_dir()
+    # Before the first write of the run — every module below assumes the
+    # directory it writes into is already private.
+    secure_config_dir()
     # A leftover profile folder means the last run ended before its exit
     # wipe (crash/kill) — shred it before the engine starts and recreates it.
     shred_dir(PROFILE_DIR)

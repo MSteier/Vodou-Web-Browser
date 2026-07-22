@@ -220,11 +220,44 @@ FIREFOX_UA_BYTES = FIREFOX_USER_AGENT.encode()
 
 _GOOGLE_AUTH_HOSTS = frozenset({"accounts.google.com", "accounts.youtube.com"})
 
+# Second-level labels Google's ccTLD domains actually use ahead of a country
+# code (google.co.uk, google.com.au, google.com.br…).
+_GOOGLE_SECOND_LEVEL = frozenset({"co", "com", "net", "org"})
+
+
+def _google_tld(rest: str) -> bool:
+    """True if `rest` looks like the TLD part of a google.<tld> domain.
+
+    Accepts a single short alphabetic TLD ("com", "de", "fr") or a
+    second-level public suffix ("co.uk", "com.au") — nothing else.
+    """
+    labels = rest.split(".")
+    if len(labels) == 1:
+        return 2 <= len(labels[0]) <= 3 and labels[0].isalpha()
+    if len(labels) == 2:
+        return (labels[0] in _GOOGLE_SECOND_LEVEL
+                and len(labels[1]) == 2 and labels[1].isalpha())
+    return False
+
 
 def google_auth_host(host: str) -> bool:
     """True for Google's sign-in hosts (including ccTLD variants like
-    accounts.google.co.uk that the sign-in flow can bounce through)."""
-    return host in _GOOGLE_AUTH_HOSTS or host.startswith("accounts.google.")
+    accounts.google.co.uk that the sign-in flow can bounce through).
+
+    The tail is validated as an actual TLD rather than accepted as any
+    "accounts.google.*" prefix. A bare prefix test also matched
+    accounts.google.evil.com — a name anyone can create under a domain they
+    own — and matching here is not cosmetic: interceptRequest refreshes
+    _last_auth_nav from it, which pins the Firefox identity **profile-wide**
+    for _AUTH_HOLD_SECONDS. That let any website flip the identity Vodou
+    presents to every other site, and get FIREFOX_QUIRK_JS injected into its
+    own main world. Residual risk is now limited to someone owning an actual
+    google.<tld>, which is a far narrower set than "any domain at all".
+    """
+    if host in _GOOGLE_AUTH_HOSTS:
+        return True
+    prefix = "accounts.google."
+    return host.startswith(prefix) and _google_tld(host[len(prefix):])
 
 
 # QtWebEngine's WebAuthn performs the actual ceremonies fine (Windows Hello
@@ -286,8 +319,28 @@ FIREFOX_QUIRK_JS = """\
 (function () {
     "use strict";
     var h = location.host;
-    if (h !== "accounts.google.com" && h !== "accounts.youtube.com"
-            && h.indexOf("accounts.google.") !== 0) {
+    // Mirrors privacy.google_auth_host: the tail after "accounts.google."
+    // must be a real TLD ("de", "co.uk"), not just any suffix — otherwise
+    // accounts.google.evil.com, which anyone can create, gets this shim.
+    function googleAuthHost(host) {
+        if (host === "accounts.google.com" || host === "accounts.youtube.com") {
+            return true;
+        }
+        var prefix = "accounts.google.";
+        if (host.indexOf(prefix) !== 0) {
+            return false;
+        }
+        var labels = host.slice(prefix.length).split(".");
+        if (labels.length === 1) {
+            return /^[a-z]{2,3}$/.test(labels[0]);
+        }
+        if (labels.length === 2) {
+            return /^(co|com|net|org)$/.test(labels[0])
+                && /^[a-z]{2}$/.test(labels[1]);
+        }
+        return false;
+    }
+    if (!googleAuthHost(h)) {
         return;
     }
     try { delete window.chrome; } catch (e) {}

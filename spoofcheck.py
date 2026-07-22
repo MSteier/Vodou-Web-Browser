@@ -400,4 +400,15 @@ def safe_download_name(name: str) -> str:
     # Reserved device name (bare or with an extension) -> prefix to neutralise.
     if cleaned.split(".", 1)[0].lower() in _WIN_RESERVED:
         cleaned = "_" + cleaned
-    return cleaned[:255]
+    if len(cleaned) <= 255:
+        return cleaned
+    # Over the length limit: shorten the stem and keep the real extension.
+    # A blind cleaned[:255] cuts wherever it lands, which can promote an
+    # earlier extension into the last one — "<250 chars>.exe.txt" truncates to
+    # a name ending ".exe". The suffix is what both the drive-by check and
+    # Windows go by, so trimming the stem is the only truncation that leaves
+    # the file being what it was named.
+    stem, dot, suffix = cleaned.rpartition(".")
+    if not dot or len(suffix) > 16:
+        return cleaned[:255]
+    return (stem[:255 - len(suffix) - 1] + "." + suffix)[:255]

@@ -21,6 +21,10 @@ How it fits together:
   * Reasoning models (e.g. deepseek-r1) emit a <think>…</think> block first;
     that reasoning is hidden and only the final answer is shown.
 
+`endpoint` must address this machine (localhost / 127.x / ::1). Anything else
+is rejected and the default is used instead — see is_local_endpoint. The
+on-device promise above is worth only as much as that check.
+
 Config lives in ~/.vodou/ai_search.json (all keys optional):
   { "enabled": true, "endpoint": "http://127.0.0.1:11434",
     "model": "deepseek-r1:8b", "max_results": 6,
@@ -37,6 +41,7 @@ after, minimising any contention with your other local-LLM work.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from pathlib import Path
@@ -58,6 +63,34 @@ DEFAULTS = {
 }
 
 
+# Hosts the endpoint may point at. The whole promise of this module is that a
+# question never leaves the machine, and `endpoint` is read from a plain JSON
+# file — so a typo, a bad merge, or anything else that can write to the profile
+# directory could silently redirect every typed question and search query to a
+# remote server while the UI still says "on your device". Enforcing loopback
+# here makes that promise something the code guarantees rather than documents.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def is_local_endpoint(endpoint: str) -> bool:
+    """True if `endpoint` addresses this machine over plain HTTP(S).
+
+    The numeric case is parsed as an address, never matched as a "127."
+    prefix — a prefix test also accepts the hostname 127.0.0.1.example.net,
+    which resolves wherever its owner points it.
+    """
+    url = QUrl(str(endpoint))
+    if url.scheme() not in ("http", "https"):
+        return False
+    host = url.host().lower()
+    if host in _LOOPBACK_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False          # not an IP literal, and not a loopback name
+
+
 def load_config() -> dict:
     cfg = dict(DEFAULTS)
     try:
@@ -66,6 +99,9 @@ def load_config() -> dict:
             cfg.update({k: data[k] for k in DEFAULTS if k in data})
     except (OSError, ValueError, TypeError):
         pass
+    if not is_local_endpoint(cfg.get("endpoint", "")):
+        cfg["endpoint"] = DEFAULTS["endpoint"]
+        cfg["endpoint_rejected"] = True
     return cfg
 
 
@@ -225,11 +261,25 @@ class OllamaClient(QObject):
     def busy(self) -> bool:
         return self._reply is not None
 
+    @staticmethod
+    def _endpoint(cfg: dict) -> str | None:
+        """The endpoint to talk to, or None if it isn't on this machine.
+
+        Checked again here, not just in load_config, because this is the line
+        the bytes actually leave through — a cfg assembled anywhere else must
+        not be able to route a question off-device.
+        """
+        endpoint = str(cfg.get("endpoint", DEFAULTS["endpoint"])).rstrip("/")
+        return endpoint if is_local_endpoint(endpoint) else None
+
     def list_models(self, cfg: dict, callback) -> None:
         """Fetch the models installed in the local Ollama (GET /api/tags) and
         hand the callback a list of their names. Empty list on any failure —
         the picker simply keeps whatever it already had."""
-        endpoint = str(cfg.get("endpoint", DEFAULTS["endpoint"])).rstrip("/")
+        endpoint = self._endpoint(cfg)
+        if endpoint is None:
+            callback([])
+            return
         reply = self._nam.get(QNetworkRequest(QUrl(endpoint + "/api/tags")))
         reply.finished.connect(lambda r=reply: self._on_models(r, callback))
 
@@ -265,7 +315,13 @@ class OllamaClient(QObject):
         self._got_content = False
         self._was_thinking = None
 
-        endpoint = str(cfg.get("endpoint", DEFAULTS["endpoint"])).rstrip("/")
+        endpoint = self._endpoint(cfg)
+        if endpoint is None:
+            self.failed.emit(
+                "Refusing to send this off your device: the configured Ollama "
+                "address is not on this machine. Local AI only ever talks to "
+                "127.0.0.1 — fix \"endpoint\" in ai_search.json.")
+            return
         req = QNetworkRequest(QUrl(endpoint + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")

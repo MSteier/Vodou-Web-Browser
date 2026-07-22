@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import secrets
 import string
 from dataclasses import dataclass, asdict
@@ -299,6 +300,15 @@ class Vault:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(blob), encoding="utf-8")
+        # Narrow the mode BEFORE the rename, so the live vault file is never
+        # momentarily world-readable. The contents are encrypted either way;
+        # this denies other local accounts the salt and ciphertext they would
+        # need to mount an offline attack on the master password.
+        if os.name == "posix":
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
         tmp.replace(self.path)
 
 
