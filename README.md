@@ -47,6 +47,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+**Linux — one extra thing.** `requirements.txt` also pulls `keyring` there.
+Windows seals the saved-cookie jar with DPAPI; Linux has no equivalent, so
+Vodou keeps that jar's key in your desktop keyring instead. GNOME and KDE
+ship one already (GNOME Keyring / KWallet). On a minimal window manager,
+install one:
+
+```bash
+sudo apt install gnome-keyring     # Debian/Ubuntu
+sudo dnf install gnome-keyring     # Fedora
+```
+
+Without a keyring, everything works except **cookie exceptions**, which turn
+themselves off — Vodou will not write your saved logins to disk unencrypted,
+and the cookie dialog says so plainly. If your session runs Wayland and Vodou
+fails to start, try `QT_QPA_PLATFORM=xcb python main.py`.
+
 **Run**
 
 ```bash
@@ -86,8 +102,19 @@ See [`docker/README.md`](docker/README.md) for details (GPU, custom models,
 port conflicts). To point Vodou at a search instance elsewhere, set
 `VODOU_SEARXNG_URL` or `~/.vodou/config.json` `{"searxng_url": "…"}`.
 
-**Optional — desktop shortcut / icon:** the repo ships `vodou.ico` for creating a
-desktop or Start-menu shortcut that points at `python main.py`.
+**Optional — desktop shortcut / icon:** on Windows the repo ships `vodou.ico`
+for creating a desktop or Start-menu shortcut that points at `python main.py`.
+On Linux, `packaging/install-linux.sh` adds Vodou to your application menu:
+
+```bash
+sh packaging/install-linux.sh
+```
+
+It writes only a launcher and an icon under `~/.local/share` (no root, no
+package manager) and leaves the code running from this checkout, which is what
+the in-app updater expects. Vodou does not register as your default browser:
+it ignores command-line arguments, so a link handed to it would open the home
+page instead of the link.
 
 ## Privacy features
 
@@ -292,11 +319,15 @@ exceptions…** lists the sites that are exempt: add a bare host like
   at the next start. QtWebEngine's cookie persistence is profile-wide
   (all-or-nothing), so Vodou does the selection itself: it watches the live
   cookie store and keeps only the allowlisted subset.
-- **Encrypted at rest with Windows DPAPI** — the same per-user OS
-  encryption Chrome uses for its own cookie database, so no password prompt
-  and no other Windows account can read it. *Honest limit:* as with
-  Chrome's jar, software running as **you** could decrypt it. On
-  non-Windows platforms the jar is written unencrypted.
+- **Encrypted at rest with the OS keystore** — Windows DPAPI (the same
+  per-user encryption Chrome uses for its own cookie database) or, on Linux,
+  a key held in your desktop keyring. Either way there's no password prompt
+  and no other local account can read it. *Honest limit:* as with Chrome's
+  jar, software running as **you** could decrypt it.
+- **No plaintext fallback.** Where no keystore is available (a headless box,
+  or Linux with no keyring service), cookie keeping switches itself off and
+  the dialog says so. These are live login credentials; forgetting them is
+  the better failure.
 - Only real persistent cookies are kept: session cookies (which the site
   itself marks as "die with the browser") are never saved, and expired ones
   are dropped on restore.
@@ -436,6 +467,12 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   rest of the session, and the footer shows each change (e.g. "Zoom: 125%").
 
 ## Graphics
+
+The three profiles below exist on every platform, but the flags behind them
+differ, because ANGLE's backends do: Direct3D on Windows, and on Linux
+whatever Chromium's own GPU detection picks (Vodou adds nothing to the Linux
+default — Chromium's driver blocklist knows more about Mesa than a Windows
+developer could).
 
 Some Windows GPU drivers make Qt WebEngine's hardware compositor flicker on
 pages that combine "frosted glass" (`backdrop-filter`) styling, WebGL, and a
@@ -584,6 +621,11 @@ Reliability details (each cost real debugging time):
   authenticator: yes; conditional/autofill passkey UI: no — which steers
   sites onto the modal Windows Hello flow that works. The same engine bug
   also breaks e.g. ChatGPT's login modal, so the shim is site-agnostic.
+  *On Linux* the shim answers **no** to the platform-authenticator questions,
+  because there is no Windows Hello equivalent behind Qt WebEngine there;
+  claiming one would push sites onto a modal flow that can't complete and
+  hide the security-key path that does. Passkeys on Linux therefore mean a
+  hardware key rather than a built-in authenticator.
 
 ## License
 

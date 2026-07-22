@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from cookies import CookieKeeper
 from vault import normalize_site
 
 
@@ -36,6 +37,22 @@ class CookieSitesDialog(QDialog):
         intro.setTextFormat(Qt.TextFormat.PlainText)
         intro.setWordWrap(True)
         outer.addWidget(intro)
+
+        # "saved (encrypted)" above is a promise Vodou keeps by not saving at
+        # all when it can't encrypt. Say so here rather than let the list look
+        # like it is working.
+        problem = CookieKeeper.keystore_problem()
+        if problem:
+            warning = QLabel(
+                "Cookie keeping is unavailable on this system, so nothing "
+                f"below will be saved: {problem}.\n\n"
+                "Vodou stores the jar's key in your desktop keyring and "
+                "won't write cookies without it. Installing a keyring "
+                "service (GNOME Keyring or KWallet) enables this.")
+            warning.setTextFormat(Qt.TextFormat.PlainText)
+            warning.setWordWrap(True)
+            warning.setStyleSheet("font-weight: 600;")
+            outer.addWidget(warning)
 
         self.listing = QListWidget()
         self.listing.addItems(sorted(set(sites)))

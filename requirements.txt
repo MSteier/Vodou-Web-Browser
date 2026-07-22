@@ -5,3 +5,7 @@
 PyQt6>=6.6
 PyQt6-WebEngine>=6.6
 cryptography>=42.0
+# Off Windows there is no DPAPI, so the cookie jar's key lives in the desktop
+# keyring instead (see dpapi.py). Windows skips this via the environment
+# marker — pip evaluates it, so one requirements file serves every platform.
+keyring>=24.0; sys_platform != "win32"

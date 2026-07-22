@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Vodou
+GenericName=Web Browser
+Comment=Privacy-centric browser with a built-in password manager
+Exec=@EXEC@
+Icon=vodou
+Terminal=false
+Categories=Network;WebBrowser;
+Keywords=browser;web;internet;privacy;
+StartupNotify=true
+StartupWMClass=vodou
+
+# Deliberately no MimeType= and no %u in Exec. Declaring
+# x-scheme-handler/http would offer Vodou as the system default browser, but
+# main() ignores argv entirely — every link click would open the SearXNG home
+# page instead of the link. Better not to be listed than to be listed and
+# swallow the URL. Restore both lines together if URL arguments are ever
+# handled.

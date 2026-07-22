@@ -23,7 +23,11 @@ import os
 import sys
 from pathlib import Path
 
-# Graphics profile. The default is tuned for integrated graphics:
+# Graphics profile. The mode names are the same everywhere (the ☰ menu and
+# --gfx are platform-independent); the flags behind them are not, because
+# ANGLE's backends aren't. d3d11 and warp are Direct3D, i.e. Windows-only.
+#
+# Windows — the default is tuned for integrated graphics:
 #   --disable-direct-composition  stops the input-field blink — Windows'
 #                                 overlay compositor misbehaves with many
 #                                 Intel/AMD iGPU drivers
@@ -38,7 +42,7 @@ from pathlib import Path
 #   python main.py --gfx gl        # native OpenGL instead of ANGLE->D3D11
 #   python main.py --gfx warp      # Microsoft WARP software rasterizer
 #   python main.py --gfx software  # no GPU at all (WebGL slow but stable)
-GFX_MODES = {
+_GFX_MODES_WINDOWS = {
     "default": ("--disable-direct-composition "
                 "--use-angle=d3d11 "
                 "--enable-gpu-rasterization "
@@ -49,6 +53,30 @@ GFX_MODES = {
     "warp": "--use-angle=warp",
     "software": "--disable-gpu",
 }
+
+# Elsewhere (Linux/BSD) the default deliberately adds NOTHING. The Windows
+# defaults above were each chosen to work around a specific Windows driver
+# bug; none of those bugs exist here, and the flags that fix them are either
+# meaningless (direct composition) or actively risky on the enormous range of
+# Mesa/proprietary drivers in the wild. Chromium's own Linux heuristics —
+# including its GPU blocklist for known-bad driver versions — are better
+# informed than anything that could be guessed from a Windows machine, so the
+# default is to let them decide. "default" and "vanilla" are therefore the
+# same thing here; that is honest rather than accidental.
+#   --gfx gl        native OpenGL, bypassing ANGLE's translation layer
+#   --gfx warp      SwiftShader — the CPU rasterizer, WARP's counterpart
+#   --gfx software  no GPU at all
+_GFX_MODES_POSIX = {
+    "default": "",
+    "vanilla": "",
+    "compat": "--disable-gpu-compositing",
+    "gl": "--use-angle=gl",
+    "warp": "--use-angle=swiftshader",
+    "software": "--disable-gpu",
+}
+
+GFX_MODES = (_GFX_MODES_WINDOWS if sys.platform == "win32"
+             else _GFX_MODES_POSIX)
 
 
 GFX_FILE = Path.home() / ".vodou" / "graphics.json"
@@ -2664,6 +2692,11 @@ def main() -> None:
     shred_dir(PROFILE_DIR)
     app = QApplication(sys.argv)
     app.setApplicationName("Vodou Browser")
+    # Ties the window to packaging/vodou.desktop so Linux desktops show the
+    # Vodou icon in the taskbar and group its windows, instead of deriving
+    # WM_CLASS from argv[0] and labelling everything "main.py". Ignored on
+    # Windows, where the icon comes from the executable.
+    app.setDesktopFileName("vodou")
     apply_theme(app)
     window = BrowserWindow()
     window.show()

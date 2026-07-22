@@ -242,7 +242,8 @@ class AboutDialog(QDialog):
         rows.setTextFormat(Qt.TextFormat.PlainText)
         rows.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
-        rows.setStyleSheet("font-family: 'Consolas', monospace; "
+        rows.setStyleSheet("font-family: Consolas, 'JetBrains Mono', "
+                           "'Ubuntu Mono', 'DejaVu Sans Mono', monospace; "
                            "padding: 12px 4px;")
         outer.addWidget(rows)
 

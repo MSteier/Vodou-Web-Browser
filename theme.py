@@ -126,7 +126,8 @@ def save_prefs(theme_name: str, mode: str) -> None:
 def build_qss(p: Palette) -> str:
     return f"""
 * {{
-    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    font-family: "Segoe UI Variable Text", "Segoe UI", "Cantarell",
+                 "Ubuntu", "Noto Sans", "DejaVu Sans", sans-serif;
     font-size: 10pt;
 }}
 
@@ -359,7 +360,8 @@ QComboBox#aiModelCombo {{
     border-radius: 6px;
     padding: 1px 6px;
     font-size: 8.5pt;
-    font-family: 'Consolas', monospace;
+    font-family: Consolas, "JetBrains Mono", "Ubuntu Mono",
+                 "DejaVu Sans Mono", monospace;
     min-width: 120px;
 }}
 QComboBox#aiModelCombo:hover {{ border-color: {p.accent}; }}

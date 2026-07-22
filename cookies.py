@@ -8,11 +8,16 @@ instead: a keeper watches the live cookie store, mirrors the cookies whose
 domain the user has allowlisted, and writes just those to disk — everything
 else stays memory-only.
 
-At rest the jar is sealed with Windows DPAPI (see dpapi.py): no password
-prompt, and another Windows account (or a lifted disk) can't read it. Honest
-limit: like Chrome's jar, anything running *as this user* could decrypt it.
-On non-Windows platforms the jar is written unencrypted — documented in the
-README.
+At rest the jar is sealed with the OS keystore (see dpapi.py) — DPAPI on
+Windows, the desktop keyring elsewhere: no password prompt, and another local
+account (or a lifted disk) can't read it. Honest limit: like Chrome's jar,
+anything running *as this user* could decrypt it.
+
+Where no keystore is available, cookie keeping switches itself off rather
+than writing the jar in the clear. Persisted cookies are live session
+credentials for the sites the user chose to stay signed in to; a plaintext
+jar would be a worse outcome than forgetting them, so the allowlist stays
+(it is a setting, not data) and nothing is written.
 
 Only non-session cookies are kept (session cookies are meant to die with
 the browser), and expired ones are dropped on restore.
@@ -27,7 +32,8 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtNetwork import QNetworkCookie
 
-from dpapi import seal as _seal, unseal as _unseal
+from dpapi import Unavailable, seal as _seal, unseal as _unseal
+from dpapi import unavailable_reason as _keystore_problem
 
 COOKIE_SITES_FILE = Path.home() / ".vodou" / "cookie_sites.json"
 COOKIE_JAR_FILE = Path.home() / ".vodou" / "cookies.dat"
@@ -118,13 +124,30 @@ class CookieKeeper(QObject):
             if not self._kept:
                 COOKIE_JAR_FILE.unlink(missing_ok=True)
                 return
-            blob = _seal(b"\n".join(self._kept.values()))
+            try:
+                blob = _seal(b"\n".join(self._kept.values()))
+            except Unavailable:
+                # No keystore: keep nothing rather than keep it in the clear.
+                # The jar is removed too — a stale one holds cookies the user
+                # believes are being maintained, and they only get staler.
+                COOKIE_JAR_FILE.unlink(missing_ok=True)
+                return
             COOKIE_JAR_FILE.parent.mkdir(parents=True, exist_ok=True)
             tmp = COOKIE_JAR_FILE.with_suffix(".tmp")
             tmp.write_bytes(blob)
             tmp.replace(COOKIE_JAR_FILE)
         except OSError:
             pass  # cookie persistence must never disturb browsing
+
+    @staticmethod
+    def keystore_problem() -> str:
+        """Why cookie keeping can't work here, or "" when it can.
+
+        The UI asks so the allowlist dialog can say so plainly — silently
+        accepting sites into a list that will never persist anything is the
+        one behaviour worse than not offering the feature.
+        """
+        return _keystore_problem()
 
     def restore(self) -> int:
         """Load the jar into the live store. Returns cookies restored."""
