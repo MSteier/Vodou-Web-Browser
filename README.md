@@ -347,6 +347,17 @@ everything; **Start fresh** discards it and opens the usual home tab.
 - **Change master password** — button in the vault window; re-enters and
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).
+- **Show password** — a toggle on the unlock, create, and change-password
+  prompts reveals what you're typing (off by default), so a long passphrase
+  can be entered without a blind typo.
+- **Lock now / log out — Ctrl+Shift+L** (or ☰ menu → *Lock vault (log out)*)
+  clears the vault key from memory immediately, without waiting for the
+  auto-lock timer; the next vault access asks for the master password again.
+- **Forgot the master password?** The unlock window has a **Start over**
+  button. Because the password *is* the encryption key there is no recovery —
+  this deletes the vault so you can create a fresh, empty one. It makes you
+  type `RESET` first and erases every saved login permanently, so keep an
+  encrypted CSV export somewhere safe if that matters to you.
 - Copied passwords are wiped from the clipboard after 30 seconds.
 - The vault auto-locks after 5 minutes of inactivity; because the vault
   window can be left open in the background, auto-locking closes it too.
@@ -362,6 +373,29 @@ everything; **Start fresh** discards it and opens the usual home tab.
   alternate-data-stream colons (`report.pdf:evil.exe`), reserved device names
   (`CON`, `NUL`, `COM1`…), and trailing dots/spaces are stripped so a crafted
   name can't write outside Downloads or hide an executable.
+
+### Security-key two-factor (FIDO2)
+
+Optionally require a **hardware security key** (or a phone passkey) *in
+addition to* the master password. This is real cryptographic 2FA, not a UI
+gate: a random per-vault secret is mixed into the encryption key with **HKDF**
+and stored **wrapped under each key's FIDO2 `hmac-secret`** (AES-GCM), so a
+stolen `vault.dat` plus a guessed master password still opens nothing without
+a registered key present. A password-only vault derives exactly the historical
+key, so existing vaults keep opening unchanged.
+
+- **Vault window → Security keys…** — add, name, and remove keys. Enrolling
+  the first key turns 2FA on and re-encrypts the vault; each further key is an
+  independent **backup** (any one enrolled key opens the vault). Removing the
+  last key reverts the vault to password-only.
+- **No bypass — so enroll a backup.** If you lose *every* registered key the
+  saved logins cannot be recovered; that irreversibility is the whole point of
+  a second factor. Register at least two (a spare kept somewhere safe).
+- **Windows-only for now**, through the native Windows WebAuthn API. It uses
+  the `fido2` package, which `requirements.txt` installs automatically on
+  Windows; without it the feature just reports itself unavailable and the vault
+  stays password-only. A physical USB/NFC key is the most reliable; a phone
+  passkey works too wherever it supports the `hmac-secret` extension.
 
 ## Bookmarks
 
@@ -511,6 +545,7 @@ sent, and a failed check does nothing.
 | Ctrl+J | Downloads |
 | Ctrl+Shift+F | Fill login |
 | Ctrl+Shift+V | Open vault |
+| Ctrl+Shift+L | Lock vault (log out) |
 | Ctrl+Shift+Del | Clear history & memory |
 | F12 | Toggle developer tools |
 

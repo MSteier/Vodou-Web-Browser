@@ -5,3 +5,7 @@
 PyQt6>=6.6
 PyQt6-WebEngine>=6.6
 cryptography>=42.0
+# Optional: only needed to unlock the vault with a FIDO2 security key
+# (Vault → Security keys…). The app runs fine without it — that feature
+# simply reports itself unavailable. Windows-only for now (native WebAuthn).
+fido2>=2.0; sys_platform == "win32"

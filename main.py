@@ -987,6 +987,11 @@ class BrowserWindow(QMainWindow):
         menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
         menu.addSeparator()
         menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
+        lock_action = menu.addAction("Lock vault (log out)\tCtrl+Shift+L",
+                                     self.lock_vault_now)
+        lock_action.setToolTip(
+            "Lock the password vault now, clearing its key from memory. "
+            "You'll need the master password to open it again.")
         menu.addAction("Import passwords (.csv)…", self.import_passwords)
         menu.addSeparator()
         menu.addAction("Plugins…", self.open_plugins)
@@ -1041,6 +1046,7 @@ class BrowserWindow(QMainWindow):
             "Ctrl+Shift+A": self.ask_ai,
             "Ctrl+Shift+F": self.fill_login,
             "Ctrl+Shift+V": self.open_vault,
+            "Ctrl+Shift+L": self.lock_vault_now,
             "Ctrl+Shift+Del": self.clear_browsing_data,
             "Ctrl+D": self.toggle_bookmark,
             "Ctrl+J": self.show_downloads,
@@ -2426,6 +2432,21 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Password vault auto-locked after {VAULT_AUTOLOCK_MINUTES} "
                 f"minutes of inactivity.", 6000)
+
+    def lock_vault_now(self) -> None:
+        """Manually lock the vault ("log out"), like auto-lock but on demand."""
+        if not self.vault.unlocked:
+            self.statusBar().showMessage("The vault is already locked.", 4000)
+            return
+        # Close the open vault window first, or it would sit there showing
+        # entries against a now-locked vault (and its next action would throw).
+        # Closing it fires _on_vault_dialog_closed, which restarts the lock
+        # timer while the vault is still unlocked — so stop the timer LAST.
+        if self._vault_dialog is not None:
+            self._vault_dialog.close()
+        self.vault.lock()
+        self._vault_lock_timer.stop()
+        self.statusBar().showMessage("Password vault locked.", 4000)
 
     def open_vault(self) -> None:
         if self._vault_dialog is not None:

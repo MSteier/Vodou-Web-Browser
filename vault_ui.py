@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -27,9 +28,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from authenticator import (
+    AuthenticatorError,
+    WindowsWebAuthnAuthenticator,
+    webauthn_supported,
+)
 from importers import parse_password_csv, write_password_csv
 from vault import (
     Entry,
+    SecondFactorFailed,
+    SecondFactorRequired,
     Vault,
     VaultCorrupted,
     WrongMasterPassword,
@@ -90,6 +98,8 @@ class UnlockDialog(QDialog):
         super().__init__(parent)
         self.vault = vault
         self.creating = not vault.exists()
+        self.reset_requested = False
+        self.needs_key = (not self.creating) and vault.file_has_factor()
         self.setWindowTitle("Create Vault" if self.creating else "Unlock Vault")
         self.setMinimumWidth(380)
 
@@ -99,6 +109,13 @@ class UnlockDialog(QDialog):
                 "No vault exists yet. Choose a master password.\n"
                 "It encrypts everything — if you forget it, the vault\n"
                 "cannot be recovered."))
+        elif self.needs_key:
+            key_hint = QLabel(
+                "🔑 This vault also needs a registered security key.\n"
+                "Have it ready — you'll be prompted to tap it after you "
+                "enter your password.")
+            key_hint.setWordWrap(True)
+            layout.addWidget(key_hint)
 
         form = QFormLayout()
         self.password_edit = QLineEdit()
@@ -112,13 +129,52 @@ class UnlockDialog(QDialog):
             form.addRow("Confirm:", self.confirm_edit)
         layout.addLayout(form)
 
+        show = QCheckBox("Show password")
+        show.toggled.connect(self._toggle_echo)
+        layout.addWidget(show)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._submit)
         buttons.rejected.connect(self.reject)
+        if not self.creating:
+            # Only offer "start over" when a vault exists to erase. This is a
+            # last resort for a forgotten master password — it cannot recover
+            # the saved logins (they're encrypted under that password), it
+            # only deletes the vault so a fresh one can be created.
+            reset_btn = buttons.addButton(
+                "Forgot? Start over…", QDialogButtonBox.ButtonRole.ResetRole)
+            reset_btn.clicked.connect(self._start_over)
         layout.addWidget(buttons)
         self.password_edit.setFocus()
+
+    def _start_over(self) -> None:
+        text, ok = QInputDialog.getText(
+            self, "Erase vault and start over",
+            "This permanently erases EVERY saved login in the vault.\n\n"
+            "Your passwords are encrypted with the master password you've\n"
+            "forgotten, so they cannot be recovered — starting over only\n"
+            "lets you create a new, empty vault. This cannot be undone.\n\n"
+            "Type RESET to confirm:")
+        if not ok or text.strip() != "RESET":
+            return
+        try:
+            self.vault.destroy()
+        except OSError as error:
+            QMessageBox.critical(
+                self, "Could not reset",
+                f"The vault file could not be deleted:\n{error}")
+            return
+        self.reset_requested = True
+        self.reject()
+
+    def _toggle_echo(self, on: bool) -> None:
+        mode = (QLineEdit.EchoMode.Normal if on
+                else QLineEdit.EchoMode.Password)
+        self.password_edit.setEchoMode(mode)
+        if self.confirm_edit is not None:
+            self.confirm_edit.setEchoMode(mode)
 
     def _submit(self) -> None:
         master = self.password_edit.text()
@@ -139,12 +195,33 @@ class UnlockDialog(QDialog):
                 return
             self.accept()
             return
+        authenticator = None
+        if self.needs_key:
+            ok, why = webauthn_supported()
+            if not ok:
+                QMessageBox.critical(
+                    self, "Security key required",
+                    "This vault needs a registered security key to unlock, "
+                    "but that isn't available right now:\n\n" + why)
+                return
+            authenticator = WindowsWebAuthnAuthenticator(int(self.winId()))
         try:
-            self.vault.unlock(master)
+            self.vault.unlock(master, authenticator)
         except WrongMasterPassword:
             QMessageBox.warning(self, "Wrong password",
                                 "That master password is incorrect.")
             self.password_edit.clear()
+            return
+        except SecondFactorRequired:
+            QMessageBox.critical(
+                self, "Security key required",
+                "This vault needs a registered security key to unlock.")
+            return
+        except SecondFactorFailed as error:
+            QMessageBox.warning(
+                self, "Security key",
+                f"Couldn't verify your security key:\n\n{error}\n\n"
+                f"Make sure the right key is plugged in, then try again.")
             return
         except (VaultCorrupted, OSError) as error:
             QMessageBox.critical(
@@ -179,6 +256,13 @@ class ChangeMasterDialog(QDialog):
         form.addRow("New master password:", self.new_edit)
         form.addRow("Confirm new:", self.confirm_edit)
         layout.addLayout(form)
+
+        show = QCheckBox("Show passwords")
+        show.toggled.connect(lambda on: [
+            edit.setEchoMode(QLineEdit.EchoMode.Normal if on
+                             else QLineEdit.EchoMode.Password)
+            for edit in (self.current_edit, self.new_edit, self.confirm_edit)])
+        layout.addWidget(show)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -217,12 +301,148 @@ class ChangeMasterDialog(QDialog):
         self.accept()
 
 
+class SecurityKeysDialog(QDialog):
+    """Enroll / remove FIDO2 security keys as the vault's second factor.
+
+    Opened from the vault window while it's unlocked. Enrolling the first key
+    turns on 2FA (password + key henceforth); each further key is an
+    independent backup. Removing the last key reverts to password-only.
+    """
+
+    def __init__(self, vault: Vault, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.vault = vault
+        self.setWindowTitle("Security keys")
+        self.setMinimumWidth(440)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "A security key adds a second factor: the vault then needs BOTH "
+            "your master password AND a registered key to open.\n\n"
+            "Enroll at least two — a spare kept somewhere safe. If you lose "
+            "the only key, the vault cannot be opened (there is no bypass)."))
+
+        self.list = QListWidget()
+        layout.addWidget(self.list)
+
+        row = QHBoxLayout()
+        self.add_btn = QPushButton("Add key…")
+        self.add_btn.clicked.connect(self._add)
+        self.remove_btn = QPushButton("Remove")
+        self.remove_btn.clicked.connect(self._remove)
+        row.addWidget(self.add_btn)
+        row.addWidget(self.remove_btn)
+        row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        row.addWidget(close_btn)
+        layout.addLayout(row)
+
+        available, why = webauthn_supported()
+        if not available:
+            self.add_btn.setEnabled(False)
+            warn = QLabel(why)
+            warn.setWordWrap(True)
+            warn.setStyleSheet("color: #b00020;")
+            layout.addWidget(warn)
+
+        self._refresh()
+
+    def _refresh(self) -> None:
+        self.list.clear()
+        keys = self.vault.list_authenticators()
+        for rec in keys:
+            label = rec["label"] or "Security key"
+            item = QListWidgetItem(f"{label}   (added {rec['added']})")
+            # QListWidgetItem is plain text, so a user-typed label can't inject
+            # markup. Store the raw credential id for removal.
+            item.setData(Qt.ItemDataRole.UserRole, rec["cred_id"])
+            self.list.addItem(item)
+        self.remove_btn.setEnabled(bool(keys))
+        if not keys:
+            placeholder = QListWidgetItem(
+                "No security keys enrolled — this vault opens with the "
+                "master password alone.")
+            placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.list.addItem(placeholder)
+
+    def _add(self) -> None:
+        label, ok = QInputDialog.getText(
+            self, "Add security key",
+            "Name this key so you can tell it apart later\n"
+            "(e.g. 'YubiKey 5C', 'Backup in drawer'):")
+        if not ok:
+            return
+        if not self.vault.factor_enrolled:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("Turn on security-key unlock")
+            box.setText(
+                "This makes a security key REQUIRED to open the vault, "
+                "alongside your master password.\n\n"
+                "If you later lose every enrolled key, the saved logins "
+                "cannot be recovered. Enroll a backup key right after this "
+                "one.\n\nContinue?")
+            box.setStandardButtons(QMessageBox.StandardButton.Yes
+                                   | QMessageBox.StandardButton.No)
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            if box.exec() != QMessageBox.StandardButton.Yes:
+                return
+        authenticator = WindowsWebAuthnAuthenticator(int(self.winId()))
+        try:
+            self.vault.enroll_authenticator(authenticator, label.strip())
+        except AuthenticatorError as error:
+            QMessageBox.warning(
+                self, "Couldn't add the key",
+                f"{error}\n\nMake sure your security key is plugged in.")
+            return
+        except ValueError as error:  # already enrolled
+            QMessageBox.warning(self, "Already enrolled", str(error))
+            return
+        except OSError as error:
+            QMessageBox.critical(self, "Vault error",
+                                 f"Could not save the vault:\n{error}")
+            return
+        self._refresh()
+
+    def _remove(self) -> None:
+        item = self.list.currentItem()
+        cred_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not cred_id:
+            return
+        last = len(self.vault.list_authenticators()) == 1
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Remove security key")
+        box.setText(
+            "Remove the LAST security key? The vault will go back to "
+            "opening with just the master password (no second factor)."
+            if last else "Remove this security key from the vault?")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.vault.remove_authenticator(cred_id)
+        except (ValueError, OSError) as error:
+            QMessageBox.warning(self, "Couldn't remove the key", str(error))
+            return
+        self._refresh()
+
+
 def ensure_unlocked(vault: Vault, parent: QWidget | None = None) -> bool:
     """Unlock (or create) the vault interactively. True if usable."""
     if vault.unlocked:
         return True
-    dialog = UnlockDialog(vault, parent)
-    return dialog.exec() == QDialog.DialogCode.Accepted
+    while True:
+        dialog = UnlockDialog(vault, parent)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return True
+        # A "start over" reset deleted the vault; loop so the dialog reopens
+        # in create mode and the user sets a new master password right away.
+        if not dialog.reset_requested:
+            return False
 
 
 class EntryDialog(QDialog):
@@ -342,6 +562,13 @@ class VaultDialog(QDialog):
         io_row.addWidget(import_btn)
         io_row.addWidget(export_btn)
         io_row.addStretch()
+        keys_btn = QPushButton("Security keys…")
+        keys_btn.setToolTip(
+            "Add or remove a FIDO2 security key as a second factor for "
+            "unlocking the vault.")
+        keys_btn.clicked.connect(
+            lambda: SecurityKeysDialog(self.vault, self).exec())
+        io_row.addWidget(keys_btn)
         master_btn = QPushButton("Change master password…")
         master_btn.clicked.connect(
             lambda: ChangeMasterDialog(self.vault, self).exec())
