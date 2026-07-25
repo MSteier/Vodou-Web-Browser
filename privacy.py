@@ -1,9 +1,11 @@
 """Privacy hardening: request interception (tracker/ad blocking) and headers.
 
 Every outgoing request gets DNT and Sec-GPC headers, and requests to known
-tracking/advertising domains are blocked outright. The blocklist below covers
-the most common trackers; drop extra domains (one per line, comments with #)
-into ~/.vodou/blocklist.txt to extend it.
+tracking/advertising domains are blocked outright. Three sources are unioned:
+the core TRACKER_DOMAINS set below (always present), the bundled trackers.txt
+shipped alongside this file (a larger curated list, refreshed via the git-pull
+update), and ~/.vodou/blocklist.txt for the user's own local additions (one
+domain per line, comments with #).
 """
 
 from __future__ import annotations
@@ -18,6 +20,9 @@ from PyQt6.QtWebEngineCore import (
 )
 
 USER_BLOCKLIST = Path.home() / ".vodou" / "blocklist.txt"
+# Larger curated list shipped in the repo (see trackers.txt); arrives with the
+# normal git-pull update, so growing it there adds blocked trackers on update.
+BUNDLED_BLOCKLIST = Path(__file__).resolve().parent / "trackers.txt"
 
 # Common tracking / advertising / fingerprinting domains. Matched against the
 # request host as an exact match or parent-domain suffix.
@@ -58,11 +63,18 @@ TRACKER_DOMAINS = {
 }
 
 
-def _load_user_blocklist() -> set[str]:
-    if not USER_BLOCKLIST.exists():
-        return set()
-    domains = set()
-    for line in USER_BLOCKLIST.read_text(encoding="utf-8").splitlines():
+def _load_blocklist_file(path: Path) -> set[str]:
+    """Read a domain-per-line blocklist (blank lines and # comments ignored).
+
+    Never raises: a missing or unreadable file just contributes nothing, so a
+    damaged trackers.txt can't stop the browser from starting.
+    """
+    domains: set[str] = set()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return domains
+    for line in text.splitlines():
         line = line.strip().lower()
         if line and not line.startswith("#"):
             domains.add(line)
@@ -99,7 +111,10 @@ class PrivacyInterceptor(QWebEngineUrlRequestInterceptor):
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
-        self._domains = frozenset(TRACKER_DOMAINS | _load_user_blocklist())
+        self._domains = frozenset(
+            TRACKER_DOMAINS
+            | _load_blocklist_file(BUNDLED_BLOCKLIST)
+            | _load_blocklist_file(USER_BLOCKLIST))
         self._verdicts: dict[str, bool] = {}
         # UI-toggled kill switch. Written from the UI thread, read from the
         # IO thread — a single bool attribute read/write is GIL-atomic.

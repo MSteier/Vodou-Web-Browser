@@ -94,7 +94,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Feature | How |
 |---|---|
 | Cookies & history never persist | Cookies are memory-only and die with the process, except for sites you explicitly allowlist — see *Cookie exceptions*. The bulky, low-sensitivity artifacts (HTTP cache, site storage) live in a size-capped disk folder for performance and are **securely shredded** on every exit — see *Performance & secure shredding* |
-| Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar; charts in ☰ menu → *Blocking report*). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
+| Tracker & ad blocking | Request interceptor blocks ~3,500 known tracker/ad domains — a small hardcoded core plus a larger curated list bundled in the repo (`trackers.txt`, refreshed with the normal update) — all matched fully on-device (counter in the status bar; charts in ☰ menu → *Blocking report*). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
@@ -108,8 +108,11 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — this session's blocking counts, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute for the cookies: exit deliberately keeps the saved cookie jar, so this is the only control that destroys it (and the only way to drop cookies without losing your open tabs) |
 | Certificate viewer | A security pill **inside** the address bar (green closed padlock = verified HTTPS, red open padlock = unencrypted, muted info dot = internal page); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
-Extend the blocklist by adding domains (one per line) to
-`~/.vodou/blocklist.txt`.
+The bundled list is **`trackers.txt`** in the repo (curated from
+[Peter Lowe's ad-server list](https://pgl.yoyo.org/adservers/)); it grows with
+each update. For your **own** additions that stay local, add domains (one per
+line) to `~/.vodou/blocklist.txt` — that file is never committed or sent
+anywhere.
 
 ## Performance & secure shredding
 
