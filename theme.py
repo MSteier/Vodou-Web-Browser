@@ -448,7 +448,7 @@ def _draw_voodoo_doll(p: QPainter) -> None:
     body = body.united(rounded(49, 84, 12, 28, 6))    # left leg
     body = body.united(rounded(67, 84, 12, 28, 6))    # right leg
 
-    outline = QPen(white, 4)
+    outline = QPen(white, 5.5)
     outline.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     outline.setCapStyle(Qt.PenCapStyle.RoundCap)
     p.setPen(outline)
