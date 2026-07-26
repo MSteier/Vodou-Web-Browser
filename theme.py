@@ -66,7 +66,7 @@ THEMES: dict[str, tuple[str, str, str]] = {
     "Midnight Blue": ("#3d7dff", "#2857c4", "#5b93ff"),
     "Bone Amber":   ("#d99a3c", "#a9741f", "#f0b95a"),
     "Spider Web Grey": ("#7d8896", "#59616f", "#9aa6b6"),
-    "Ghost White":  ("#dcdfee", "#7f8598", "#eceefb"),
+    "Ghost White":  ("#eef1fc", "#767c92", "#ffffff"),
 }
 DEFAULT_THEME = "Vodou Violet"
 DEFAULT_MODE = "dark"
