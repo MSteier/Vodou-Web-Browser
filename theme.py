@@ -16,13 +16,14 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import (
     QBrush,
     QColor,
     QIcon,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPalette,
     QPen,
     QPixmap,
@@ -419,77 +420,81 @@ QPushButton#aiSend:disabled {{ color: {p.muted}; background: {p.surface}; border
 
 
 def _draw_voodoo_doll(p: QPainter) -> None:
-    """Paint the Vodou mark on a 128×128 painter: a stitched burlap doll head
-    with X-button eyes, a sewn mouth, and a red-beaded pin driven through it,
-    on the violet brand backdrop. Vector primitives so it stays crisp when
+    """Paint the Vodou mark on a 128×128 painter: a white line-art voodoo doll
+    — a stitched gingerbread-style figure with X-button eyes and a sewn mouth —
+    on a black rounded backdrop. Vector primitives so it stays crisp when
     scaled down to a 16px favicon."""
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    # Rounded violet backdrop (keeps the Vodou brand gradient).
-    backdrop = QLinearGradient(0, 0, 128, 128)
-    backdrop.setColorAt(0, QColor("#8d70ff"))
-    backdrop.setColorAt(1, QColor("#3a2a86"))
-    p.setBrush(QBrush(backdrop))
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawRoundedRect(6, 6, 116, 116, 30, 30)
+    # Black rounded backdrop, with a hair of dark edge so the icon still reads
+    # as a distinct shape on a pure-black taskbar.
+    p.setBrush(QBrush(QColor("#000000")))
+    p.setPen(QPen(QColor("#2a2a2a"), 2))
+    p.drawRoundedRect(QRectF(6, 6, 116, 116), 30, 30)
 
-    burlap = QColor("#e7d8b6")
-    burlap_dark = QColor("#cbb98e")
-    thread = QColor("#4a3720")
+    white = QColor("#ffffff")
 
-    # Head: a burlap sack, slightly egg-shaped, with a soft shaded underside.
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QBrush(burlap_dark))
-    p.drawEllipse(QPointF(64, 65), 33, 39)      # shadow layer
-    p.setBrush(QBrush(burlap))
-    p.drawEllipse(QPointF(64, 62), 33, 39)      # head
+    # The doll silhouette, built as one united path (head + torso + arms +
+    # legs) so it strokes as a single clean outline with no internal seams.
+    def rounded(x, y, w, h, r):
+        sub = QPainterPath()
+        sub.addRoundedRect(QRectF(x, y, w, h), r, r)
+        return sub
 
-    # Cinched top-knot where the sack is tied off.
-    p.setBrush(QBrush(burlap_dark))
-    p.drawEllipse(QPointF(64, 24), 8, 6)
-    p.setPen(QPen(thread, 2))
-    p.drawLine(60, 22, 68, 26)
-    p.drawLine(60, 26, 68, 22)
+    body = QPainterPath()
+    body.addEllipse(QPointF(64, 32), 16, 16)     # head
+    body = body.united(rounded(48, 44, 32, 46, 14))   # torso
+    body = body.united(rounded(18, 54, 92, 15, 7.5))  # outstretched arms
+    body = body.united(rounded(49, 84, 12, 28, 6))    # left leg
+    body = body.united(rounded(67, 84, 12, 28, 6))    # right leg
 
-    # Seam stitches running down the centre of the face.
-    seam = QPen(thread, 2)
+    outline = QPen(white, 4)
+    outline.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    outline.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(outline)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawPath(body)
+
+    # Seam stitches running down the centre.
+    seam = QPen(white, 2)
     seam.setStyle(Qt.PenStyle.DashLine)
     seam.setDashPattern([2, 3])
     p.setPen(seam)
-    p.drawLine(64, 32, 64, 96)
+    p.drawLine(64, 46, 64, 88)
 
     # X-button eyes.
-    eye = QPen(thread, 4)
+    eye = QPen(white, 3)
     eye.setCapStyle(Qt.PenCapStyle.RoundCap)
     p.setPen(eye)
-    for cx in (50, 78):
-        p.drawLine(cx - 6, 52, cx + 6, 64)
-        p.drawLine(cx - 6, 64, cx + 6, 52)
+    for cx in (57, 71):
+        p.drawLine(cx - 4, 27, cx + 4, 36)
+        p.drawLine(cx - 4, 36, cx + 4, 27)
 
-    # Sewn cross-stitch mouth: a base line crossed by short vertical stitches.
-    mouth = QPen(thread, 3)
+    # Sewn cross-stitch mouth: a base line crossed by short stitches.
+    mouth = QPen(white, 2)
     mouth.setCapStyle(Qt.PenCapStyle.RoundCap)
     p.setPen(mouth)
-    p.drawLine(50, 84, 78, 84)
-    for mx in range(52, 79, 6):
-        p.drawLine(mx, 80, mx - 3, 88)
+    p.drawLine(57, 40, 71, 40)
+    for mx in range(59, 72, 4):
+        p.drawLine(mx, 38, mx - 2, 43)
 
-    # A pin driven through the doll: steel shaft with a bright red bead head,
-    # angling out to the top-right corner.
-    shaft = QPen(QColor("#e8e9f2"), 3)
-    shaft.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(shaft)
-    p.drawLine(70, 58, 108, 20)
-    p.setPen(QPen(QColor("#7a1020"), 1))
-    bead = QLinearGradient(102, 12, 116, 26)
-    bead.setColorAt(0, QColor("#ff5c7a"))
-    bead.setColorAt(1, QColor("#c81e3a"))
-    p.setBrush(QBrush(bead))
-    p.drawEllipse(QPointF(109, 19), 8, 8)
-    # Glint on the bead.
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QBrush(QColor(255, 255, 255, 160)))
-    p.drawEllipse(QPointF(106, 16), 2.2, 2.2)
+    # A stitch cross on the chest, the classic "stick the pin here" mark.
+    cross = QPen(white, 3)
+    cross.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(cross)
+    p.drawLine(58, 64, 70, 76)
+    p.drawLine(58, 76, 70, 64)
+
+    # Short cross-stitch ticks on the arms and legs.
+    tick = QPen(white, 2)
+    tick.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(tick)
+    for x in (28, 96):        # arms
+        p.drawLine(x - 3, 58, x + 3, 65)
+        p.drawLine(x - 3, 65, x + 3, 58)
+    for x in (55, 73):        # legs
+        p.drawLine(x - 3, 98, x + 3, 103)
+        p.drawLine(x - 3, 103, x + 3, 98)
 
 
 def make_app_icon() -> QIcon:
