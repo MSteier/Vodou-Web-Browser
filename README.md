@@ -98,6 +98,7 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
+| Location Guard | On by default (☰ menu → Settings → Location Guard). Blocks the page Geolocation API so a site can't read your precise GPS/Wi-Fi location — every request is answered PERMISSION_DENIED, so a site can at most estimate your area from your IP address. Toggle it per taste; reload open pages to apply |
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. Vodou's only outbound calls of its own are the two anonymous version checks (*About & updates*) and the anonymous periodic download of the public Safe Browsing lists (*Safe Browsing*) — public files fetched by IP, carrying no identifiers and no browsing data. The optional local AI features talk only to a **local** Ollama instance, so they add no off-device traffic either |
@@ -364,6 +365,13 @@ everything; **Start fresh** discards it and opens the usual home tab.
   Vodou can act on, the toolbar **pulses the button for your next step**: the
   **key** when there's a saved login ready to fill, or the **vault** when it's
   locked and needs unlocking first — so a pulse always points at one click.
+- **Save & update on sign-in** — when you submit a login, Vodou offers to
+  **Save** it if it's new, or **Update** the stored password if it changed
+  (nothing if it's unchanged). Multi-step and password-only pages hide the
+  username at submit, so if the site has exactly one saved login Vodou matches
+  it — a changed password becomes an *Update* rather than a duplicate. Capture
+  runs in the isolated world via a token-prefixed channel; the host is taken
+  from the URL, never from the page.
 - **Change master password** — button in the vault window; re-enters and
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).
@@ -455,7 +463,14 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   **isolated world** hidden from page scripts, and shows a **SHA-256 code
   fingerprint** so its identity is tamper-evident.
 - Bundled: *Cookie Banner Zapper*, *Glass Blur Deflicker*, *Text Selection
-  Unlocker*.
+  Unlocker*, *YouTube Ad Skip*.
+- *YouTube Ad Skip* auto-clicks "Skip Ad", fast-forwards unskippable video ads
+  to their end (and mutes them), and hides overlay/banner/display ads — without
+  touching your login. It's DOM-based, so a brief ad flash before the skip is
+  possible; and because YouTube reworks its player often, the selectors are a
+  maintenance target and it can trip YouTube's anti-ad-block notice. (Note: the
+  `youtube.com.` trailing-dot trick disables ads a different way but logs you
+  out and is unreliable, so Vodou doesn't use it.)
 - A *Dark Mode Everywhere* plugin was bundled until v1.8.0 and has been
   removed. Forcing a dark scheme onto arbitrary sites means inverting them,
   which fights whatever styling a site already has: it turned already-dark
@@ -504,10 +519,12 @@ input field and chat bubbles pulse while the window is focused). No Chromium
 flag fixes it; switching the compositor does.
 
 - **☰ menu → Settings → Graphics** — three profiles, remembered in
-  `~/.vodou/graphics.json` and applied on the next start:
-  *Hardware* (fastest), *Compatibility* (software compositing, WebGL stays on
-  the GPU — **fixes the flicker**), and *Software* (no GPU at all, most
-  stable).
+  `~/.vodou/graphics.json`: *Hardware* (fastest), *Compatibility* (software
+  compositing, WebGL stays on the GPU — **fixes the flicker**), and *Software*
+  (no GPU at all, most stable). The graphics flags are read only when the
+  engine starts, so changing this **offers to restart Vodou now** to apply it —
+  and an intentional restart silently **reopens your open tabs** (no crash
+  prompt).
 - Per-launch override for debugging: `python main.py --gfx
   default|vanilla|compat|gl|warp|software`.
 

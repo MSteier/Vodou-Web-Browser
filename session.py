@@ -21,6 +21,10 @@ import json
 from pathlib import Path
 
 SESSION_FILE = Path.home() / ".vodou" / "session.json"
+# Set just before an *intentional* self-restart (e.g. applying a graphics
+# change) so the next launch restores the tabs silently instead of showing the
+# "didn't shut down cleanly" prompt.
+RESTART_FLAG = Path.home() / ".vodou" / "restart.flag"
 
 # Sanity cap when reading the file back: a corrupt or hand-edited snapshot
 # must not make the browser try to open hundreds of tabs.
@@ -53,6 +57,26 @@ def clear_snapshot() -> None:
         SESSION_FILE.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def mark_restart() -> None:
+    """Flag that the coming exit is an intentional restart, not a crash."""
+    try:
+        RESTART_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        RESTART_FLAG.write_text("1", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def consume_restart() -> bool:
+    """True (once) if the last exit was an intentional restart; clears the flag."""
+    try:
+        if RESTART_FLAG.exists():
+            RESTART_FLAG.unlink(missing_ok=True)
+            return True
+    except OSError:
+        pass
+    return False
 
 
 def load_snapshot() -> tuple[list[str], int] | None:

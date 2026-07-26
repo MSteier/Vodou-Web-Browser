@@ -125,6 +125,92 @@ def webauthn_supported() -> tuple[bool, str]:
     return True, ""
 
 
+# The Windows credential UI (the "Windows Security" / Windows Hello PIN prompt
+# the WebAuthn API pops up) is hosted by the credential broker. We match its
+# window class by substring — language-independent, unlike the title, and
+# tolerant of the exact class name ("Credential Dialog Xaml Host") varying.
+_CREDENTIAL_DIALOG_CLASS_HINT = "Credential Dialog"
+
+
+def _find_credential_dialog():
+    """HWND of a visible Windows credential/Hello prompt, or None."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR,
+                                     ctypes.c_int]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    found = {"hwnd": None}
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _enum(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        buffer = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, buffer, 256)
+        if _CREDENTIAL_DIALOG_CLASS_HINT in buffer.value:
+            found["hwnd"] = hwnd
+            return False  # stop enumerating
+        return True
+
+    user32.EnumWindows(_enum, 0)
+    return found["hwnd"]
+
+
+def _force_foreground(hwnd) -> None:
+    """Yank a window to the top and give it focus, working around Windows'
+    SetForegroundWindow restriction by briefly attaching to the current
+    foreground thread's input queue."""
+    if not hwnd:
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND,
+                                                ctypes.c_void_p]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+
+    foreground = user32.GetForegroundWindow()
+    this_tid = kernel32.GetCurrentThreadId()
+    fg_tid = (user32.GetWindowThreadProcessId(foreground, None)
+              if foreground else 0)
+    attached = bool(fg_tid) and fg_tid != this_tid and bool(
+        user32.AttachThreadInput(this_tid, fg_tid, True))
+    try:
+        user32.ShowWindow(hwnd, 9)          # SW_RESTORE (if minimized)
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+        # HWND_TOP, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+    finally:
+        if attached:
+            user32.AttachThreadInput(this_tid, fg_tid, False)
+
+
+def _keep_credential_dialog_foreground(stop) -> None:
+    """While a ceremony runs, keep pulling the native credential prompt to the
+    front so it never hides behind Vodou. Polls for the credential-broker
+    window and foregrounds it as soon as it appears."""
+    if sys.platform != "win32":
+        return
+    import time
+
+    deadline = time.time() + 30       # ceremony can wait on the user a while
+    seen = False
+    while not stop.is_set() and time.time() < deadline:
+        hwnd = _find_credential_dialog()
+        if hwnd:
+            _force_foreground(hwnd)
+            seen = True
+        elif seen:
+            break                     # prompt appeared and has now closed
+        stop.wait(0.15)
+
+
 def _run_on_mta_thread(fn):
     """Run a blocking WebAuthn ceremony on a dedicated COM-MTA thread.
 
@@ -134,11 +220,16 @@ def _run_on_mta_thread(fn):
     a fresh thread initialised as MTA (verified working) it drives its dialog
     correctly. The caller's thread blocks on join(), which is fine: the
     system security dialog is modal anyway.
+
+    A sidecar watcher thread keeps the native prompt in the foreground so it
+    can't open behind Vodou (e.g. after the user clicks OK on the master-
+    password dialog).
     """
     import ctypes
     import threading
 
     box: dict = {}
+    stop = threading.Event()
 
     def runner():
         ctypes.windll.ole32.CoInitializeEx(None, 0x0)  # COINIT_MULTITHREADED
@@ -149,9 +240,13 @@ def _run_on_mta_thread(fn):
         finally:
             ctypes.windll.ole32.CoUninitialize()
 
+    watcher = threading.Thread(
+        target=_keep_credential_dialog_foreground, args=(stop,), daemon=True)
     thread = threading.Thread(target=runner, daemon=True)
+    watcher.start()
     thread.start()
     thread.join()
+    stop.set()
     if "error" in box:
         raise box["error"]
     return box["result"]

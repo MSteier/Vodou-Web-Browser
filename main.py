@@ -73,6 +73,37 @@ def save_gfx_mode(mode: str) -> None:
         pass
 
 
+PRIVACY_FILE = Path.home() / ".vodou" / "privacy.json"
+
+
+def load_location_guard() -> bool:
+    """Whether Location Guard (block precise geolocation) is on. On by default
+    — Vodou is privacy-first, and precise location is rarely needed."""
+    try:
+        data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+        return bool(data.get("location_guard", True))
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def save_location_guard(on: bool) -> None:
+    try:
+        PRIVACY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        try:
+            data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data["location_guard"] = bool(on)
+        tmp = PRIVACY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(PRIVACY_FILE)
+    except OSError:
+        pass
+
+
 def _gfx_flags() -> str:
     global GFX_MODE
     mode = _load_saved_gfx()          # ☰ menu → Graphics choice, if any
@@ -99,7 +130,8 @@ import secrets
 from urllib.parse import quote
 
 from PyQt6.QtCore import (
-    QEvent, QSize, Qt, QTimer, QUrl, QVariantAnimation, pyqtSignal, pyqtSlot,
+    QEvent, QProcess, QSize, Qt, QTimer, QUrl, QVariantAnimation, pyqtSignal,
+    pyqtSlot,
 )
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWebEngineCore import (
@@ -149,6 +181,7 @@ from importers import parse_bookmarks_html, parse_password_csv
 from privacy import (
     FIREFOX_QUIRK_JS,
     GENERIC_USER_AGENT,
+    LOCATION_GUARD_JS,
     WEBAUTHN_SHIM_JS,
     PrivacyInterceptor,
     apply_ua_quirk,
@@ -163,7 +196,10 @@ from ai_search import (
     save_config as save_ai_config,
 )
 from safebrowsing import SafeBrowsing
-from session import clear_snapshot, load_snapshot, save_snapshot
+from session import (
+    clear_snapshot, consume_restart, load_snapshot, mark_restart,
+    save_snapshot,
+)
 from shred import shred_dir
 from spoofcheck import (
     SENTINEL_HOST,
@@ -819,6 +855,22 @@ class BrowserWindow(QMainWindow):
         webauthn_shim.setSourceCode(WEBAUTHN_SHIM_JS)
         self.profile.scripts().insert(webauthn_shim)
 
+        # Location Guard: block precise geolocation (see privacy.LOCATION_GUARD
+        # _JS). Toggled from Settings; kept as a member so it can be inserted /
+        # removed live. Main world at DocumentCreation so it replaces the API
+        # the page sees before any page script can call it.
+        self._location_guard_script = QWebEngineScript()
+        self._location_guard_script.setName("vodou-location-guard")
+        self._location_guard_script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        self._location_guard_script.setWorldId(
+            QWebEngineScript.ScriptWorldId.MainWorld)
+        self._location_guard_script.setRunsOnSubFrames(True)
+        self._location_guard_script.setSourceCode(LOCATION_GUARD_JS)
+        self._location_guard_on = load_location_guard()
+        if self._location_guard_on:
+            self.profile.scripts().insert(self._location_guard_script)
+
         # Reviewed, opt-in plugins injected into the isolated world. State is
         # ID-only (no code from disk); each plugin self-limits to its hosts.
         self.plugins = PluginManager()
@@ -867,9 +919,15 @@ class BrowserWindow(QMainWindow):
         self._mem_timer.timeout.connect(self._poll_tab_memory)
         self._mem_timer.start()
 
+        self._restarting = False   # set true only for an intentional restart
         self._build_ui()
         self._build_shortcuts()
-        if not self._offer_crash_restore():
+        # An intentional restart (e.g. applying a graphics change) silently
+        # reopens the tabs; otherwise a leftover snapshot means a crash and we
+        # offer them back. Either falls through to a fresh home tab.
+        if consume_restart() and self._resume_after_restart():
+            pass
+        elif not self._offer_crash_restore():
             self.add_tab(QUrl(HOME_URL))
 
         # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
@@ -1044,23 +1102,36 @@ class BrowserWindow(QMainWindow):
         menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._icon_targets.append((menu_button, "menu"))
         menu = QMenu(menu_button)
-        clear_action = menu.addAction("Clear history & memory\tCtrl+Shift+Del",
-                                      self.clear_browsing_data)
-        clear_action.setToolTip(
-            "Erase visited-link history, the HTTP cache, cookies (including "
-            "the saved ones for allowlisted sites), the recorded blocking "
-            "statistics, and each tab's back/forward navigation memory")
-        menu.addSeparator()
+
+        # --- Content & tools you reach often ---
         hamburger_bookmarks = menu.addMenu("Bookmarks")
         hamburger_bookmarks.aboutToShow.connect(
             lambda: self._populate_bookmarks_menu(hamburger_bookmarks))
+        menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
+        menu.addAction("Ask local AI…\tCtrl+Shift+A", self.ask_ai)
+
+        # --- Passwords ---
+        menu.addSeparator()
+        menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
+        lock_action = menu.addAction("Lock vault (log out)\tCtrl+Shift+L",
+                                     self.lock_vault_now)
+        lock_action.setToolTip(
+            "Lock the password vault now, clearing its key from memory. "
+            "You'll need the master password to open it again.")
+        menu.addAction("Import passwords (.csv)…", self.import_passwords)
+
+        # --- View & configuration ---
+        menu.addSeparator()
         self._build_appearance_menu(menu.addMenu("Appearance"))
         zoom_menu = menu.addMenu("Zoom")
         zoom_menu.addAction("Zoom in\tCtrl++", self.zoom_in)
         zoom_menu.addAction("Zoom out\tCtrl+-", self.zoom_out)
         zoom_menu.addAction("Reset zoom\tCtrl+0", self.zoom_reset)
+
         settings_menu = menu.addMenu("Settings")
         self._build_graphics_menu(settings_menu.addMenu("Graphics"))
+        # Privacy & security group.
+        settings_menu.addSeparator()
         self.pause_blocking_action = settings_menu.addAction(
             "Pause tracker blocking")
         self.pause_blocking_action.setCheckable(True)
@@ -1068,9 +1139,12 @@ class BrowserWindow(QMainWindow):
             "Let tracker/ad requests through until resumed — for sites "
             "that break with blocking on. Blocking resumes on restart.")
         self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
-        settings_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
-        self.safe_browsing_action = settings_menu.addAction(
-            "Safe Browsing")
+        blocking_report = settings_menu.addAction(
+            "Blocking report…", self.show_blocking_report)
+        blocking_report.setToolTip(
+            "Charts of how many trackers and ads were blocked per day, "
+            "and which ones came up most")
+        self.safe_browsing_action = settings_menu.addAction("Safe Browsing")
         self.safe_browsing_action.setCheckable(True)
         self.safe_browsing_action.setChecked(self.safe_browsing.enabled)
         self.safe_browsing_action.setToolTip(
@@ -1080,8 +1154,18 @@ class BrowserWindow(QMainWindow):
         self.safe_browsing_action.toggled.connect(self._set_safe_browsing)
         settings_menu.addAction("Safe Browsing status…",
                                 self.show_safe_browsing_status)
-        self.ai_search_action = settings_menu.addAction(
-            "Local AI (Ollama)")
+        settings_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
+        self.location_guard_action = settings_menu.addAction("Location Guard")
+        self.location_guard_action.setCheckable(True)
+        self.location_guard_action.setChecked(self._location_guard_on)
+        self.location_guard_action.setToolTip(
+            "Block websites from reading your precise (GPS/Wi-Fi) location. "
+            "Sites can at most estimate your area from your IP address. "
+            "Reload open pages after changing this.")
+        self.location_guard_action.toggled.connect(self._set_location_guard)
+        # Local AI group.
+        settings_menu.addSeparator()
+        self.ai_search_action = settings_menu.addAction("Local AI (Ollama)")
         self.ai_search_action.setCheckable(True)
         self.ai_search_action.setChecked(bool(self.ai_cfg.get("enabled")))
         self.ai_search_action.setToolTip(
@@ -1090,24 +1174,21 @@ class BrowserWindow(QMainWindow):
             "nothing is ever sent out.")
         self.ai_search_action.toggled.connect(self._set_ai_search)
         settings_menu.addAction("Local AI options…", self.show_ai_options)
+        # Extend group.
+        settings_menu.addSeparator()
+        settings_menu.addAction("Plugins…", self.open_plugins)
+
+        # --- Data & diagnostics ---
         menu.addSeparator()
-        report = menu.addAction("Blocking report…", self.show_blocking_report)
-        report.setToolTip(
-            "Charts of how many trackers and ads were blocked per day, "
-            "and which ones came up most")
-        menu.addAction("Ask local AI…\tCtrl+Shift+A", self.ask_ai)
-        menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
-        menu.addSeparator()
-        menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
-        lock_action = menu.addAction("Lock vault (log out)\tCtrl+Shift+L",
-                                     self.lock_vault_now)
-        lock_action.setToolTip(
-            "Lock the password vault now, clearing its key from memory. "
-            "You'll need the master password to open it again.")
-        menu.addAction("Import passwords (.csv)…", self.import_passwords)
-        menu.addSeparator()
-        menu.addAction("Plugins…", self.open_plugins)
+        clear_action = menu.addAction("Clear history & memory\tCtrl+Shift+Del",
+                                      self.clear_browsing_data)
+        clear_action.setToolTip(
+            "Erase visited-link history, the HTTP cache, cookies (including "
+            "the saved ones for allowlisted sites), the recorded blocking "
+            "statistics, and each tab's back/forward navigation memory")
         menu.addAction("Developer tools\tF12", self.open_dev_tools)
+
+        # --- Help ---
         menu.addSeparator()
         help_menu = menu.addMenu("Help")
         report = help_menu.addAction("Report an issue…", self.report_issue)
@@ -1334,7 +1415,10 @@ class BrowserWindow(QMainWindow):
         clear_copied_secrets()  # no passwords left on the clipboard
         self.ai_client.cancel()  # drop any in-flight Ollama request
         self._session_timer.stop()
-        clear_snapshot()  # clean exit — a leftover file means "crashed"
+        # Clean exit clears the snapshot (a leftover file means "crashed"); an
+        # intentional restart keeps it so the new instance can reopen the tabs.
+        if not self._restarting:
+            clear_snapshot()
         self.cookie_keeper.flush()  # capture last cookie updates in the jar
         # The vault window has no parent (so it can fall behind), which also
         # means it won't be torn down with this one — close it explicitly or
@@ -1361,6 +1445,25 @@ class BrowserWindow(QMainWindow):
         self.statusBar().showMessage(
             "Safe Browsing on — updating the list…" if on
             else "Safe Browsing off.", 5000)
+
+    def _set_location_guard(self, on: bool) -> None:
+        """Turn precise-geolocation blocking on/off by inserting or removing
+        the main-world shim. Applies to pages loaded from here on."""
+        if on == getattr(self, "_location_guard_on", None):
+            return
+        self._location_guard_on = on
+        save_location_guard(on)
+        scripts = self.profile.scripts()
+        if on:
+            scripts.insert(self._location_guard_script)
+        else:
+            for script in scripts.find("vodou-location-guard"):
+                scripts.remove(script)
+        self.statusBar().showMessage(
+            "Location Guard on — precise location blocked. Reload open pages "
+            "to apply." if on else
+            "Location Guard off — sites may request your precise location. "
+            "Reload open pages to apply.", 6000)
 
     def show_safe_browsing_status(self) -> None:
         sb = self.safe_browsing
@@ -1409,6 +1512,19 @@ class BrowserWindow(QMainWindow):
         if box.clickedButton() is not restore:
             clear_snapshot()
             return False
+        self._restore_snapshot_tabs(urls, current)
+        return True
+
+    def _resume_after_restart(self) -> bool:
+        """Silently reopen the tabs saved just before an intentional restart."""
+        snapshot = load_snapshot()
+        if snapshot is None:
+            return False
+        self._restore_snapshot_tabs(*snapshot)
+        return True
+
+    def _restore_snapshot_tabs(self, urls: list[str], current: int) -> None:
+        """Open a snapshot's tabs lazily and select the one that was active."""
         for u in urls:
             view = self.add_tab(None)
             view.pending_url = QUrl(u)
@@ -1418,7 +1534,39 @@ class BrowserWindow(QMainWindow):
             self._update_tab_label(view)
         self.tab_bar.setCurrentIndex(current)
         self._load_pending(self.tab_stack.widget(current))
-        return True
+
+    def _prompt_restart(self, change: str) -> None:
+        """Ask whether to restart now so a just-changed setting takes effect."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Restart to apply")
+        box.setText(f"{change}\n\nThis takes effect after a restart. Restart "
+                    "Vodou now? Your open tabs will be reopened.")
+        restart = box.addButton("Restart now",
+                                QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(restart)
+        box.exec()
+        if box.clickedButton() is restart:
+            self._restart_app()
+
+    def _restart_app(self) -> None:
+        """Relaunch Vodou (reopening the current tabs) and close this window."""
+        self._write_session()          # snapshot the open tabs
+        mark_restart()                 # new instance reopens them silently
+        self._restarting = True        # closeEvent keeps the snapshot
+        script = str(Path(__file__).resolve())
+        # PyQt6's 3-arg startDetached returns (started, pid).
+        started, _pid = QProcess.startDetached(
+            sys.executable, [script] + sys.argv[1:], str(Path(script).parent))
+        if not started:
+            self._restarting = False   # relaunch failed — don't lose the tabs
+            QMessageBox.warning(
+                self, "Couldn't restart",
+                "Vodou couldn't relaunch itself. Please close and reopen it "
+                "to apply the change.")
+            return
+        self.close()
 
     @staticmethod
     def _load_pending(view: WebView | None) -> None:
@@ -1842,10 +1990,7 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Graphics mode unchanged — already in effect.", 5000)
             return
-        QMessageBox.information(
-            self, "Graphics mode saved",
-            "The new graphics mode takes effect the next time Vodou "
-            "starts.")
+        self._prompt_restart("The graphics mode has been changed.")
 
     def _set_theme(self, name: str) -> None:
         self._theme_name = name
@@ -2777,7 +2922,19 @@ class BrowserWindow(QMainWindow):
         if view is not self.current_view():
             return
         host = view.url().host().removeprefix("www.")
-        if not host or (host, username) in self._capture_dismissed:
+        if not host:
+            return
+
+        # A submitted login with no username (multi-step or password-only
+        # pages hide the username field) is matched to the host's sole saved
+        # login if there is exactly one, so a password change is offered as an
+        # Update rather than saved as an empty-username duplicate.
+        if self.vault.unlocked:
+            username, existing = self._resolve_capture(host, username)
+        else:
+            existing = None
+
+        if (host, username) in self._capture_dismissed:
             return
         dismiss = lambda: self._capture_dismissed.add((host, username))
         who = f"“{username}” on {host}" if username else host
@@ -2791,7 +2948,6 @@ class BrowserWindow(QMainWindow):
                 on_dismiss=dismiss)
             return
 
-        existing = self._find_entry(host, username)
         if existing is None:
             text = f"💾 Save the login you just used for {who} in your vault?"
             label = "Save"
@@ -2806,6 +2962,22 @@ class BrowserWindow(QMainWindow):
             on_accept=lambda: self._save_captured(host, username, password),
             on_dismiss=dismiss)
 
+    def _resolve_capture(self, host: str, username: str):
+        """Map a captured (host, username) to the entry it belongs to.
+
+        Returns (username, existing). On an exact username match, that entry.
+        When the captured username is empty but the host has exactly one saved
+        login, adopt that login's username so a password change updates it
+        instead of adding a duplicate. Requires the vault unlocked.
+        """
+        existing = self._find_entry(host, username)
+        if existing is None and not username:
+            matches = self.vault.entries_for_host(host)
+            if len(matches) == 1:
+                index, entry = matches[0]
+                return entry.username, (index, entry)
+        return username, existing
+
     def _find_entry(self, host: str, username: str):
         """(index, entry) for host+username, or None."""
         for index, entry in enumerate(self.vault.entries()):
@@ -2819,7 +2991,9 @@ class BrowserWindow(QMainWindow):
                        password: str) -> None:
         if not self._unlock_vault():
             return
-        existing = self._find_entry(host, username)
+        # Re-resolve now that the vault is unlocked (the capture may have been
+        # made while locked): an empty username adopts the host's sole login.
+        username, existing = self._resolve_capture(host, username)
         if existing is not None:
             index, entry = existing
             if self.vault.reveal(index) == password:

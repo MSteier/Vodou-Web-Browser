@@ -323,6 +323,55 @@ WEBAUTHN_SHIM_JS = """\
 """
 
 
+# Location Guard: block the W3C Geolocation API so a page can never read your
+# precise (GPS/Wi-Fi) position. Injected at DocumentCreation in the page's MAIN
+# world (it must replace what the page itself sees) before any page script
+# runs, and into subframes too. Every geolocation request is answered with a
+# PERMISSION_DENIED error, so a site can at most estimate your location from
+# your IP address (coarse, city-level) — never pinpoint you. The prototype
+# methods are replaced so it holds no matter how the page reaches them.
+LOCATION_GUARD_JS = """\
+(function () {
+    "use strict";
+    if (!("geolocation" in navigator)) {
+        return;
+    }
+    var proto = Object.getPrototypeOf(navigator.geolocation) ||
+                navigator.geolocation;
+    function deny(onError) {
+        if (typeof onError === "function") {
+            setTimeout(function () {
+                try {
+                    onError({
+                        code: 1,            // PERMISSION_DENIED
+                        message: "Location blocked by Vodou's Location Guard.",
+                        PERMISSION_DENIED: 1,
+                        POSITION_UNAVAILABLE: 2,
+                        TIMEOUT: 3
+                    });
+                } catch (e) {}
+            }, 0);
+        }
+    }
+    function define(name, value) {
+        try {
+            Object.defineProperty(proto, name, {
+                value: value, configurable: true, writable: true
+            });
+        } catch (e) {}
+    }
+    define("getCurrentPosition", function (onSuccess, onError) {
+        deny(onError);
+    });
+    define("watchPosition", function (onSuccess, onError) {
+        deny(onError);
+        return 0;
+    });
+    define("clearWatch", function () {});
+})();
+"""
+
+
 # JS-visible Chromium giveaways that contradict the Firefox identity on
 # Google's sign-in pages. The risk checks there don't stop at headers: page
 # script can see window.chrome, navigator.userAgentData (with Chromium

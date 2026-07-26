@@ -103,6 +103,58 @@ html, body { overflow: auto !important; }
 """,
     ),
     Plugin(
+        id="youtube-ad-skip",
+        name="YouTube Ad Skip",
+        description="Auto-clicks 'Skip Ad', fast-forwards unskippable video "
+                    "ads to their end, and hides overlay/banner/display ads on "
+                    "YouTube. Leaves your login and the video itself untouched. "
+                    "YouTube changes its player often, so this may need "
+                    "updates and can trip YouTube's anti-ad-block notices.",
+        version="1.0",
+        author="Vodou (verified)",
+        matches=("youtube.com", "*.youtube.com"),
+        css="""
+.ytp-ad-overlay-container, .ytp-ad-overlay-slot, .ytp-ad-overlay-image,
+.ytp-ad-text, .ytp-ad-overlay-close-container,
+ytd-display-ad-renderer, ytd-ad-slot-renderer,
+ytd-in-feed-ad-layout-renderer, ytd-companion-slot-renderer,
+ytd-banner-promo-renderer, #masthead-ad {
+    display: none !important;
+}
+""",
+        js="""
+var SKIP = [
+    '.ytp-ad-skip-button',
+    '.ytp-ad-skip-button-modern',
+    '.ytp-skip-ad-button',
+    '.ytp-ad-skip-button-container button'
+];
+var tick = function () {
+    try {
+        for (var i = 0; i < SKIP.length; i++) {
+            var btn = document.querySelector(SKIP[i]);
+            if (btn) { btn.click(); }
+        }
+        var player = document.querySelector('.html5-video-player');
+        if (player && player.classList.contains('ad-showing')) {
+            var video = document.querySelector('video.html5-main-video')
+                        || document.querySelector('video');
+            if (video && isFinite(video.duration) && video.duration > 0) {
+                video.currentTime = video.duration;   // jump past the ad
+                video.muted = true;
+            }
+        }
+    } catch (e) {}
+};
+setInterval(tick, 400);
+try {
+    var mo = new MutationObserver(tick);
+    mo.observe(document.documentElement, {childList: true, subtree: true});
+} catch (e) {}
+tick();
+""",
+    ),
+    Plugin(
         id="selection-unlock",
         name="Text Selection Unlocker",
         description="Re-enables selecting and copying text on sites that "
