@@ -338,6 +338,43 @@ QToolButton#devtoolsClose:hover {{
     color: {p.on_accent};
 }}
 
+QWidget#splitViewRoot {{ background: {p.bg}; }}
+QFrame#splitBar {{
+    background: {p.bg};
+    border-bottom: 1px solid {p.border};
+}}
+QLabel#splitBarTag {{
+    color: {p.muted};
+    font-size: 8.5pt;
+    font-weight: 700;
+    letter-spacing: 1px;
+}}
+QToolButton#splitBarBtn {{
+    color: {p.text};
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 3px 10px;
+}}
+QToolButton#splitBarBtn:hover {{ background: {p.elevated}; }}
+QToolButton#splitBarBtn:pressed {{ background: {p.accent_dim}; }}
+QFrame#splitPaneHeader {{
+    background: {p.surface};
+    border-bottom: 1px solid {p.border};
+}}
+QLabel#splitPaneTitle {{ color: {p.muted}; font-size: 8.5pt; }}
+QToolButton#splitPaneBtn {{
+    color: {p.muted};
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: 10pt;
+}}
+QToolButton#splitPaneBtn:hover {{ background: {p.elevated}; color: {p.text}; }}
+QSplitter#splitViewSplitter::handle {{ background: {p.border}; }}
+QSplitter#splitViewSplitter::handle:hover {{ background: {p.accent}; }}
+
 QFrame#notifyBar {{
     background: {p.elevated};
     border-bottom: 1px solid {p.accent_dim};

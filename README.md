@@ -488,12 +488,43 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
 
 - **Window layout**, top to bottom: the **tab bar** (with a **+** button just
   to the right of the last tab), then the **address bar**, then the
-  **bookmarks bar**, then the page. Tabs can be dragged to reorder, and
-  **right-clicking a tab** offers *New tab*, *Close tab* (the one you clicked),
-  and *Close other tabs*. Each tab shows its **renderer memory** next to the
-  title (e.g. *GitHub · 142 MB*), refreshed every few seconds — handy for
-  spotting a heavy page. (Chromium shares a renderer across same-site tabs, so
-  those report the same figure.)
+  **bookmarks bar**, then the page. Tabs can be dragged to reorder. Each tab
+  shows its **renderer memory** next to the title (e.g. *GitHub · 142 MB*),
+  refreshed every few seconds — handy for spotting a heavy page. (Chromium
+  shares a renderer across same-site tabs, so those report the same figure.)
+- **Right-clicking a tab** opens a full, Chrome-equivalent menu: *New tab*,
+  *Reopen closed tab* (also **Ctrl+Shift+T**), *Reload*, *Duplicate*,
+  *Pin / Unpin* (pinned tabs get a 📌 and cluster to the left, and are spared
+  by the bulk-close items), *Mute / Unmute site* (🔇), *Open in split view* ▸
+  (pick which other tab to pair with), *Move tab* ▸ (*to beginning*, *to end*,
+  *to new window*), *Close tab*, *Close other tabs*, and *Close tabs to the
+  right*. Items that don't apply are greyed out, as in a modern browser.
+
+### Split view
+
+Show two open tabs side by side in one window — right-click a tab → *Open in
+split view* and pick the other tab. It **borrows the existing tab views** rather
+than reloading, so each side keeps its full live state: navigation history,
+scroll position, form data, focus, JavaScript, and media playback all carry
+across entering, swapping, and leaving the split.
+
+- **Drag the divider** to resize; the ratio is remembered for the next split.
+- Click a pane (or its tab in the strip) to **focus** it — the focused pane gets
+  an accent frame and the address bar, shortcuts, and DevTools act on it.
+- **⇄ Swap sides** exchanges left and right instantly, with no reload and the
+  focused tab kept focused. **✕ Exit split** returns both tabs to the strip and
+  reselects the tab you were on before — again with no reload.
+- Each pane header has **⇄** (show a different open tab in this pane) and **⤢**
+  (send this tab back to the strip, collapsing the split). You can also **drag a
+  tab down out of the strip onto a pane** to drop it there.
+- Split tabs are marked with **◫** in the strip. Selecting any *other* tab
+  leaves the split and shows that tab. The design generalises to more panes /
+  orientations later without a rewrite.
+
+*Move tab → to new window* detaches a tab into its own top-level window that
+**shares this window's profile** (so the page keeps running — no reload, and no
+second engine profile to collide on Vodou's shredded cache). Its **⤢** button
+returns it to the main strip; closing the main window closes it too.
 - **☰ menu → Appearance** — seven built-in themes (*Vodou Violet*, *Blood
   Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*, *Spider Web Grey*,
   *Ghost White*) plus a **dark / light** toggle. Each theme tints the whole
@@ -579,6 +610,7 @@ sent, and a failed check does nothing.
 | Keys | Action |
 |---|---|
 | Ctrl+T / Ctrl+W | New / close tab |
+| Ctrl+Shift+T | Reopen last closed tab |
 | Ctrl+Tab | Next tab |
 | Ctrl+L | Focus address bar |
 | Ctrl+R / F5 | Reload (bypasses the cache — always fetches fresh) |

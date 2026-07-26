@@ -130,10 +130,12 @@ import secrets
 from urllib.parse import quote
 
 from PyQt6.QtCore import (
-    QEvent, QProcess, QSize, Qt, QTimer, QUrl, QVariantAnimation, pyqtSignal,
-    pyqtSlot,
+    QEvent, QMimeData, QPoint, QProcess, QSize, Qt, QTimer, QUrl,
+    QVariantAnimation, pyqtSignal, pyqtSlot,
 )
-from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PyQt6.QtGui import (
+    QAction, QActionGroup, QColor, QCursor, QDrag, QKeySequence, QShortcut,
+)
 from PyQt6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
@@ -201,6 +203,7 @@ from session import (
     save_snapshot,
 )
 from shred import shred_dir
+from splitview import TAB_MIME, SplitView
 from spoofcheck import (
     SENTINEL_HOST,
     download_risk,
@@ -754,6 +757,55 @@ class ButtonPulser:
             self._button.setStyleSheet("")
 
 
+class DraggableTabBar(QTabBar):
+    """The main tab bar, with a tear-off drag so a tab can be dropped into a
+    Split View pane.
+
+    Ordinary left-right reordering is untouched: QTabBar's built-in movable
+    behaviour keeps the pointer inside the bar, so it never crosses the
+    generous vertical margin that arms the tear-off. Only a clear downward
+    drag (toward the page area) starts a QDrag carrying the tab's index; a
+    Split View pane accepts that drop. The index is resolved against the
+    live view list at drop time, so a concurrent reorder can't misfire."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._press_pos: QPoint | None = None
+        self._press_index = -1
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = event.position().toPoint()
+            self._press_index = self.tabAt(self._press_pos)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (self._press_pos is not None and self._press_index >= 0
+                and event.buttons() & Qt.MouseButton.LeftButton):
+            # Arm only on a decisive move below the strip, so horizontal
+            # reordering (which stays within the bar) is never intercepted.
+            pos = event.position().toPoint()
+            if pos.y() - self.rect().bottom() > 24:
+                self._start_tear_off()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._press_pos = None
+        self._press_index = -1
+        super().mouseReleaseEvent(event)
+
+    def _start_tear_off(self) -> None:
+        index = self._press_index
+        self._press_pos = None
+        self._press_index = -1
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(TAB_MIME, str(index).encode("ascii"))
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
+
+
 class BrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -955,7 +1007,7 @@ class BrowserWindow(QMainWindow):
         # QStackedWidget) so the address bar and bookmark bar can sit BETWEEN
         # the tabs and the page — the vertical order top to bottom is:
         # tabs · address bar · bookmarks bar · page.
-        self.tab_bar = QTabBar()
+        self.tab_bar = DraggableTabBar()
         self.tab_bar.setObjectName("mainTabBar")
         self.tab_bar.setTabsClosable(True)
         self.tab_bar.setMovable(True)
@@ -970,6 +1022,21 @@ class BrowserWindow(QMainWindow):
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.tab_bar.customContextMenuRequested.connect(self._tab_context_menu)
         self.tab_stack = QStackedWidget()
+
+        # Ordered source of truth for the open tabs, index-aligned with the tab
+        # bar. It is kept separate from tab_stack's own child list because Split
+        # View borrows a couple of views out of the stack: the list still names
+        # every tab in order while those views live in the split panes.
+        self._views: list[WebView] = []
+        self._active_view: WebView | None = None
+        # (url, pinned) for tabs the user closed, most-recent last — powers
+        # "Reopen closed tab" / Ctrl+Shift+T. Session-only and capped.
+        self._closed_tabs: list[tuple[str, bool]] = []
+        self._split_view: SplitView | None = None
+        self._pre_split_active: WebView | None = None
+        # Top-level windows created by "Move tab to new window"; they share
+        # this window's profile, so they're closed with it.
+        self._detached_windows: list["DetachedWindow"] = []
 
         # "+" opens a new tab, sitting just to the right of the last tab.
         self.plus_button = QToolButton()
@@ -989,11 +1056,17 @@ class BrowserWindow(QMainWindow):
         strip.addWidget(self.plus_button)
         strip.addStretch(1)
 
-        # Page area: the stack of tab pages, with the DevTools panel docking to
-        # the right of this splitter when developer tools are enabled.
+        # Page area: a small stack that flips between the normal single-tab
+        # view (tab_stack) and Split View. Wrapping them keeps the DevTools / AI
+        # panels docking to the right of whichever is showing, unchanged.
+        self.page_area = QStackedWidget()
+        self.page_area.addWidget(self.tab_stack)      # index 0: normal
+
+        # DevTools / AI panels dock to the right of the page area in this
+        # splitter when enabled.
         self._split = QSplitter(Qt.Orientation.Horizontal)
         self._split.setChildrenCollapsible(False)
-        self._split.addWidget(self.tab_stack)
+        self._split.addWidget(self.page_area)
 
         self.notify_bar = NotifyBar()
         # Favicons for the bookmarks bar: captured from pages you browse /
@@ -1234,6 +1307,7 @@ class BrowserWindow(QMainWindow):
         bindings = {
             "Ctrl+T": lambda: self.add_tab(QUrl(HOME_URL)),
             "Ctrl+W": lambda: self.close_tab(self.tab_bar.currentIndex()),
+            "Ctrl+Shift+T": self.reopen_closed_tab,
             "Ctrl+L": self._focus_url_bar,
             "Ctrl+R": self.reload_page,
             "F5": self.reload_page,
@@ -1268,83 +1342,460 @@ class BrowserWindow(QMainWindow):
 
     # -- tabs ---------------------------------------------------------------
 
-    def add_tab(self, url: QUrl | None = None) -> WebView:
+    def add_tab(self, url: QUrl | None = None, *,
+                at: int | None = None, background: bool = False) -> WebView:
         view = WebView(self)
         view._short_title = "New tab"   # tab label pieces (see _update_tab_label)
         view._full_title = ""
         view._mem_mb = None
+        view._pinned = False
         if self._zoom != 1.0:
             view.setZoomFactor(self._zoom)
-        # Keep the tab bar and the page stack index-aligned: both append.
-        index = self.tab_stack.addWidget(view)
+        # tab_stack is the parking/display surface; self._views is the ordered
+        # source of truth. Insert into the list first so any signal fired by
+        # insertTab (e.g. the first tab's currentChanged) already sees it.
+        self.tab_stack.addWidget(view)
+        index = len(self._views) if at is None else max(0, min(at, len(self._views)))
+        self._views.insert(index, view)
         self.tab_bar.insertTab(index, "New tab")
-        self.tab_bar.setCurrentIndex(index)
-        self.tab_stack.setCurrentIndex(index)
 
         view.urlChanged.connect(lambda u, v=view: self._on_url_changed(v, u))
         view.titleChanged.connect(lambda t, v=view: self._on_title_changed(v, t))
         view.iconChanged.connect(
             lambda icon, v=view: self._on_icon_changed(v, icon))
         view.page().fullScreenRequested.connect(self._on_fullscreen)
+        view.page().audioMutedChanged.connect(
+            lambda _m, v=view: self._update_tab_label(v))
         view.loadFinished.connect(
             lambda ok, v=view: self._maybe_offer_fill(v, ok))
         view.page().captured.connect(
             lambda user, pw, v=view: self._on_captured(v, user, pw))
 
+        if not background:
+            self.tab_bar.setCurrentIndex(index)
+            self._on_tab_changed(index)   # covers the no-signal (unchanged) case
         if url is not None:
             view.setUrl(url)
         return view
 
     def close_tab(self, index: int) -> None:
-        if self.tab_bar.count() == 1:
+        if not (0 <= index < len(self._views)):
+            return
+        if len(self._views) == 1:
             self.close()
             return
-        view = self.tab_stack.widget(index)
-        self.tab_bar.removeTab(index)
-        if view is not None:
+        view = self._views[index]
+        # A tab shown in Split View is dismantled from the split first (the
+        # other pane's tab returns to the strip) so nothing is left dangling.
+        if self._split_view is not None and view in self._split_view.views():
+            self._teardown_split()
+        self._remember_closed(view)
+        closing_active = view is self._active_view
+        self._views.pop(index)
+        if self.tab_stack.indexOf(view) >= 0:
             self.tab_stack.removeWidget(view)
-            view.deleteLater()
+        # Keep the tab bar consistent with the (already updated) view list
+        # without a mid-state currentChanged firing against stale indices.
+        self.tab_bar.blockSignals(True)
+        self.tab_bar.removeTab(index)
+        self.tab_bar.blockSignals(False)
+        view.deleteLater()
+        if closing_active:
+            self._on_tab_changed(self.tab_bar.currentIndex())
         self._schedule_session_save()
 
+    def _remember_closed(self, view: WebView) -> None:
+        url = view.pending_url or view.url()
+        text = url.toString()
+        if (text and url.scheme() in ("http", "https", "file")
+                and url.host() != SENTINEL_HOST):
+            self._closed_tabs.append((text, getattr(view, "_pinned", False)))
+            del self._closed_tabs[:-25]     # keep only the most recent 25
+
+    def reopen_closed_tab(self) -> None:
+        """Reopen the most recently closed tab (Ctrl+Shift+T)."""
+        if not self._closed_tabs:
+            self.statusBar().showMessage("No recently closed tabs.", 3000)
+            return
+        url, pinned = self._closed_tabs.pop()
+        view = self.add_tab(QUrl(url))
+        if pinned:
+            self._set_pinned(view, True)
+
+    def _close_other_tabs(self, keep_index: int) -> None:
+        # Close by identity so shifting indices can't close the wrong tab as
+        # the list shrinks; pinned tabs are protected, matching Chrome.
+        keep = self._views[keep_index]
+        for view in list(self._views):
+            if view is not keep and not getattr(view, "_pinned", False):
+                self.close_tab(self._index_of(view))
+
+    def _close_tabs_to_right(self, index: int) -> None:
+        anchor = self._views[index]
+        # Snapshot the tabs to the right now; closing shifts the list.
+        doomed = [v for v in self._views[self._index_of(anchor) + 1:]
+                  if not getattr(v, "_pinned", False)]
+        for view in doomed:
+            self.close_tab(self._index_of(view))
+
+    def _on_tab_moved(self, frm: int, to: int) -> None:
+        """A dragged tab reordered the strip: mirror it in the view list.
+        Display is by widget identity now, so the stack needs no reordering."""
+        if 0 <= frm < len(self._views):
+            view = self._views.pop(frm)
+            self._views.insert(to, view)
+        self._schedule_session_save()
+
+    def _index_of(self, view: WebView) -> int:
+        try:
+            return self._views.index(view)
+        except ValueError:
+            return -1
+
+    def current_view(self) -> WebView | None:
+        return self._active_view
+
+    # -- tab context menu ---------------------------------------------------
+
     def _tab_context_menu(self, pos) -> None:
-        """Right-click on the tab bar: act on the tab under the cursor."""
+        """Right-click on a tab: a Chrome-equivalent menu acting on that tab.
+        Items that don't apply are disabled or hidden, as in a modern browser.
+        """
         index = self.tab_bar.tabAt(pos)
         menu = QMenu(self)
         menu.addAction("New tab", lambda: self.add_tab(QUrl(HOME_URL)))
+        reopen = menu.addAction("Reopen closed tab", self.reopen_closed_tab)
+        reopen.setEnabled(bool(self._closed_tabs))
+
         if index >= 0:
+            view = self._views[index]
+            pinned = getattr(view, "_pinned", False)
+            muted = view.page().isAudioMuted()
+            count = len(self._views)
+            in_split = (self._split_view is not None
+                        and view in self._split_view.views())
+
+            menu.addSeparator()
+            menu.addAction("Reload", lambda v=view: self._reload_view(v))
+            menu.addAction("Duplicate",
+                           lambda i=index: self._duplicate_tab(i))
+            menu.addAction("Unpin tab" if pinned else "Pin tab",
+                           lambda v=view: self._set_pinned(v, not pinned))
+            menu.addAction("Unmute site" if muted else "Mute site",
+                           lambda v=view: self._toggle_mute(v))
+
+            menu.addSeparator()
+            # Open / manage Split View for this tab.
+            if in_split:
+                menu.addAction("Exit split view",
+                               lambda: self._exit_split_view(restore=True))
+            else:
+                split_menu = menu.addMenu("Open in split view")
+                added = False
+                for other in self._views:
+                    if other is view:
+                        continue
+                    title = self._tab_menu_title(other)
+                    split_menu.addAction(
+                        title,
+                        lambda o=other, i=index: self._open_in_split(i, o))
+                    added = True
+                if not added:
+                    empty = split_menu.addAction("Open another tab first")
+                    empty.setEnabled(False)
+
+            move_menu = menu.addMenu("Move tab")
+            to_start = move_menu.addAction(
+                "To beginning", lambda i=index: self._move_tab(i, "start"))
+            to_start.setEnabled(index > 0)
+            to_end = move_menu.addAction(
+                "To end", lambda i=index: self._move_tab(i, "end"))
+            to_end.setEnabled(index < count - 1)
+            move_menu.addSeparator()
+            move_menu.addAction(
+                "To new window",
+                lambda i=index: self._move_tab_to_new_window(i))
+
             menu.addSeparator()
             menu.addAction("Close tab", lambda i=index: self.close_tab(i))
             others = menu.addAction(
                 "Close other tabs", lambda i=index: self._close_other_tabs(i))
-            others.setEnabled(self.tab_bar.count() > 1)
+            others.setEnabled(
+                any(v is not view and not getattr(v, "_pinned", False)
+                    for v in self._views))
+            to_right = menu.addAction(
+                "Close tabs to the right",
+                lambda i=index: self._close_tabs_to_right(i))
+            to_right.setEnabled(
+                any(not getattr(v, "_pinned", False)
+                    for v in self._views[index + 1:]))
         menu.exec(self.tab_bar.mapToGlobal(pos))
 
-    def _close_other_tabs(self, keep_index: int) -> None:
-        # Close by widget identity so shifting indices can't close the wrong
-        # tab as the list shrinks.
-        keep = self.tab_stack.widget(keep_index)
-        for i in range(self.tab_bar.count() - 1, -1, -1):
-            if self.tab_stack.widget(i) is not keep:
-                self.close_tab(i)
+    def _tab_menu_title(self, view: WebView) -> str:
+        base = (getattr(view, "_short_title", "") or view.url().host()
+                or "New tab")
+        return base if len(base) <= 40 else base[:39] + "…"
 
-    def _on_tab_moved(self, frm: int, to: int) -> None:
-        """A dragged tab: reorder the page stack to match, keeping the two
-        index-aligned, then re-sync the current page."""
-        view = self.tab_stack.widget(frm)
-        if view is not None:
-            self.tab_stack.removeWidget(view)
-            self.tab_stack.insertWidget(to, view)
-        self.tab_stack.setCurrentIndex(self.tab_bar.currentIndex())
+    def _reload_view(self, view: WebView) -> None:
+        view.page().triggerAction(
+            QWebEnginePage.WebAction.ReloadAndBypassCache)
+
+    def _duplicate_tab(self, index: int) -> None:
+        if not (0 <= index < len(self._views)):
+            return
+        src = self._views[index]
+        url = src.pending_url or src.url()
+        new = self.add_tab(None, at=index + 1)
+        if url is not None and url.toString():
+            new.setUrl(url)
+
+    def _toggle_mute(self, view: WebView) -> None:
+        page = view.page()
+        page.setAudioMuted(not page.isAudioMuted())
+        # audioMutedChanged relabels the tab; nothing else to do.
+
+    def _set_pinned(self, view: WebView, pinned: bool) -> None:
+        view._pinned = pinned
+        # Pinned tabs cluster on the left, preserving relative order.
+        ordered = ([v for v in self._views if getattr(v, "_pinned", False)]
+                   + [v for v in self._views
+                      if not getattr(v, "_pinned", False)])
+        self._reorder_tabs(ordered)
+        self._update_tab_label(view)
         self._schedule_session_save()
 
-    def current_view(self) -> WebView:
-        return self.tab_stack.currentWidget()
+    def _move_tab(self, index: int, where: str) -> None:
+        if not (0 <= index < len(self._views)):
+            return
+        view = self._views[index]
+        ordered = list(self._views)
+        ordered.pop(index)
+        ordered.insert(0 if where == "start" else len(ordered), view)
+        self._reorder_tabs(ordered)
+        self._schedule_session_save()
+
+    def _reorder_tabs(self, ordered: list) -> None:
+        """Rearrange the strip to match `ordered` (a permutation of the current
+        views), keeping tab_bar and the view list in lock-step. Signals are
+        blocked so the moves don't re-enter _on_tab_moved."""
+        self.tab_bar.blockSignals(True)
+        for target, view in enumerate(ordered):
+            cur = self._index_of(view)
+            if cur < 0 or cur == target:
+                continue
+            self.tab_bar.moveTab(cur, target)
+            self._views.insert(target, self._views.pop(cur))
+        # moveTab keeps the active tab selected; re-assert its highlight.
+        if self._active_view is not None:
+            self.tab_bar.setCurrentIndex(self._index_of(self._active_view))
+        self.tab_bar.blockSignals(False)
+
+    def _move_tab_to_new_window(self, index: int) -> None:
+        """Detach the tab into its own top-level window that shares this
+        window's profile (so the very page keeps running — no reload, no second
+        engine profile to collide on disk). Closing it, or this window, tidies
+        up. See DetachedWindow."""
+        if not (0 <= index < len(self._views)) or len(self._views) == 1:
+            return
+        view = self._views[index]
+        if self._split_view is not None and view in self._split_view.views():
+            self._teardown_split()
+        was_active = view is self._active_view
+        # Remove from the strip WITHOUT deleting the view.
+        self._views.pop(index)
+        if self.tab_stack.indexOf(view) >= 0:
+            self.tab_stack.removeWidget(view)
+        self.tab_bar.blockSignals(True)
+        self.tab_bar.removeTab(index)
+        self.tab_bar.blockSignals(False)
+        if was_active:
+            self._on_tab_changed(self.tab_bar.currentIndex())
+        win = DetachedWindow(self, view)
+        self._detached_windows.append(win)
+        win.show()
+        self._schedule_session_save()
+
+    def reattach_detached(self, window: "DetachedWindow", view: WebView) -> None:
+        """Bring a detached tab back into the main strip (called when the
+        detached window is closed via its Return button)."""
+        if window in self._detached_windows:
+            self._detached_windows.remove(window)
+        if view is None:
+            return
+        self.tab_stack.addWidget(view)
+        index = len(self._views)
+        self._views.append(view)
+        self.tab_bar.insertTab(index, "New tab")
+        self._update_tab_label(view)
+        idx = self._index_of(view)
+        if self.tab_bar.tabIcon(idx).isNull():
+            self.tab_bar.setTabIcon(idx, view.icon())
+        self.tab_bar.setCurrentIndex(index)
+        self._on_tab_changed(index)
+        self._schedule_session_save()
+
+    def forget_detached(self, window: "DetachedWindow") -> None:
+        """The detached window closed for good (its tab is being destroyed)."""
+        if window in self._detached_windows:
+            self._detached_windows.remove(window)
+        self._schedule_session_save()
+
+    # -- split view ---------------------------------------------------------
+
+    def _ensure_split_view(self) -> SplitView:
+        if self._split_view is None:
+            sv = SplitView()
+            sv.set_accent(self.palette().highlight().color())
+            sv.exit_requested.connect(
+                lambda: self._exit_split_view(restore=True))
+            sv.swap_requested.connect(self._swap_split)
+            sv.focus_changed.connect(self._on_split_focus)
+            sv.replace_requested.connect(self._replace_split_pane)
+            sv.return_requested.connect(self._return_split_view_to_strip)
+            sv.tab_dropped.connect(self._on_tab_dropped_on_pane)
+            self.page_area.addWidget(sv)         # index 1
+            self._split_view = sv
+        return self._split_view
+
+    def _open_in_split(self, base_index: int, other: WebView) -> None:
+        if not (0 <= base_index < len(self._views)):
+            return
+        base = self._views[base_index]
+        if base is other or other not in self._views:
+            return
+        self._enter_split_view(base, other)
+
+    def _enter_split_view(self, left: WebView, right: WebView) -> None:
+        sv = self._ensure_split_view()
+        # Remember what to restore to when the split closes.
+        self._pre_split_active = self._active_view
+        for v in (left, right):
+            if self.tab_stack.indexOf(v) >= 0:
+                self.tab_stack.removeWidget(v)
+        sv.mount([left, right])
+        self._refresh_split_titles()
+        self.page_area.setCurrentWidget(sv)
+        for v in (left, right):     # add the split marker to their tabs
+            self._update_tab_label(v)
+        self._on_split_focus(left)
+        self.statusBar().showMessage(
+            "Split view — click a pane to focus it; drag the divider to "
+            "resize.", 5000)
+
+    def _teardown_split(self) -> None:
+        """Dismantle the split UI and hand both views back to the stack. Does
+        NOT change the current selection — callers decide what to show next."""
+        if (self._split_view is None
+                or self.page_area.currentWidget() is not self._split_view):
+            return
+        views = self._split_view.unmount()
+        for v in views:
+            if v is not None and self.tab_stack.indexOf(v) < 0:
+                self.tab_stack.addWidget(v)
+        self.page_area.setCurrentWidget(self.tab_stack)
+        for v in views:                 # drop the split markers
+            self._update_tab_label(v)
+
+    def _exit_split_view(self, restore: bool = True) -> None:
+        if (self._split_view is None
+                or self.page_area.currentWidget() is not self._split_view):
+            return
+        target = getattr(self, "_pre_split_active", None) if restore \
+            else self._active_view
+        self._teardown_split()
+        if target is None or target not in self._views:
+            target = (self._active_view if self._active_view in self._views
+                      else (self._views[0] if self._views else None))
+        if target is not None:
+            idx = self._index_of(target)
+            if self.tab_bar.currentIndex() == idx:
+                self._on_tab_changed(idx)
+            else:
+                self.tab_bar.setCurrentIndex(idx)
+
+    def _swap_split(self) -> None:
+        if self._split_view is None:
+            return
+        self._split_view.swap()
+        self._refresh_split_titles()
+        self._schedule_session_save()
+
+    def _refresh_split_titles(self) -> None:
+        if self._split_view is None:
+            return
+        titles = {}
+        for v in self._split_view.views():
+            titles[v] = (getattr(v, "_full_title", "")
+                         or getattr(v, "_short_title", "")
+                         or v.url().host() or "New tab")
+        self._split_view.set_titles(titles)
+
+    def _on_split_focus(self, view: WebView) -> None:
+        self._active_view = view
+        idx = self._index_of(view)
+        if idx >= 0:
+            self.tab_bar.blockSignals(True)
+            self.tab_bar.setCurrentIndex(idx)
+            self.tab_bar.blockSignals(False)
+        self._sync_chrome_to(view)
+
+    def _replace_split_pane(self, pane) -> None:
+        """The ⇄ button on a pane: pick another tab to show there."""
+        if self._split_view is None:
+            return
+        shown = set(self._split_view.views())
+        menu = QMenu(self)
+        added = False
+        for v in self._views:
+            if v in shown:
+                continue
+            menu.addAction(self._tab_menu_title(v),
+                           lambda vv=v, pp=pane: self._put_view_in_pane(pp, vv))
+            added = True
+        if not added:
+            menu.addAction("No other tabs").setEnabled(False)
+        menu.exec(QCursor.pos())
+
+    def _put_view_in_pane(self, pane, view: WebView) -> None:
+        if self._split_view is None or view not in self._views:
+            return
+        other = self._split_view.other_pane(pane)
+        if other is not None and other.view is view:
+            self._swap_split()          # it's the other pane's tab -> swap
+            return
+        outgoing = pane.view
+        if outgoing is view:
+            return
+        if self.tab_stack.indexOf(view) >= 0:
+            self.tab_stack.removeWidget(view)
+        detached = pane.take_view()
+        if detached is not None and self.tab_stack.indexOf(detached) < 0:
+            self.tab_stack.addWidget(detached)
+        self._split_view.set_view_in_pane(pane, view)
+        self._refresh_split_titles()
+        if detached is not None:
+            self._update_tab_label(detached)
+        self._update_tab_label(view)
+        self._schedule_session_save()
+
+    def _return_split_view_to_strip(self, view: WebView) -> None:
+        # Returning one pane collapses the split; keep that tab active.
+        self._pre_split_active = view
+        self._exit_split_view(restore=True)
+
+    def _on_tab_dropped_on_pane(self, pane, src_index: int) -> None:
+        if (self._split_view is None
+                or self.page_area.currentWidget() is not self._split_view):
+            return
+        if not (0 <= src_index < len(self._views)):
+            return
+        self._put_view_in_pane(pane, self._views[src_index])
 
     def _open_bookmark(self, url: str) -> None:
         self.add_tab(QUrl(url))
 
     def _on_icon_changed(self, view: WebView, icon) -> None:
-        index = self.tab_stack.indexOf(view)
+        index = self._index_of(view)
         if index >= 0:
             self.tab_bar.setTabIcon(index, icon)
         # Capture the favicon for the bookmarks bar, but only for hosts the
@@ -1427,6 +1878,11 @@ class BrowserWindow(QMainWindow):
             self._vault_dialog.close()
         if self._report_window is not None:
             self._report_window.close()
+        # Detached tab windows share this window's profile, so they must not
+        # outlive it — close them (destroying their views) before teardown.
+        for win in list(self._detached_windows):
+            win.close_for_shutdown()
+        self._detached_windows.clear()
         # Blocking stats are in-memory only; they simply go with the process.
         super().closeEvent(event)
 
@@ -1526,14 +1982,15 @@ class BrowserWindow(QMainWindow):
     def _restore_snapshot_tabs(self, urls: list[str], current: int) -> None:
         """Open a snapshot's tabs lazily and select the one that was active."""
         for u in urls:
-            view = self.add_tab(None)
+            view = self.add_tab(None, background=True)
             view.pending_url = QUrl(u)
             # Label the unloaded tab with its host so it's recognizable (store
             # it as the title piece so the memory poll doesn't overwrite it).
             view._short_title = view.pending_url.host() or u
             self._update_tab_label(view)
-        self.tab_bar.setCurrentIndex(current)
-        self._load_pending(self.tab_stack.widget(current))
+        if 0 <= current < len(self._views):
+            self.tab_bar.setCurrentIndex(current)
+            self._on_tab_changed(current)
 
     def _prompt_restart(self, change: str) -> None:
         """Ask whether to restart now so a just-changed setting takes effect."""
@@ -1581,9 +2038,8 @@ class BrowserWindow(QMainWindow):
     def _write_session(self) -> None:
         urls: list[str] = []
         current = 0
-        cur = self.tab_stack.currentWidget()
-        for i in range(self.tab_stack.count()):
-            view = self.tab_stack.widget(i)
+        cur = self._active_view
+        for view in self._views:
             url = view.pending_url or view.url()
             text = url.toString()
             if (text and url.scheme() in ("http", "https", "file")
@@ -1599,23 +2055,42 @@ class BrowserWindow(QMainWindow):
         # switch (the newly-shown tab isn't re-probed until its next load).
         self._clear_login_cues()
         self._schedule_session_save()
-        if index < 0:
+        if not (0 <= index < len(self._views)):
             return
-        self.tab_stack.setCurrentIndex(index)
-        view = self.tab_stack.widget(index)
+        view = self._views[index]
+        # Selecting one of the two split tabs focuses that pane rather than
+        # collapsing the split; selecting any other tab leaves the split.
+        if self._split_view is not None and view in self._split_view.views():
+            self._split_view.set_focused_view(view)   # -> _on_split_focus
+            return
+        if (self._split_view is not None
+                and self.page_area.currentWidget() is self._split_view):
+            self._teardown_split()
+        self._active_view = view
+        self.page_area.setCurrentWidget(self.tab_stack)
+        self.tab_stack.setCurrentWidget(view)
         self._load_pending(view)
-        if view is not None:
-            # A tab parked on the deceptive-site interstitial reflects the
-            # blocked host, not the internal sentinel URL.
-            if view.url().host() == SENTINEL_HOST:
-                self._on_url_changed(view, view.url())
-                return
-            self.url_bar.setText(view.url().toString())
-            self._update_security_indicator(view.url())
-            self._update_star(view.url())
-            # Keep docked DevTools pointed at whichever tab is now active.
-            if getattr(self, "_devtools_open", False):
-                view.page().setDevToolsPage(self._devtools_view.page())
+        self._sync_chrome_to(view)
+
+    def _sync_chrome_to(self, view: WebView | None) -> None:
+        """Point the address bar, security indicator, star, window title, and
+        docked DevTools at `view` (the focused tab, split or not)."""
+        if view is None:
+            return
+        # A tab parked on the deceptive-site interstitial reflects the blocked
+        # host, not the internal sentinel URL.
+        if view.url().host() == SENTINEL_HOST:
+            self._on_url_changed(view, view.url())
+            return
+        self.url_bar.setText(view.url().toString())
+        self.url_bar.setCursorPosition(0)
+        self._update_security_indicator(view.url())
+        self._update_star(view.url())
+        title = getattr(view, "_full_title", "") or view.url().host()
+        if title:
+            self.setWindowTitle(f"{title} — Vodou (private)")
+        if getattr(self, "_devtools_open", False):
+            view.page().setDevToolsPage(self._devtools_view.page())
 
     def _on_url_changed(self, view: WebView, url: QUrl) -> None:
         self._schedule_session_save()
@@ -1740,25 +2215,36 @@ class BrowserWindow(QMainWindow):
         CertificateDialog(host, probe, self).exec()
 
     def _on_title_changed(self, view: WebView, title: str) -> None:
-        index = self.tab_stack.indexOf(view)
+        index = self._index_of(view)
         short = title if len(title) <= 25 else title[:24] + "…"
         view._short_title = short or "New tab"
         view._full_title = title
-        self.tab_bar.setTabToolTip(index, title)
+        if index >= 0:
+            self.tab_bar.setTabToolTip(index, title)
         self._update_tab_label(view)  # re-adds a memory line if one is known
+        self._refresh_split_titles()
         if view is self.current_view():
             self.setWindowTitle(f"{title} — Vodou (private)")
 
     def _update_tab_label(self, view: WebView) -> None:
         """Set the tab text to the page title plus its renderer memory, e.g.
-        'GitHub · 142 MB'. Memory is appended only once known."""
-        index = self.tab_stack.indexOf(view)
+        'GitHub · 142 MB', with pin / mute / split markers prefixed. Memory is
+        appended only once known."""
+        index = self._index_of(view)
         if index < 0:
             return
         title = getattr(view, "_short_title", None) or "New tab"
+        markers = ""
+        if getattr(view, "_pinned", False):
+            markers += "📌 "
+        if view.page().isAudioMuted():
+            markers += "🔇 "
+        if (self._split_view is not None
+                and view in self._split_view.views()):
+            markers += "◫ "
         mb = getattr(view, "_mem_mb", None)
-        label = f"{title}  ·  {mb:.0f} MB" if mb is not None else title
-        self.tab_bar.setTabText(index, label)
+        body = f"{title}  ·  {mb:.0f} MB" if mb is not None else title
+        self.tab_bar.setTabText(index, markers + body)
         if mb is not None:
             full = getattr(view, "_full_title", "") or title
             self.tab_bar.setTabToolTip(
@@ -1766,10 +2252,7 @@ class BrowserWindow(QMainWindow):
 
     def _poll_tab_memory(self) -> None:
         """Refresh every tab's renderer-memory figure (see the timer)."""
-        for i in range(self.tab_stack.count()):
-            view = self.tab_stack.widget(i)
-            if view is None:
-                continue
+        for view in self._views:
             pid = view.page().renderProcessPid()
             view._mem_mb = _process_working_set_mb(pid)
             self._update_tab_label(view)
@@ -2586,10 +3069,8 @@ class BrowserWindow(QMainWindow):
         self.profile.clearAllVisitedLinks()
         # Clear each tab's in-memory back/forward navigation history so the
         # trail of pages you moved through this session is dropped too.
-        for i in range(self.tab_stack.count()):
-            view = self.tab_stack.widget(i)
-            if view is not None:
-                view.history().clear()
+        for view in self._views:
+            view.history().clear()
         self.statusBar().showMessage("History and memory cleared.", 6000)
         # This summary must name the *persistent* cookie jar too. Quitting
         # keeps it (closeEvent flushes it), so this is the only control that
@@ -3076,6 +3557,100 @@ class BrowserWindow(QMainWindow):
         # The user acted on the cue; retire the flashes (a following multi-step
         # page will re-raise one on its next load if a password field appears).
         self._clear_login_cues()
+
+
+class DetachedWindow(QMainWindow):
+    """A single tab torn off into its own top-level window ("Move tab to new
+    window"). It reuses the very WebView — no reload, full state kept — and
+    shares the parent window's QWebEngineProfile, so there is no second engine
+    profile to collide on Vodou's size-capped, shredded cache directory. It
+    carries a slim nav bar; its lifetime is tied to the parent (see
+    BrowserWindow.closeEvent)."""
+
+    def __init__(self, browser: "BrowserWindow", view: "WebView"):
+        super().__init__()
+        self.browser = browser
+        self.view = view
+        self._shutting_down = False
+        self._returned = False
+        self.setWindowTitle("Vodou — detached tab (private)")
+        self.resize(1024, 720)
+
+        tb = QToolBar("Navigation")
+        tb.setMovable(False)
+        self.addToolBar(tb)
+
+        def button(text: str, tip: str, slot) -> QToolButton:
+            b = QToolButton()
+            b.setText(text)
+            b.setToolTip(tip)
+            b.setAutoRaise(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(slot)
+            tb.addWidget(b)
+            return b
+
+        button("‹", "Back", view.back)
+        button("›", "Forward", view.forward)
+        button("⟳", "Reload",
+               lambda: view.page().triggerAction(
+                   QWebEnginePage.WebAction.ReloadAndBypassCache))
+        self._url = QLineEdit()
+        self._url.setClearButtonEnabled(True)
+        self._url.returnPressed.connect(self._navigate)
+        tb.addWidget(self._url)
+        button("⤢", "Return this tab to the main window",
+               self._return_to_main)
+
+        self.setCentralWidget(view)     # reparents the view (state preserved)
+        view.show()
+        view.urlChanged.connect(self._on_url)
+        view.titleChanged.connect(self._on_title)
+        self._on_url(view.url())
+        self._on_title(view.title())
+
+    def _navigate(self) -> None:
+        self.view.setUrl(to_url(self._url.text()))
+
+    def _on_url(self, url: QUrl) -> None:
+        self._url.setText(url.toString())
+        self._url.setCursorPosition(0)
+
+    def _on_title(self, title: str) -> None:
+        self.setWindowTitle(f"{title} — Vodou (private)" if title
+                            else "Vodou — detached tab (private)")
+
+    def _return_to_main(self) -> None:
+        self._returned = True
+        # Drop our own signal links first, or the view keeps this window alive.
+        try:
+            self.view.urlChanged.disconnect(self._on_url)
+            self.view.titleChanged.disconnect(self._on_title)
+        except TypeError:
+            pass
+        view = self.takeCentralWidget()   # release before reparenting
+        self.browser.reattach_detached(self, view)
+        self.close()
+
+    def close_for_shutdown(self) -> None:
+        """The main window is closing: drop this tab's view with it."""
+        self._shutting_down = True
+        view = self.takeCentralWidget()
+        if view is not None:
+            view.setParent(None)
+            view.deleteLater()
+        self.close()
+
+    def closeEvent(self, event) -> None:
+        # User-initiated close (not a return, not app shutdown): the tab goes
+        # away for good, so destroy its view and tell the parent to forget us.
+        if not self._returned and not self._shutting_down:
+            view = self.takeCentralWidget()
+            if view is not None:
+                view.setParent(None)
+                view.deleteLater()
+            self.browser.forget_detached(self)
+        super().closeEvent(event)
 
 
 def main() -> None:
