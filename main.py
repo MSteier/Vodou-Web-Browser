@@ -98,7 +98,9 @@ import platform
 import secrets
 from urllib.parse import quote
 
-from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import (
+    QEvent, QSize, Qt, QTimer, QUrl, QVariantAnimation, pyqtSignal, pyqtSlot,
+)
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
@@ -922,8 +924,13 @@ class BrowserWindow(QMainWindow):
         toolbar.addWidget(self.bookmarks_button)
         self._icon_targets.append((self.bookmarks_button, "bookmarks"))
 
-        action("key", "Fill saved login on this page (Ctrl+Shift+F)",
-               self.fill_login)
+        self.key_action = action(
+            "key", "Fill saved login on this page (Ctrl+Shift+F)",
+            self.fill_login)
+        # The toolbar renders the QAction as a QToolButton; grab that widget so
+        # a detected login form can flash it (see _set_key_active).
+        self.key_button = toolbar.widgetForAction(self.key_action)
+        self._setup_key_flash()
         action("save", "Save a login for this site", self.save_login_for_site)
         action("vault", "Open password vault (Ctrl+Shift+V)", self.open_vault)
 
@@ -1330,6 +1337,9 @@ class BrowserWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         self.notify_bar.hide()
+        # The key's login cue belongs to the tab that raised it; clear it on
+        # switch (the newly-shown tab isn't re-probed until its next load).
+        self._set_key_active(False)
         self._schedule_session_save()
         if index < 0:
             return
@@ -2514,25 +2524,80 @@ class BrowserWindow(QMainWindow):
 
     # -- autofill offer / capture -----------------------------------------
 
+    def _setup_key_flash(self) -> None:
+        """Prepare the pulse animation that draws the eye to the key button
+        when a fillable login form is present (see _set_key_active)."""
+        self._key_active = False
+        self._key_accent_rgb = (0, 0, 0)
+        self._key_flash = QVariantAnimation(self)
+        self._key_flash.setDuration(700)          # one in-out pulse
+        self._key_flash.setStartValue(0.0)
+        self._key_flash.setKeyValueAt(0.5, 1.0)
+        self._key_flash.setEndValue(0.0)
+        self._key_flash.setLoopCount(4)           # ~2.8s of pulsing, then rest
+        self._key_flash.valueChanged.connect(
+            lambda v: self._paint_key(float(v)))
+        self._key_flash.finished.connect(self._settle_key)
+
+    def _set_key_active(self, on: bool) -> None:
+        """Turn the key button's 'a login is here' cue on or off. Idempotent,
+        so re-probing the same page doesn't restart the pulse each time."""
+        if getattr(self, "key_button", None) is None:
+            return
+        if on == self._key_active:
+            return
+        self._key_active = on
+        self._key_flash.stop()
+        if on:
+            accent = build_palette(self._theme_name, self._mode).accent
+            self._key_accent_rgb = (
+                int(accent[1:3], 16), int(accent[3:5], 16),
+                int(accent[5:7], 16))
+            self._key_flash.start()   # pulse, then _settle leaves a steady tint
+        else:
+            self.key_button.setStyleSheet("")
+
+    def _paint_key(self, value: float) -> None:
+        r, g, b = self._key_accent_rgb
+        alpha = int(40 + 150 * value)   # subtle at the trough, bright at peak
+        self.key_button.setStyleSheet(
+            f"QToolButton {{ background: rgba({r},{g},{b},{alpha}); "
+            f"border-radius: 4px; }}")
+
+    def _settle_key(self) -> None:
+        # After the pulse finishes, keep a gentle steady highlight while the
+        # form is still there so the cue persists for a user who looked away.
+        if self._key_active:
+            self._paint_key(0.35)
+        else:
+            self.key_button.setStyleSheet("")
+
     def _maybe_offer_fill(self, view: WebView, ok: bool) -> None:
         """After a page loads, offer to fill if the vault can help."""
-        if not ok or view is not self.current_view():
+        if view is not self.current_view():
+            return
+        if not ok:
+            self._set_key_active(False)
             return
         url = view.url()
         host = url.host().removeprefix("www.")
         if url.scheme() != "https" or not host or not self.vault.exists():
+            self._set_key_active(False)
             return
         if host in self._fill_offer_dismissed:
+            self._set_key_active(False)
             return
 
         def probed(has_password_field: bool) -> None:
             try:
                 if not has_password_field or view is not self.current_view():
+                    self._set_key_active(False)
                     return
             except RuntimeError:  # tab closed before the probe returned
                 return
             if self.vault.unlocked:
                 if not self.vault.entries_for_host(host):
+                    self._set_key_active(False)
                     return
                 text = (f"🔑 Vodou has a saved login for {host}. "
                         f"Autofill username and password?")
@@ -2541,6 +2606,9 @@ class BrowserWindow(QMainWindow):
                 text = (f"🔑 This page has a login form. Unlock your vault "
                         f"to autofill a saved login for {host}?")
                 label = "Unlock && autofill"
+            # A form is here and the vault can help — flash the key button so
+            # the user knows to click it, and offer the one-click bar too.
+            self._set_key_active(True)
             self.notify_bar.offer(
                 host, text, label,
                 on_accept=self.fill_login,
@@ -2676,6 +2744,9 @@ class BrowserWindow(QMainWindow):
         }
         self.statusBar().showMessage(
             messages.get(result, "Fill finished."), 5000)
+        # The user acted on the cue; retire the flash (a following multi-step
+        # page will re-raise it on its next load if a password field appears).
+        self._set_key_active(False)
 
 
 def main() -> None:

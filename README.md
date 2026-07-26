@@ -352,7 +352,11 @@ everything; **Start fresh** discards it and opens the usual home tab.
   origins), judges visibility in a way that copes with **fixed-position
   login modals** (Target, Google's dialogs), and handles **multi-step
   logins** (Google, OpenAI) — on an email-first screen it fills the username
-  and offers again once the password field appears.
+  and offers again once the password field appears. When a page has a login
+  form Vodou can act on, the **key button pulses** in your theme's accent so
+  the fill affordance is easy to spot — only when there's actually a saved
+  login to fill (or a locked vault that might have one), so a flash always
+  means "click to fill".
 - **Change master password** — button in the vault window; re-enters and
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).
