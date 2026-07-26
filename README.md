@@ -20,7 +20,7 @@ in the footer.
 
 **Requirements**
 
-- **Python 3.9+** (developed on 3.10)
+- **Python 3.10+** (developed on 3.10)
 - **pip**
 - Windows, macOS, or Linux (the bundled Qt WebEngine build is platform-specific
   but installs automatically via pip)
