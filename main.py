@@ -2669,6 +2669,9 @@ class BrowserWindow(QMainWindow):
         messages = {
             "ok": "Login filled.",
             "password-only": "Password filled (no username field found).",
+            "username-only": ("Username filled — continue to the password "
+                              "step and Vodou will offer to fill it."),
+            "no-login-field": "No login field found on this page.",
             "no-password-field": "No password field found on this page.",
         }
         self.statusBar().showMessage(

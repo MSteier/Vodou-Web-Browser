@@ -346,7 +346,13 @@ everything; **Start fresh** discards it and opens the usual home tab.
   pages, and matches entries by domain (subdomains included). When several
   logins match, a picker lists them — **Select** (or double-click / Enter)
   fills the highlighted one, and **Delete login** removes stale entries
-  right from the picker.
+  right from the picker. Field detection is built for how real sign-in pages
+  are actually made: it reaches into **shadow DOM and same-origin iframes**
+  (cross-origin frames are never touched, so a fill can't leak across
+  origins), judges visibility in a way that copes with **fixed-position
+  login modals** (Target, Google's dialogs), and handles **multi-step
+  logins** (Google, OpenAI) — on an email-first screen it fills the username
+  and offers again once the password field appears.
 - **Change master password** — button in the vault window; re-enters and
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).
