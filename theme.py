@@ -65,6 +65,8 @@ THEMES: dict[str, tuple[str, str, str]] = {
     "Swamp Green":  ("#2fae72", "#1f7d51", "#3ddc97"),
     "Midnight Blue": ("#3d7dff", "#2857c4", "#5b93ff"),
     "Bone Amber":   ("#d99a3c", "#a9741f", "#f0b95a"),
+    "Spider Web Grey": ("#7d8896", "#59616f", "#9aa6b6"),
+    "Ghost White":  ("#dcdfee", "#7f8598", "#eceefb"),
 }
 DEFAULT_THEME = "Vodou Violet"
 DEFAULT_MODE = "dark"
@@ -82,6 +84,15 @@ def _mix(base_hex: str, accent_hex: str, t: float) -> str:
     return f"#{r:02x}{g:02x}{bl:02x}"
 
 
+def _readable_on(hex_color: str) -> str:
+    """Black or white — whichever reads better as text/fill over the colour.
+    Lets pale accents (e.g. Ghost White) keep legible text on accent fills."""
+    c = hex_color.lstrip("#")
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return "#17181f" if luminance > 0.6 else "#ffffff"
+
+
 def build_palette(theme_name: str, mode: str) -> Palette:
     accent, dim, hover = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
     base = dict(_LIGHT_BASE if mode == "light" else _DARK_BASE)
@@ -96,7 +107,10 @@ def build_palette(theme_name: str, mode: str) -> Palette:
         border=_mix(base["border"], accent, 0.30),
         text=base["text"],
         muted=_mix(base["muted"], accent, 0.20),
-        ok=base["ok"], danger=base["danger"], on_accent=base["on_accent"])
+        ok=base["ok"], danger=base["danger"],
+        # Derived from the accent so a pale accent gets dark text on its fills
+        # (default buttons, table selection) instead of invisible white.
+        on_accent=_readable_on(accent))
 
 
 def load_prefs() -> tuple[str, str]:

@@ -474,10 +474,15 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   to the right of the last tab), then the **address bar**, then the
   **bookmarks bar**, then the page. Tabs can be dragged to reorder, and
   **right-clicking a tab** offers *New tab*, *Close tab* (the one you clicked),
-  and *Close other tabs*.
-- **☰ menu → Appearance** — five built-in themes (*Vodou Violet*, *Blood
-  Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*) plus a **dark / light**
-  toggle. Each theme tints the whole chrome, so the switch is unmistakable.
+  and *Close other tabs*. Each tab shows its **renderer memory** next to the
+  title (e.g. *GitHub · 142 MB*), refreshed every few seconds — handy for
+  spotting a heavy page. (Chromium shares a renderer across same-site tabs, so
+  those report the same figure.)
+- **☰ menu → Appearance** — seven built-in themes (*Vodou Violet*, *Blood
+  Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*, *Spider Web Grey*,
+  *Ghost White*) plus a **dark / light** toggle. Each theme tints the whole
+  chrome, so the switch is unmistakable; accent-on-fill text auto-picks black
+  or white for legibility, so even the pale themes stay readable.
 - The toolbar and address-bar icons are **crisp vectors drawn at runtime**
   (no image files) and repaint in the active theme's colours when you switch
   theme or mode — the bookmark star fills in the accent colour, the security

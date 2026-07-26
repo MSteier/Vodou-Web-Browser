@@ -293,6 +293,46 @@ def plain_message(parent, icon, title, text,
     return box.exec()
 
 
+def _process_working_set_mb(pid: int) -> float | None:
+    """A process's working-set (resident RAM) in MB, or None if unreadable.
+
+    Windows-only (uses GetProcessMemoryInfo); returns None elsewhere or on any
+    failure so callers can just skip the figure. Note a Chromium renderer is
+    shared by same-site tabs, so several tabs can report the same process.
+    """
+    if sys.platform != "win32" or not pid or pid <= 0:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class _PMC(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t)]
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFO
+    if not handle:
+        return None
+    try:
+        counters = _PMC()
+        counters.cb = ctypes.sizeof(_PMC)
+        ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+            handle, ctypes.byref(counters), counters.cb)
+        if not ok:
+            return None
+        return counters.WorkingSetSize / (1024 * 1024)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def to_url(text: str) -> QUrl:
     """Address-bar text -> URL (HTTPS-first) or search query."""
     text = text.strip()
@@ -821,6 +861,12 @@ class BrowserWindow(QMainWindow):
         self._session_timer.setInterval(1000)
         self._session_timer.timeout.connect(self._write_session)
 
+        # Poll each tab's renderer memory and show it in the tab label.
+        self._mem_timer = QTimer(self)
+        self._mem_timer.setInterval(4000)
+        self._mem_timer.timeout.connect(self._poll_tab_memory)
+        self._mem_timer.start()
+
         self._build_ui()
         self._build_shortcuts()
         if not self._offer_crash_restore():
@@ -1143,6 +1189,9 @@ class BrowserWindow(QMainWindow):
 
     def add_tab(self, url: QUrl | None = None) -> WebView:
         view = WebView(self)
+        view._short_title = "New tab"   # tab label pieces (see _update_tab_label)
+        view._full_title = ""
+        view._mem_mb = None
         if self._zoom != 1.0:
             view.setZoomFactor(self._zoom)
         # Keep the tab bar and the page stack index-aligned: both append.
@@ -1363,9 +1412,10 @@ class BrowserWindow(QMainWindow):
         for u in urls:
             view = self.add_tab(None)
             view.pending_url = QUrl(u)
-            # Label the unloaded tab with its host so it's recognizable.
-            self.tab_bar.setTabText(self.tab_stack.indexOf(view),
-                                    view.pending_url.host() or u)
+            # Label the unloaded tab with its host so it's recognizable (store
+            # it as the title piece so the memory poll doesn't overwrite it).
+            view._short_title = view.pending_url.host() or u
+            self._update_tab_label(view)
         self.tab_bar.setCurrentIndex(current)
         self._load_pending(self.tab_stack.widget(current))
         return True
@@ -1544,10 +1594,37 @@ class BrowserWindow(QMainWindow):
     def _on_title_changed(self, view: WebView, title: str) -> None:
         index = self.tab_stack.indexOf(view)
         short = title if len(title) <= 25 else title[:24] + "…"
-        self.tab_bar.setTabText(index, short or "New tab")
+        view._short_title = short or "New tab"
+        view._full_title = title
         self.tab_bar.setTabToolTip(index, title)
+        self._update_tab_label(view)  # re-adds a memory line if one is known
         if view is self.current_view():
             self.setWindowTitle(f"{title} — Vodou (private)")
+
+    def _update_tab_label(self, view: WebView) -> None:
+        """Set the tab text to the page title plus its renderer memory, e.g.
+        'GitHub · 142 MB'. Memory is appended only once known."""
+        index = self.tab_stack.indexOf(view)
+        if index < 0:
+            return
+        title = getattr(view, "_short_title", None) or "New tab"
+        mb = getattr(view, "_mem_mb", None)
+        label = f"{title}  ·  {mb:.0f} MB" if mb is not None else title
+        self.tab_bar.setTabText(index, label)
+        if mb is not None:
+            full = getattr(view, "_full_title", "") or title
+            self.tab_bar.setTabToolTip(
+                index, f"{full}\nRenderer memory: {mb:.0f} MB")
+
+    def _poll_tab_memory(self) -> None:
+        """Refresh every tab's renderer-memory figure (see the timer)."""
+        for i in range(self.tab_stack.count()):
+            view = self.tab_stack.widget(i)
+            if view is None:
+                continue
+            pid = view.page().renderProcessPid()
+            view._mem_mb = _process_working_set_mb(pid)
+            self._update_tab_label(view)
 
     def _navigate(self) -> None:
         self.current_view().setUrl(to_url(self.url_bar.text()))
