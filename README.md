@@ -387,7 +387,8 @@ everything; **Start fresh** discards it and opens the usual home tab.
   decrypted at the instant it is used (fill, copy, edit).
 - **Import / export** — pull passwords in from a Chrome, Edge, Firefox, Brave,
   or Bitwarden **CSV** export, or export the vault to CSV (behind a plain-text
-  warning). Buttons are in the vault dialog; import is also on the ☰ menu.
+  warning). Both live under the vault window's **Manage** menu; import is also
+  on the ☰ menu.
 - Downloads always require confirmation (no silent drive-by downloads), and
   the server-suggested filename is sanitised: path components, NTFS
   alternate-data-stream colons (`report.pdf:evil.exe`), reserved device names
@@ -404,7 +405,7 @@ stolen `vault.dat` plus a guessed master password still opens nothing without
 a registered key present. A password-only vault derives exactly the historical
 key, so existing vaults keep opening unchanged.
 
-- **Vault window → Security keys…** — add, name, and remove keys. Enrolling
+- **Vault window → Manage → Security keys…** — add, name, and remove keys. Enrolling
   the first key turns 2FA on and re-encrypts the vault; each further key is an
   independent **backup** (any one enrolled key opens the vault). Removing the
   last key reverts the vault to password-only.
@@ -568,6 +569,7 @@ sent, and a failed check does nothing.
 | Ctrl+0 | Reset zoom |
 | Ctrl+D | Bookmark current page |
 | Ctrl+J | Downloads |
+| Ctrl+Shift+A | Ask local AI / summarize |
 | Ctrl+Shift+F | Fill login |
 | Ctrl+Shift+V | Open vault |
 | Ctrl+Shift+L | Lock vault (log out) |
