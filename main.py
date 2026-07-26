@@ -21,6 +21,7 @@ Run:  python main.py
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # Graphics profile. The default is tuned for integrated graphics:
@@ -104,6 +105,34 @@ def save_location_guard(on: bool) -> None:
         pass
 
 
+def load_block_webcam() -> bool:
+    """Whether webcam (camera) access is blocked. On by default — Vodou is
+    privacy-first, and a page rarely has a legitimate need for the camera."""
+    try:
+        data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+        return bool(data.get("block_webcam", True))
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def save_block_webcam(on: bool) -> None:
+    try:
+        PRIVACY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        try:
+            data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data["block_webcam"] = bool(on)
+        tmp = PRIVACY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(PRIVACY_FILE)
+    except OSError:
+        pass
+
+
 def _gfx_flags() -> str:
     global GFX_MODE
     mode = _load_saved_gfx()          # ☰ menu → Graphics choice, if any
@@ -139,6 +168,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
+    QWebEnginePermission,
     QWebEngineProfile,
     QWebEngineScript,
     QWebEngineSettings,
@@ -408,6 +438,10 @@ class WebPage(QWebEnginePage):
         # True while the deceptive-site interstitial occupies this page, so its
         # own load and links aren't themselves re-inspected.
         self._interstitial_active = False
+        # Gate camera/mic/etc. permission prompts. QtWebEngine denies any
+        # permission that no slot resolves, so by owning this signal we keep
+        # Vodou's default of granting nothing unless the user opts in.
+        self.permissionRequested.connect(self._on_permission_requested)
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame) -> bool:
         host = url.host()
@@ -500,6 +534,29 @@ class WebPage(QWebEnginePage):
         # handler writes page console output (which routinely includes
         # user data) to stderr/logs. DevTools has its own console feed,
         # so nothing is lost for debugging.
+
+    def _on_permission_requested(self, permission) -> None:
+        """Decide on a page's request to use a device/capability.
+
+        Camera (video, or audio+video) is gated on the Block Webcam setting:
+        denied outright when the guard is on, otherwise the user is asked.
+        Every other permission (microphone, screen capture, notifications,
+        clipboard, fonts, geolocation) is denied — Vodou grants nothing on its
+        own, and this simply makes that long-standing default explicit now
+        that we own the signal. Geolocation stays additionally shielded by
+        Location Guard's JS shim.
+        """
+        ptype = QWebEnginePermission.PermissionType
+        wants_camera = permission.permissionType() in (
+            ptype.MediaVideoCapture, ptype.MediaAudioVideoCapture)
+        if not wants_camera:
+            permission.deny()
+            return
+        if self.browser._block_webcam:
+            permission.deny()
+            self.browser._note_webcam_blocked(permission.origin().host())
+            return
+        self.browser._prompt_webcam(permission)
 
 
 class BookmarkBar(QToolBar):
@@ -923,6 +980,14 @@ class BrowserWindow(QMainWindow):
         if self._location_guard_on:
             self.profile.scripts().insert(self._location_guard_script)
 
+        # Block Webcam: deny page requests for the camera. Enforced per-page in
+        # WebPage._on_permission_requested; kept here so every page reads one
+        # live flag. On by default (privacy-first).
+        self._block_webcam = load_block_webcam()
+        # Throttles the "camera blocked" status note so a page that hammers
+        # getUserMedia can't spam the status bar.
+        self._webcam_note_at = 0.0
+
         # Reviewed, opt-in plugins injected into the isolated world. State is
         # ID-only (no code from disk); each plugin self-limits to its hosts.
         self.plugins = PluginManager()
@@ -1236,6 +1301,14 @@ class BrowserWindow(QMainWindow):
             "Sites can at most estimate your area from your IP address. "
             "Reload open pages after changing this.")
         self.location_guard_action.toggled.connect(self._set_location_guard)
+        self.block_webcam_action = settings_menu.addAction("Block Webcam")
+        self.block_webcam_action.setCheckable(True)
+        self.block_webcam_action.setChecked(self._block_webcam)
+        self.block_webcam_action.setToolTip(
+            "Stop websites from using your camera. Denied automatically while "
+            "on; turn off to be asked for each site instead. Takes effect on "
+            "the next camera request — no reload needed.")
+        self.block_webcam_action.toggled.connect(self._set_block_webcam)
         # Local AI group.
         settings_menu.addSeparator()
         self.ai_search_action = settings_menu.addAction("Local AI (Ollama)")
@@ -1920,6 +1993,48 @@ class BrowserWindow(QMainWindow):
             "to apply." if on else
             "Location Guard off — sites may request your precise location. "
             "Reload open pages to apply.", 6000)
+
+    def _set_block_webcam(self, on: bool) -> None:
+        """Turn webcam blocking on/off. Takes effect on the next camera
+        request — no reload needed, since the gate is checked live."""
+        if on == getattr(self, "_block_webcam", None):
+            return
+        self._block_webcam = on
+        save_block_webcam(on)
+        self.statusBar().showMessage(
+            "Block Webcam on — sites can't use your camera." if on else
+            "Block Webcam off — Vodou will ask before a site uses your "
+            "camera.", 6000)
+
+    def _note_webcam_blocked(self, host: str) -> None:
+        """Briefly tell the user a camera request was just denied, rate-limited
+        so a page that retries in a loop can't flood the status bar."""
+        now = time.monotonic()
+        if now - self._webcam_note_at < 4.0:
+            return
+        self._webcam_note_at = now
+        who = host or "A site"
+        self.statusBar().showMessage(
+            f"Blocked a camera request from {who}. Turn off Block Webcam in "
+            "Settings to allow it.", 5000)
+
+    def _prompt_webcam(self, permission) -> None:
+        """Ask the user whether to grant a camera request (Block Webcam off).
+        Kept per-request so the choice is never remembered silently."""
+        host = permission.origin().host() or "This site"
+        answer = plain_message(
+            self, QMessageBox.Icon.Question, "Camera access",
+            f"{host} wants to use your camera.\n\n"
+            "Allow it to access your camera for this request?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        try:
+            if answer == QMessageBox.StandardButton.Yes:
+                permission.grant()
+            else:
+                permission.deny()
+        except RuntimeError:
+            pass  # page navigated away while the prompt was open
 
     def show_safe_browsing_status(self) -> None:
         sb = self.safe_browsing
