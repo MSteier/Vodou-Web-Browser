@@ -340,7 +340,15 @@ everything; **Start fresh** discards it and opens the usual home tab.
   and generate strong random passwords (`secrets` module). The vault is an
   ordinary window, not a modal dialog — it stays usable alongside the
   browser and other apps, drops behind when you click elsewhere, and
-  returns via its taskbar button.
+  returns via its taskbar button. Everyday actions sit up front (add / edit /
+  delete on the left, **Go to site** / copy on the right — *Go to site* opens
+  the selected login's site in a new tab); a **Manage** menu tucks away the
+  occasional ones (security keys, change master password, CSV import/export),
+  and a **🔒 Log out** button locks the vault right from the window.
+- The **vault toolbar button shows its state at a glance**: a **red** safe
+  with a closed padlock when locked, a **green** one with an open padlock
+  when unlocked. When a page has a login form but the vault is locked, that
+  button **pulses** to point you at unlocking first.
 - **🔑 / Ctrl+Shift+F** — fill the saved login on the current page.
   Filling is always user-initiated (never automatic), warns on non-HTTPS
   pages, and matches entries by domain (subdomains included). When several
@@ -353,10 +361,9 @@ everything; **Start fresh** discards it and opens the usual home tab.
   login modals** (Target, Google's dialogs), and handles **multi-step
   logins** (Google, OpenAI) — on an email-first screen it fills the username
   and offers again once the password field appears. When a page has a login
-  form Vodou can act on, the **key button pulses** in your theme's accent so
-  the fill affordance is easy to spot — only when there's actually a saved
-  login to fill (or a locked vault that might have one), so a flash always
-  means "click to fill".
+  Vodou can act on, the toolbar **pulses the button for your next step**: the
+  **key** when there's a saved login ready to fill, or the **vault** when it's
+  locked and needs unlocking first — so a pulse always points at one click.
 - **Change master password** — button in the vault window; re-enters and
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -511,15 +513,23 @@ class EntryDialog(QDialog):
 class VaultDialog(QDialog):
     """Table view of all saved logins with add/edit/delete/copy."""
 
+    # Emitted when the user clicks "Log out": the browser locks the vault and
+    # closes this window (it owns the lock timer and the toolbar indicator).
+    logout_requested = pyqtSignal()
+    # Emitted with a saved entry's site so the browser can open it in a tab.
+    open_site_requested = pyqtSignal(str)
+
     def __init__(self, vault: Vault, parent: QWidget | None = None,
                  current_site: str = ""):
         super().__init__(parent)
         self.vault = vault
         self.current_site = current_site
         self.setWindowTitle("Password Vault")
-        self.resize(640, 420)
+        self.resize(660, 440)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 12)
+        layout.setSpacing(10)
 
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
@@ -541,44 +551,69 @@ class VaultDialog(QDialog):
         self.table.doubleClicked.connect(lambda _: self._edit())
         layout.addWidget(self.table)
 
-        row = QHBoxLayout()
-        for label, handler in (
-                ("Add", self._add),
-                ("Edit", self._edit),
-                ("Delete", self._delete),
-                ("Copy password", self._copy_password),
-                ("Copy username", self._copy_username)):
+        # Entry actions: modify the selection on the left, copy it on the
+        # right, so the two kinds of action read as distinct groups.
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
+        for label, handler in (("Add", self._add),
+                               ("Edit", self._edit),
+                               ("Delete", self._delete)):
             btn = QPushButton(label)
             btn.clicked.connect(handler)
-            row.addWidget(btn)
-        row.addStretch()
-        layout.addLayout(row)
+            actions.addWidget(btn)
+        actions.addStretch()
+        for label, handler in (("Go to site", self._go_to_site),
+                               ("Copy username", self._copy_username),
+                               ("Copy password", self._copy_password)):
+            btn = QPushButton(label)
+            btn.clicked.connect(handler)
+            actions.addWidget(btn)
+        layout.addLayout(actions)
 
-        io_row = QHBoxLayout()
-        import_btn = QPushButton("Import CSV…")
-        import_btn.clicked.connect(self._import_csv)
-        export_btn = QPushButton("Export CSV…")
-        export_btn.clicked.connect(self._export_csv)
-        io_row.addWidget(import_btn)
-        io_row.addWidget(export_btn)
-        io_row.addStretch()
-        keys_btn = QPushButton("Security keys…")
-        keys_btn.setToolTip(
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(divider)
+
+        # Footer: a "Manage" menu gathers the occasional vault-wide actions so
+        # they don't crowd the everyday buttons; Log out sits apart on the far
+        # right where a "leave" control is expected.
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+
+        manage_btn = QPushButton("Manage")
+        manage_btn.setToolTip("Security keys, master password, and CSV "
+                              "import/export.")
+        manage_menu = QMenu(manage_btn)
+        keys_action = manage_menu.addAction(
+            "Security keys…",
+            lambda: SecurityKeysDialog(self.vault, self).exec())
+        keys_action.setToolTip(
             "Add or remove a FIDO2 security key as a second factor for "
             "unlocking the vault.")
-        keys_btn.clicked.connect(
-            lambda: SecurityKeysDialog(self.vault, self).exec())
-        io_row.addWidget(keys_btn)
-        master_btn = QPushButton("Change master password…")
-        master_btn.clicked.connect(
+        manage_menu.addAction(
+            "Change master password…",
             lambda: ChangeMasterDialog(self.vault, self).exec())
-        io_row.addWidget(master_btn)
-        layout.addLayout(io_row)
+        manage_menu.addSeparator()
+        manage_menu.addAction("Import from CSV…", self._import_csv)
+        manage_menu.addAction("Export to CSV…", self._export_csv)
+        manage_btn.setMenu(manage_menu)
+        footer.addWidget(manage_btn)
 
-        hint = QLabel(f"Copied passwords are cleared from the clipboard "
-                      f"after {CLIPBOARD_CLEAR_SECONDS}s.")
+        hint = QLabel(f"Copied passwords clear after "
+                      f"{CLIPBOARD_CLEAR_SECONDS}s")
         hint.setStyleSheet("color: gray;")
-        layout.addWidget(hint)
+        footer.addWidget(hint)
+
+        footer.addStretch()
+
+        logout_btn = QPushButton("🔒  Log out")
+        logout_btn.setToolTip(
+            "Lock the vault now and close this window (Ctrl+Shift+L).")
+        logout_btn.clicked.connect(lambda: self.logout_requested.emit())
+        footer.addWidget(logout_btn)
+
+        layout.addLayout(footer)
 
         self._refresh()
 
@@ -637,6 +672,16 @@ class VaultDialog(QDialog):
         if box.exec() == QMessageBox.StandardButton.Yes:
             self.vault.delete(index)
             self._refresh()
+
+    def _go_to_site(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            QMessageBox.information(self, "No login selected",
+                                    "Select a saved login first.")
+            return
+        site = self.vault.entries()[index].site.strip()
+        if site:
+            self.open_site_requested.emit(site)
 
     def _copy_password(self) -> None:
         index = self._selected_index()

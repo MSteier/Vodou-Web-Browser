@@ -623,6 +623,61 @@ class WebView(QWebEngineView):
         return super().eventFilter(obj, event)
 
 
+class ButtonPulser:
+    """Pulses a toolbar QToolButton's background to draw the eye to it.
+
+    Runs ~4 in-and-out accent-coloured pulses, then leaves a gentle steady
+    tint while it stays active so the cue persists for a user who looked
+    away. set_active is idempotent, so re-probing the same page doesn't
+    restart the pulse. The accent is read fresh each time it activates
+    (via accent_provider) so it always matches the live theme.
+    """
+
+    def __init__(self, button, accent_provider):
+        self._button = button
+        self._accent = accent_provider   # callable -> "#rrggbb"
+        self._active = False
+        self._rgb = (0, 0, 0)
+        self._anim = QVariantAnimation(button)
+        self._anim.setDuration(700)          # one in-out pulse
+        self._anim.setStartValue(0.0)
+        self._anim.setKeyValueAt(0.5, 1.0)
+        self._anim.setEndValue(0.0)
+        self._anim.setLoopCount(4)           # ~2.8s of pulsing, then rest
+        self._anim.valueChanged.connect(lambda v: self._paint(float(v)))
+        self._anim.finished.connect(self._settle)
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def set_active(self, on: bool) -> None:
+        if self._button is None or on == self._active:
+            return
+        self._active = on
+        self._anim.stop()
+        if on:
+            hexc = self._accent()
+            self._rgb = (int(hexc[1:3], 16), int(hexc[3:5], 16),
+                         int(hexc[5:7], 16))
+            self._anim.start()   # pulse, then _settle leaves a steady tint
+        else:
+            self._button.setStyleSheet("")
+
+    def _paint(self, value: float) -> None:
+        r, g, b = self._rgb
+        alpha = int(40 + 150 * value)   # subtle at the trough, bright at peak
+        self._button.setStyleSheet(
+            f"QToolButton {{ background: rgba({r},{g},{b},{alpha}); "
+            f"border-radius: 4px; }}")
+
+    def _settle(self) -> None:
+        if self._active:
+            self._paint(0.35)
+        else:
+            self._button.setStyleSheet("")
+
+
 class BrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -927,12 +982,16 @@ class BrowserWindow(QMainWindow):
         self.key_action = action(
             "key", "Fill saved login on this page (Ctrl+Shift+F)",
             self.fill_login)
-        # The toolbar renders the QAction as a QToolButton; grab that widget so
-        # a detected login form can flash it (see _set_key_active).
-        self.key_button = toolbar.widgetForAction(self.key_action)
-        self._setup_key_flash()
         action("save", "Save a login for this site", self.save_login_for_site)
-        action("vault", "Open password vault (Ctrl+Shift+V)", self.open_vault)
+        self.vault_action = action(
+            "vault", "Open password vault (Ctrl+Shift+V)", self.open_vault)
+        # The toolbar renders each QAction as a QToolButton; grab the key and
+        # vault widgets so detected login forms can pulse them (key = a saved
+        # login is here to fill; vault = unlock first), and so the vault button
+        # can carry a locked/unlocked state indicator.
+        self.key_button = toolbar.widgetForAction(self.key_action)
+        self.vault_button = toolbar.widgetForAction(self.vault_action)
+        self._setup_button_pulsers()
 
         menu_button = QToolButton()
         menu_button.setToolTip("Menu")
@@ -1016,6 +1075,7 @@ class BrowserWindow(QMainWindow):
         menu_button.setMenu(menu)
         toolbar.addWidget(menu_button)
         self._apply_static_icons()
+        self._refresh_vault_indicator()   # vault state icon over the neutral one
 
         # The version tag floats as a direct child of the status bar (outside
         # its layout) so it can sit dead-centre in the footer; an event filter
@@ -1337,9 +1397,9 @@ class BrowserWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         self.notify_bar.hide()
-        # The key's login cue belongs to the tab that raised it; clear it on
+        # The login cues belong to the tab that raised them; clear them on
         # switch (the newly-shown tab isn't re-probed until its next load).
-        self._set_key_active(False)
+        self._clear_login_cues()
         self._schedule_session_save()
         if index < 0:
             return
@@ -1530,6 +1590,7 @@ class BrowserWindow(QMainWindow):
         self._rebuild_icon_cache()
         self._apply_static_icons()
         self.ai_action.setIcon(self._ai_icon)  # accent-coloured, set directly
+        self._refresh_vault_indicator()  # vault locked/unlocked state icon
         self.bookmark_bar.refresh()  # recolour the globe fallback
         view = self.current_view()
         if view is not None:
@@ -2426,6 +2487,7 @@ class BrowserWindow(QMainWindow):
         if not ensure_unlocked(self.vault, self):
             return False
         self._vault_lock_timer.start()
+        self._refresh_vault_indicator()
         return True
 
     def _autolock_vault(self) -> None:
@@ -2439,6 +2501,7 @@ class BrowserWindow(QMainWindow):
             if self._vault_dialog is not None:
                 self._vault_dialog.close()
             self.vault.lock()
+            self._refresh_vault_indicator()
             self.statusBar().showMessage(
                 f"Password vault auto-locked after {VAULT_AUTOLOCK_MINUTES} "
                 f"minutes of inactivity.", 6000)
@@ -2456,6 +2519,7 @@ class BrowserWindow(QMainWindow):
             self._vault_dialog.close()
         self.vault.lock()
         self._vault_lock_timer.stop()
+        self._refresh_vault_indicator()
         self.statusBar().showMessage("Password vault locked.", 4000)
 
     def open_vault(self) -> None:
@@ -2481,8 +2545,23 @@ class BrowserWindow(QMainWindow):
         dialog.setModal(False)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(self._on_vault_dialog_closed)
+        # "Log out" inside the vault window routes through the browser so the
+        # lock timer stops and the toolbar indicator updates (lock_vault_now
+        # closes this dialog itself).
+        dialog.logout_requested.connect(self.lock_vault_now)
+        dialog.open_site_requested.connect(self.open_saved_site)
         self._vault_dialog = dialog
         dialog.show()
+
+    def open_saved_site(self, site: str) -> None:
+        """Open a saved login's site in a new tab and bring the browser
+        forward (the vault window is a separate, modeless window)."""
+        url = to_url(site)
+        if not url.isValid() or url.scheme() not in ("http", "https"):
+            return
+        self.add_tab(url)
+        self.raise_()
+        self.activateWindow()
 
     def _on_vault_dialog_closed(self, _result: int = 0) -> None:
         self._vault_dialog = None
@@ -2524,91 +2603,90 @@ class BrowserWindow(QMainWindow):
 
     # -- autofill offer / capture -----------------------------------------
 
-    def _setup_key_flash(self) -> None:
-        """Prepare the pulse animation that draws the eye to the key button
-        when a fillable login form is present (see _set_key_active)."""
-        self._key_active = False
-        self._key_accent_rgb = (0, 0, 0)
-        self._key_flash = QVariantAnimation(self)
-        self._key_flash.setDuration(700)          # one in-out pulse
-        self._key_flash.setStartValue(0.0)
-        self._key_flash.setKeyValueAt(0.5, 1.0)
-        self._key_flash.setEndValue(0.0)
-        self._key_flash.setLoopCount(4)           # ~2.8s of pulsing, then rest
-        self._key_flash.valueChanged.connect(
-            lambda v: self._paint_key(float(v)))
-        self._key_flash.finished.connect(self._settle_key)
+    def _setup_button_pulsers(self) -> None:
+        """Wire the two attention cues: the key button (a saved login is here
+        to fill) and the vault button (a login is here but the vault is locked,
+        so unlock it first). Both pulse in the live theme accent."""
+        accent = lambda: build_palette(self._theme_name, self._mode).accent
+        self._key_pulser = ButtonPulser(self.key_button, accent)
+        self._vault_pulser = ButtonPulser(self.vault_button, accent)
 
     def _set_key_active(self, on: bool) -> None:
-        """Turn the key button's 'a login is here' cue on or off. Idempotent,
-        so re-probing the same page doesn't restart the pulse each time."""
-        if getattr(self, "key_button", None) is None:
-            return
-        if on == self._key_active:
-            return
-        self._key_active = on
-        self._key_flash.stop()
-        if on:
-            accent = build_palette(self._theme_name, self._mode).accent
-            self._key_accent_rgb = (
-                int(accent[1:3], 16), int(accent[3:5], 16),
-                int(accent[5:7], 16))
-            self._key_flash.start()   # pulse, then _settle leaves a steady tint
-        else:
-            self.key_button.setStyleSheet("")
+        if getattr(self, "_key_pulser", None) is not None:
+            self._key_pulser.set_active(on)
 
-    def _paint_key(self, value: float) -> None:
-        r, g, b = self._key_accent_rgb
-        alpha = int(40 + 150 * value)   # subtle at the trough, bright at peak
-        self.key_button.setStyleSheet(
-            f"QToolButton {{ background: rgba({r},{g},{b},{alpha}); "
-            f"border-radius: 4px; }}")
+    def _set_vault_active(self, on: bool) -> None:
+        if getattr(self, "_vault_pulser", None) is not None:
+            self._vault_pulser.set_active(on)
 
-    def _settle_key(self) -> None:
-        # After the pulse finishes, keep a gentle steady highlight while the
-        # form is still there so the cue persists for a user who looked away.
-        if self._key_active:
-            self._paint_key(0.35)
+    def _refresh_vault_indicator(self) -> None:
+        """Repaint the vault button so its state reads at a glance: dimmed
+        (locked) vs. accent-green (unlocked), with a matching tooltip. The icon
+        is set on the QAction (which the toolbar button displays); call this
+        after _apply_static_icons, which would otherwise reset it to neutral.
+        Called on every lock/unlock transition and on theme switches."""
+        action = getattr(self, "vault_action", None)
+        if action is None:
+            return
+        p = build_palette(self._theme_name, self._mode)
+        if not self.vault.exists():
+            action.setIcon(make_icon("vault", p.text))
+            action.setToolTip("Open password vault (Ctrl+Shift+V)")
+            return
+        if self.vault.unlocked:
+            action.setIcon(make_icon("vault-unlocked", p.ok))
+            action.setToolTip("Vault unlocked — open it (Ctrl+Shift+V)")
+            self._set_vault_active(False)   # no need to nag to unlock
         else:
-            self.key_button.setStyleSheet("")
+            action.setIcon(make_icon("vault-locked", p.danger))
+            action.setToolTip("Vault locked — click to unlock (Ctrl+Shift+V)")
+
+    def _clear_login_cues(self) -> None:
+        """Stop both attention pulses (key and vault)."""
+        self._set_key_active(False)
+        self._set_vault_active(False)
 
     def _maybe_offer_fill(self, view: WebView, ok: bool) -> None:
         """After a page loads, offer to fill if the vault can help."""
         if view is not self.current_view():
             return
         if not ok:
-            self._set_key_active(False)
+            self._clear_login_cues()
             return
         url = view.url()
         host = url.host().removeprefix("www.")
         if url.scheme() != "https" or not host or not self.vault.exists():
-            self._set_key_active(False)
+            self._clear_login_cues()
             return
         if host in self._fill_offer_dismissed:
-            self._set_key_active(False)
+            self._clear_login_cues()
             return
 
         def probed(has_password_field: bool) -> None:
             try:
                 if not has_password_field or view is not self.current_view():
-                    self._set_key_active(False)
+                    self._clear_login_cues()
                     return
             except RuntimeError:  # tab closed before the probe returned
                 return
             if self.vault.unlocked:
                 if not self.vault.entries_for_host(host):
-                    self._set_key_active(False)
+                    self._clear_login_cues()
                     return
                 text = (f"🔑 Vodou has a saved login for {host}. "
                         f"Autofill username and password?")
                 label = "Autofill"
+                # Something to fill right now — flash the key button.
+                self._set_vault_active(False)
+                self._set_key_active(True)
             else:
                 text = (f"🔑 This page has a login form. Unlock your vault "
                         f"to autofill a saved login for {host}?")
                 label = "Unlock && autofill"
-            # A form is here and the vault can help — flash the key button so
-            # the user knows to click it, and offer the one-click bar too.
-            self._set_key_active(True)
+                # Can't fill until the vault is unlocked — flash the vault
+                # button to point the user at the step they need first.
+                self._set_key_active(False)
+                self._set_vault_active(True)
             self.notify_bar.offer(
                 host, text, label,
                 on_accept=self.fill_login,
@@ -2744,9 +2822,9 @@ class BrowserWindow(QMainWindow):
         }
         self.statusBar().showMessage(
             messages.get(result, "Fill finished."), 5000)
-        # The user acted on the cue; retire the flash (a following multi-step
-        # page will re-raise it on its next load if a password field appears).
-        self._set_key_active(False)
+        # The user acted on the cue; retire the flashes (a following multi-step
+        # page will re-raise one on its next load if a password field appears).
+        self._clear_login_cues()
 
 
 def main() -> None:
