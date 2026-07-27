@@ -94,16 +94,16 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Feature | How |
 |---|---|
 | Cookies & history never persist | Cookies are memory-only and die with the process, except for sites you explicitly allowlist — see *Cookie exceptions*. The bulky, low-sensitivity artifacts (HTTP cache, site storage) live in a size-capped disk folder for performance and are **securely shredded** on every exit — see *Performance & secure shredding* |
-| Tracker & ad blocking | Request interceptor blocks ~3,500 known tracker/ad domains — a small hardcoded core plus a larger curated list bundled in the repo (`trackers.txt`, refreshed with the normal update) — all matched fully on-device (counter in the status bar; charts in ☰ menu → *Blocking report*). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
+| Tracker & ad blocking | Request interceptor blocks ~3,500 known tracker/ad domains — a small hardcoded core plus a larger curated list bundled in the repo (`trackers.txt`, refreshed with the normal update) — all matched fully on-device (counter in the status bar; charts in ☰ menu → *Blocking report*). Click the counter — or ☰ menu → Settings → Privacy & security → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
-| Location Guard | On by default (☰ menu → Settings → Location Guard). Blocks the page Geolocation API so a site can't read your precise GPS/Wi-Fi location — every request is answered PERMISSION_DENIED, so a site can at most estimate your area from your IP address. Toggle it per taste; reload open pages to apply |
-| Block Webcam | On by default (☰ menu → Settings → Block Webcam). Denies any page request for your camera at the engine level, so a site's `getUserMedia` fails without ever reaching the hardware — no JS workaround. Turn it off to be asked (Allow / Block) per site instead; takes effect on the next request, no reload needed |
-| Block Microphone | On by default (☰ menu → Settings → Block Microphone). Same engine-level gate for your microphone, toggled independently of the camera. A combined camera+microphone request is atomic, so it is denied if *either* guard is on and only offered to you when both are off. Screen capture, notifications, clipboard and font access stay denied by default regardless |
+| Location Guard | On by default (☰ menu → Settings → Privacy & security → Location Guard). Blocks the page Geolocation API so a site can't read your precise GPS/Wi-Fi location — every request is answered PERMISSION_DENIED, so a site can at most estimate your area from your IP address. Toggle it per taste; reload open pages to apply |
+| Block Webcam | On by default (☰ menu → Settings → Privacy & security → Block Webcam). Denies any page request for your camera at the engine level, so a site's `getUserMedia` fails without ever reaching the hardware — no JS workaround. Turn it off to be asked (Allow / Block) per site instead; takes effect on the next request, no reload needed |
+| Block Microphone | On by default (☰ menu → Settings → Privacy & security → Block Microphone). Same engine-level gate for your microphone, toggled independently of the camera. A combined camera+microphone request is atomic, so it is denied if *either* guard is on and only offered to you when both are off. Screen capture, notifications, clipboard and font access stay denied by default regardless |
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) is the default start page and search engine — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
-| Start page & search engine | Both are yours to change (☰ menu → Settings). **Set start page…** picks the page new tabs and the Home button open (blank restores the private SearXNG page). **Search engine** chooses where address-bar searches go — SearXNG (local, keeps queries on your machine) or an external service (DuckDuckGo, Startpage, Brave, Google), plus a **Custom…** template. Choosing an external engine sends your searches to that service; the SearXNG default keeps them local |
+| Start page & search engine | Both are yours to change (☰ menu → Settings → Start page & search). **Set start page…** picks the page new tabs and the Home button open (blank restores the private SearXNG page). **Search engine** chooses where address-bar searches go — SearXNG (local, keeps queries on your machine) or an external service (DuckDuckGo, Startpage, Brave, Google), plus a **Custom…** template. Choosing an external engine sends your searches to that service; the SearXNG default keeps them local |
 | Start-page hijack protection | Only *you* can change the start page or search engine, and only through the Settings dialog. A start page can only ever be a normal `http`/`https` web page — `file:`, `chrome:`, `about:`, `data:`, `javascript:` and the like are refused. Vodou **signs** the saved settings with a per-install key (`~/.vodou/prefs.key`); if adware, a synced edit, or a script changes `~/.vodou/prefs.json` behind your back, the signature no longer matches, so on the next launch Vodou reverts to the private defaults and tells you. (Edit these through Settings, not by hand — a hand-edited file trips the same guard.) |
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. Vodou's only outbound calls of its own are the two anonymous version checks (*About & updates*) and the anonymous periodic download of the public Safe Browsing lists (*Safe Browsing*) — public files fetched by IP, carrying no identifiers and no browsing data. The optional local AI features talk only to a **local** Ollama instance, so they add no off-device traffic either |
 | Local AI (summaries + chat) | Optional, off-by-default, powered by your **own local [Ollama](https://ollama.com) instance**: the ✨ button summarizes a search-results page, and **Ctrl+Shift+A** opens the same panel as a general chat you can ask anything. Summaries are read from the local SearXNG page; chat sends only what you type — never the page, its address, or your history. SearXNG is local, Ollama is local, so nothing leaves the machine, and Vodou is only an HTTP client of Ollama and never changes its models or config. See *Local AI* |
@@ -235,7 +235,7 @@ path on an otherwise-fine host isn't caught), and it's **periodically
 refreshed**, so a brand-new phishing domain can slip the window until the next
 update. It layers with the deceptive-site detection, which needs no list.
 
-- **☰ menu → Settings → Safe Browsing** toggles it (on by default);
+- **☰ menu → Settings → Privacy & security → Safe Browsing** toggles it (on by default);
   **Safe Browsing status…** shows the host count and last update.
 - Default sources are no-API-key public feeds (abuse.ch URLhaus for malware,
   the Phishing.Database ACTIVE list for phishing). Point it elsewhere by
@@ -279,7 +279,7 @@ starts over.
   models (e.g. `deepseek-r1`) show a *Reasoning…* indicator while they think;
   their `<think>` scratchpad is hidden and only the final answer is shown.
   **Stop** ends a reply early and keeps whatever arrived.
-- **☰ menu → Settings → Local AI (Ollama)** toggles the feature (off by
+- **☰ menu → Settings → Local AI → Local AI (Ollama)** toggles the feature (off by
   default); **Local AI options…** shows the current model, endpoint, and
   config-file path.
 - Configure it in `~/.vodou/ai_search.json` — `model`, `endpoint`,
@@ -291,8 +291,8 @@ starts over.
 ## Cookie exceptions
 
 Memory-only cookies are the right default, but they also forget the logins
-and site settings you *want* kept. **☰ menu → Settings → Cookie
-exceptions…** lists the sites that are exempt: add a bare host like
+and site settings you *want* kept. **☰ menu → Settings → Privacy & security
+→ Cookie exceptions…** lists the sites that are exempt: add a bare host like
 `youtube.com` (subdomains included), `localhost`, or an IP.
 
 - Everything not on the list is unchanged: memory-only, erased on exit.

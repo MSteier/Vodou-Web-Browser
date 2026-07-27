@@ -1448,22 +1448,26 @@ class BrowserWindow(QMainWindow):
         zoom_menu.addAction("Reset zoom\tCtrl+0", self.zoom_reset)
 
         settings_menu = menu.addMenu("Settings")
-        self._build_graphics_menu(settings_menu.addMenu("Graphics"))
-        # Privacy & security group.
-        settings_menu.addSeparator()
-        self.pause_blocking_action = settings_menu.addAction(
+
+        # --- Privacy & security -------------------------------------------
+        # The browser's headline concern, so it leads. Internally grouped by
+        # separators: tracker blocking, then deceptive-site protection, then
+        # per-site permissions.
+        privacy_menu = settings_menu.addMenu("Privacy & security")
+        self.pause_blocking_action = privacy_menu.addAction(
             "Pause tracker blocking")
         self.pause_blocking_action.setCheckable(True)
         self.pause_blocking_action.setToolTip(
             "Let tracker/ad requests through until resumed — for sites "
             "that break with blocking on. Blocking resumes on restart.")
         self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
-        blocking_report = settings_menu.addAction(
+        blocking_report = privacy_menu.addAction(
             "Blocking report…", self.show_blocking_report)
         blocking_report.setToolTip(
             "Charts of how many trackers and ads were blocked per day, "
             "and which ones came up most")
-        self.safe_browsing_action = settings_menu.addAction("Safe Browsing")
+        privacy_menu.addSeparator()
+        self.safe_browsing_action = privacy_menu.addAction("Safe Browsing")
         self.safe_browsing_action.setCheckable(True)
         self.safe_browsing_action.setChecked(self.safe_browsing.enabled)
         self.safe_browsing_action.setToolTip(
@@ -1471,10 +1475,11 @@ class BrowserWindow(QMainWindow):
             "Checked entirely on your device — nothing about your browsing "
             "is ever sent out.")
         self.safe_browsing_action.toggled.connect(self._set_safe_browsing)
-        settings_menu.addAction("Safe Browsing status…",
-                                self.show_safe_browsing_status)
-        settings_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
-        self.location_guard_action = settings_menu.addAction("Location Guard")
+        privacy_menu.addAction("Safe Browsing status…",
+                               self.show_safe_browsing_status)
+        privacy_menu.addSeparator()
+        privacy_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
+        self.location_guard_action = privacy_menu.addAction("Location Guard")
         self.location_guard_action.setCheckable(True)
         self.location_guard_action.setChecked(self._location_guard_on)
         self.location_guard_action.setToolTip(
@@ -1482,7 +1487,7 @@ class BrowserWindow(QMainWindow):
             "Sites can at most estimate your area from your IP address. "
             "Reload open pages after changing this.")
         self.location_guard_action.toggled.connect(self._set_location_guard)
-        self.block_webcam_action = settings_menu.addAction("Block Webcam")
+        self.block_webcam_action = privacy_menu.addAction("Block Webcam")
         self.block_webcam_action.setCheckable(True)
         self.block_webcam_action.setChecked(self._block_webcam)
         self.block_webcam_action.setToolTip(
@@ -1490,7 +1495,7 @@ class BrowserWindow(QMainWindow):
             "on; turn off to be asked for each site instead. Takes effect on "
             "the next camera request — no reload needed.")
         self.block_webcam_action.toggled.connect(self._set_block_webcam)
-        self.block_microphone_action = settings_menu.addAction(
+        self.block_microphone_action = privacy_menu.addAction(
             "Block Microphone")
         self.block_microphone_action.setCheckable(True)
         self.block_microphone_action.setChecked(self._block_microphone)
@@ -1500,17 +1505,19 @@ class BrowserWindow(QMainWindow):
             "effect on the next microphone request — no reload needed.")
         self.block_microphone_action.toggled.connect(
             self._set_block_microphone)
-        # Start page & search engine group.
-        settings_menu.addSeparator()
-        start_action = settings_menu.addAction(
+
+        # --- Start page & search ------------------------------------------
+        search_menu = settings_menu.addMenu("Start page & search")
+        start_action = search_menu.addAction(
             "Set start page…", self.set_start_page)
         start_action.setToolTip(
             "Choose the page new tabs and the Home button open. Leave it "
             "blank to restore the private SearXNG start page.")
-        self._build_search_engine_menu(settings_menu.addMenu("Search engine"))
-        # Local AI group.
-        settings_menu.addSeparator()
-        self.ai_search_action = settings_menu.addAction("Local AI (Ollama)")
+        self._build_search_engine_menu(search_menu.addMenu("Search engine"))
+
+        # --- Local AI ------------------------------------------------------
+        ai_menu = settings_menu.addMenu("Local AI")
+        self.ai_search_action = ai_menu.addAction("Local AI (Ollama)")
         self.ai_search_action.setCheckable(True)
         self.ai_search_action.setChecked(bool(self.ai_cfg.get("enabled")))
         self.ai_search_action.setToolTip(
@@ -1518,8 +1525,12 @@ class BrowserWindow(QMainWindow):
             "local Ollama model anything. Runs entirely on your device; "
             "nothing is ever sent out.")
         self.ai_search_action.toggled.connect(self._set_ai_search)
-        settings_menu.addAction("Local AI options…", self.show_ai_options)
-        # Extend group.
+        ai_menu.addAction("Local AI options…", self.show_ai_options)
+
+        # --- Display -------------------------------------------------------
+        self._build_graphics_menu(settings_menu.addMenu("Graphics"))
+
+        # --- Extend --------------------------------------------------------
         settings_menu.addSeparator()
         settings_menu.addAction("Plugins…", self.open_plugins)
 
