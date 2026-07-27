@@ -168,6 +168,41 @@ def _capture_label(camera: bool, mic: bool) -> str:
     return "camera" if camera else "microphone"
 
 
+PREFS_FILE = Path.home() / ".vodou" / "prefs.json"
+
+
+def _load_prefs() -> dict:
+    """User-chosen prefs (start page, search engine) from ~/.vodou/prefs.json."""
+    try:
+        data = json.loads(PREFS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_pref(key: str, value: str) -> None:
+    try:
+        PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = _load_prefs()
+        data[key] = value
+        tmp = PREFS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(PREFS_FILE)
+    except OSError:
+        pass
+
+
+def _normalize_url(text: str) -> str:
+    """A start-page string the user typed -> a loadable URL (HTTPS-first)."""
+    text = text.strip()
+    if not text:
+        return text
+    if text.startswith(
+            ("http://", "https://", "about:", "file:", "chrome://")):
+        return text
+    return "https://" + text
+
+
 def _gfx_flags() -> str:
     global GFX_MODE
     mode = _load_saved_gfx()          # ☰ menu → Graphics choice, if any
@@ -216,6 +251,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -363,6 +399,27 @@ PROFILE_DIR = Path.home() / ".vodou" / "profile"
 ZOOM_LEVELS = (0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0,
                1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0)
 SEARCH_URL = SEARXNG_BASE + "/search?q={}"
+
+# The address bar sends searches to SEARCH_URL, with {} where the query goes.
+# SearXNG (local) keeps queries on your machine; the rest are external
+# services. Offered in the Settings ▸ Search engine menu, plus a Custom option.
+SEARCH_ENGINES = {
+    "SearXNG (local, private)": SEARXNG_BASE + "/search?q={}",
+    "DuckDuckGo": "https://duckduckgo.com/?q={}",
+    "Startpage": "https://www.startpage.com/sp/search?query={}",
+    "Brave Search": "https://search.brave.com/search?q={}",
+    "Google": "https://www.google.com/search?q={}",
+}
+
+# Apply the user's saved Settings ▸ start-page / search-engine overrides, if
+# any. Both fall back to the private SearXNG defaults set just above.
+_prefs = _load_prefs()
+_saved_start = _normalize_url(str(_prefs.get("start_page", "")))
+if _saved_start:
+    HOME_URL = _saved_start
+_saved_engine = str(_prefs.get("search_engine", "")).strip()
+if "{}" in _saved_engine:
+    SEARCH_URL = _saved_engine
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
 # SearXNG instance). Certificate errors anywhere else are still fatal.
@@ -1366,6 +1423,14 @@ class BrowserWindow(QMainWindow):
             "effect on the next microphone request — no reload needed.")
         self.block_microphone_action.toggled.connect(
             self._set_block_microphone)
+        # Start page & search engine group.
+        settings_menu.addSeparator()
+        start_action = settings_menu.addAction(
+            "Set start page…", self.set_start_page)
+        start_action.setToolTip(
+            "Choose the page new tabs and the Home button open. Leave it "
+            "blank to restore the private SearXNG start page.")
+        self._build_search_engine_menu(settings_menu.addMenu("Search engine"))
         # Local AI group.
         settings_menu.addSeparator()
         self.ai_search_action = settings_menu.addAction("Local AI (Ollama)")
@@ -2107,6 +2172,95 @@ class BrowserWindow(QMainWindow):
                 permission.deny()
         except RuntimeError:
             pass  # page navigated away while the prompt was open
+
+    # -- Start page & search engine -----------------------------------------
+
+    def set_start_page(self) -> None:
+        """Let the user pick the page new tabs and Home open. Blank restores
+        the private SearXNG default. Takes effect on the next new tab / Home."""
+        global HOME_URL
+        text, ok = QInputDialog.getText(
+            self, "Set start page",
+            "Start page URL (leave blank for the private SearXNG page):",
+            QLineEdit.EchoMode.Normal, HOME_URL)
+        if not ok:
+            return
+        value = _normalize_url(text)
+        if value:
+            HOME_URL = value
+            _save_pref("start_page", value)
+            self.statusBar().showMessage(
+                f"Start page set to {value} — opens on the next new tab.", 5000)
+        else:
+            HOME_URL = SEARXNG_BASE
+            _save_pref("start_page", "")
+            self.statusBar().showMessage(
+                "Start page reset to the private SearXNG page.", 5000)
+
+    def _build_search_engine_menu(self, menu) -> None:
+        """Populate the Settings ▸ Search engine submenu: one exclusive radio
+        per built-in engine, plus a Custom option."""
+        menu.setToolTip(
+            "Where address-bar searches go. SearXNG (local) keeps queries on "
+            "your machine; the others are external services.")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self._engine_actions = {}
+        for name, template in SEARCH_ENGINES.items():
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.triggered.connect(
+                lambda _checked, t=template: self._set_search_engine(t))
+            group.addAction(act)
+            self._engine_actions[template] = act
+        menu.addSeparator()
+        self._custom_engine_action = menu.addAction("Custom…")
+        self._custom_engine_action.setCheckable(True)
+        self._custom_engine_action.triggered.connect(self._set_custom_engine)
+        group.addAction(self._custom_engine_action)
+        self._sync_engine_check()
+
+    def _sync_engine_check(self) -> None:
+        """Tick the radio matching the active SEARCH_URL (Custom if none do)."""
+        matched = False
+        for template, act in self._engine_actions.items():
+            on = (template == SEARCH_URL)
+            act.setChecked(on)
+            matched = matched or on
+        self._custom_engine_action.setChecked(not matched)
+
+    def _set_search_engine(self, template: str) -> None:
+        global SEARCH_URL
+        SEARCH_URL = template
+        _save_pref("search_engine", template)
+        self._sync_engine_check()
+        name = next((n for n, t in SEARCH_ENGINES.items() if t == template),
+                    template)
+        self.statusBar().showMessage(f"Search engine set to {name}.", 5000)
+
+    def _set_custom_engine(self) -> None:
+        """Prompt for a custom search-URL template (must contain {})."""
+        global SEARCH_URL
+        text, ok = QInputDialog.getText(
+            self, "Custom search engine",
+            "Search URL template — put {} where the query goes, e.g.\n"
+            "https://example.com/search?q={}",
+            QLineEdit.EchoMode.Normal, SEARCH_URL)
+        if not ok:
+            self._sync_engine_check()   # cancelled — restore the real choice
+            return
+        template = text.strip().replace("%s", "{}")
+        if "{}" not in template:
+            plain_message(
+                self, QMessageBox.Icon.Warning, "Custom search engine",
+                "The template must contain {} where the search query should "
+                "go. Nothing was changed.")
+            self._sync_engine_check()
+            return
+        SEARCH_URL = template
+        _save_pref("search_engine", template)
+        self._sync_engine_check()
+        self.statusBar().showMessage("Custom search engine set.", 5000)
 
     def show_safe_browsing_status(self) -> None:
         sb = self.safe_browsing
