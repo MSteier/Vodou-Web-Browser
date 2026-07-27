@@ -18,6 +18,8 @@ Password manager:
 Run:  python main.py
 """
 
+import hashlib
+import hmac
 import json
 import os
 import sys
@@ -169,10 +171,51 @@ def _capture_label(camera: bool, mic: bool) -> str:
 
 
 PREFS_FILE = Path.home() / ".vodou" / "prefs.json"
+PREFS_KEY_FILE = Path.home() / ".vodou" / "prefs.key"
+
+# Prefs that are integrity-protected against start-page/search hijacking. A
+# value changed on disk by anything other than Vodou's own Settings dialog
+# (adware, a synced edit, a script) won't carry a valid HMAC signature, so it's
+# reverted to the private default on the next startup. See _prefs_sig.
+_SIGNED_KEYS = ("start_page", "search_engine")
+# A start page may only be a normal web page: file:/chrome:/about:/data:/
+# javascript:/blob: are refused, so even a tampered value can't reach local
+# files, engine-internal pages, or script.
+_SAFE_START_SCHEMES = ("http://", "https://")
+
+
+def _prefs_key() -> bytes:
+    """Per-install secret used to sign prefs; created once on first use and
+    kept owner-only. A homepage hijacker that blindly overwrites prefs.json
+    can't forge the signature without this key."""
+    try:
+        return bytes.fromhex(PREFS_KEY_FILE.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        pass
+    key = secrets.token_bytes(32)
+    try:
+        PREFS_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PREFS_KEY_FILE.with_suffix(".key.tmp")
+        tmp.write_text(key.hex(), encoding="utf-8")
+        tmp.replace(PREFS_KEY_FILE)
+        if os.name == "posix":
+            os.chmod(PREFS_KEY_FILE, 0o600)
+    except OSError:
+        pass
+    return key
+
+
+def _prefs_sig(data: dict) -> str:
+    """HMAC-SHA256 over the signed prefs, canonicalised so mere key-order
+    changes can't alter the signature."""
+    signed = {k: str(data.get(k, "")) for k in _SIGNED_KEYS}
+    payload = json.dumps(signed, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+    return hmac.new(_prefs_key(), payload, hashlib.sha256).hexdigest()
 
 
 def _load_prefs() -> dict:
-    """User-chosen prefs (start page, search engine) from ~/.vodou/prefs.json."""
+    """Raw prefs dict (including its signature) from ~/.vodou/prefs.json."""
     try:
         data = json.loads(PREFS_FILE.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
@@ -180,16 +223,30 @@ def _load_prefs() -> dict:
         return {}
 
 
-def _save_pref(key: str, value: str) -> None:
+def _write_prefs(data: dict) -> None:
+    """Write prefs.json atomically with a fresh signature over _SIGNED_KEYS."""
     try:
         PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        data = _load_prefs()
-        data[key] = value
+        out = {k: v for k, v in data.items() if k != "_sig"}
+        out["_sig"] = _prefs_sig(out)
         tmp = PREFS_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.write_text(json.dumps(out), encoding="utf-8")
         tmp.replace(PREFS_FILE)
     except OSError:
         pass
+
+
+def _save_pref(key: str, value: str) -> None:
+    data = _load_prefs()
+    data[key] = value
+    _write_prefs(data)
+
+
+def _prefs_trusted(data: dict) -> bool:
+    """Whether the file's stored signature matches its signed values — i.e.
+    Vodou itself wrote them and nothing has changed them since."""
+    want = str(data.get("_sig", ""))
+    return bool(want) and hmac.compare_digest(want, _prefs_sig(data))
 
 
 def _normalize_url(text: str) -> str:
@@ -201,6 +258,12 @@ def _normalize_url(text: str) -> str:
             ("http://", "https://", "about:", "file:", "chrome://")):
         return text
     return "https://" + text
+
+
+def _safe_start_page(url: str) -> str:
+    """The URL if it's a normal http(s) web page, else '' (use the default)."""
+    url = url.strip()
+    return url if url.startswith(_SAFE_START_SCHEMES) else ""
 
 
 def _gfx_flags() -> str:
@@ -411,15 +474,29 @@ SEARCH_ENGINES = {
     "Google": "https://www.google.com/search?q={}",
 }
 
-# Apply the user's saved Settings ▸ start-page / search-engine overrides, if
-# any. Both fall back to the private SearXNG defaults set just above.
+# Apply the user's saved Settings ▸ start-page / search-engine overrides — but
+# ONLY if the file's signature verifies. A start page or search engine changed
+# on disk by anything other than Vodou (a homepage hijacker, adware, a stray
+# edit) can't carry a valid signature, so we ignore it, keep the private
+# SearXNG defaults set just above, re-sign a clean file, and leave a one-time
+# notice for the window to show. Both fall back to the SearXNG defaults.
+PREFS_RESET_NOTICE = None
 _prefs = _load_prefs()
-_saved_start = _normalize_url(str(_prefs.get("start_page", "")))
-if _saved_start:
-    HOME_URL = _saved_start
-_saved_engine = str(_prefs.get("search_engine", "")).strip()
-if "{}" in _saved_engine:
-    SEARCH_URL = _saved_engine
+_has_overrides = any(str(_prefs.get(k, "")).strip() for k in _SIGNED_KEYS)
+if _has_overrides and not _prefs_trusted(_prefs):
+    PREFS_RESET_NOTICE = (
+        "Your saved start page and search engine couldn't be verified, so "
+        "Vodou restored the private defaults. If you customized them, set "
+        "them again from ☰ → Settings.")
+    _write_prefs({"start_page": "", "search_engine": ""})
+elif _has_overrides:
+    _saved_start = _safe_start_page(
+        _normalize_url(str(_prefs.get("start_page", ""))))
+    if _saved_start:
+        HOME_URL = _saved_start
+    _saved_engine = str(_prefs.get("search_engine", "")).strip()
+    if "{}" in _saved_engine:
+        SEARCH_URL = _saved_engine
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
 # SearXNG instance). Certificate errors anywhere else are still fatal.
@@ -1497,6 +1574,13 @@ class BrowserWindow(QMainWindow):
         # Seed the bookmarked-host set and drop favicons for bookmarks that
         # were removed in a previous session.
         self._bookmarks_changed()
+        # A start page / search engine tampered with on disk was reverted at
+        # startup; tell the user once (deferred so it lands after the window
+        # is shown).
+        if PREFS_RESET_NOTICE:
+            QTimer.singleShot(0, lambda: plain_message(
+                self, QMessageBox.Icon.Warning, "Start page protected",
+                PREFS_RESET_NOTICE))
 
     def _build_shortcuts(self) -> None:
         bindings = {
@@ -2186,6 +2270,12 @@ class BrowserWindow(QMainWindow):
         if not ok:
             return
         value = _normalize_url(text)
+        if value and not _safe_start_page(value):
+            plain_message(
+                self, QMessageBox.Icon.Warning, "Set start page",
+                "The start page must be a normal web page (http:// or "
+                "https://). Nothing was changed.")
+            return
         if value:
             HOME_URL = value
             _save_pref("start_page", value)
