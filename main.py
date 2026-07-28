@@ -307,12 +307,17 @@ from PyQt6.QtWebEngineCore import (
     QWebEngineSettings,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtNetwork import QNetworkProxy
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -321,6 +326,8 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QRadioButton,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTabBar,
@@ -611,6 +618,8 @@ class WebPage(QWebEnginePage):
         # permission that no slot resolves, so by owning this signal we keep
         # Vodou's default of granting nothing unless the user opts in.
         self.permissionRequested.connect(self._on_permission_requested)
+        # Answer proxy sign-in challenges (auto from the vault, else prompt).
+        self.proxyAuthenticationRequired.connect(browser._on_proxy_auth)
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame) -> bool:
         host = url.host()
@@ -1094,11 +1103,68 @@ def save_discard_after_s(seconds: int) -> None:
         pass
 
 
+# Proxy configuration (☰ → Settings → Network → Proxy…). The non-secret parts
+# live in proxy.json; any username/password lives encrypted in the vault (see
+# Vault.set_proxy_credential) and is supplied on demand by _on_proxy_auth.
+PROXY_FILE = Path.home() / ".vodou" / "proxy.json"
+PROXY_TYPES = {"http": "HTTP", "socks5": "SOCKS5"}  # key -> display label
+
+
+def _load_proxy_conf() -> dict:
+    try:
+        data = json.loads(PROXY_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_proxy_conf(conf: dict) -> None:
+    try:
+        PROXY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PROXY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(conf), encoding="utf-8")
+        tmp.replace(PROXY_FILE)
+    except OSError:
+        pass
+
+
+def _build_qnetwork_proxy(conf: dict) -> QNetworkProxy:
+    """Turn a saved proxy.json dict into a QNetworkProxy (NoProxy if disabled
+    or incomplete). Credentials are NOT baked in here — QtWebEngine asks for
+    them through proxyAuthenticationRequired, answered by _on_proxy_auth."""
+    if not conf.get("enabled") or not conf.get("host"):
+        return QNetworkProxy(QNetworkProxy.ProxyType.NoProxy)
+    is_socks = conf.get("type") == "socks5"
+    proxy = QNetworkProxy(
+        QNetworkProxy.ProxyType.Socks5Proxy if is_socks
+        else QNetworkProxy.ProxyType.HttpProxy,
+        str(conf.get("host", "")), int(conf.get("port") or 0))
+    if is_socks:
+        # SOCKS5 can resolve hostnames at the proxy, keeping DNS off the local
+        # resolver; honour the user's remote-DNS choice explicitly.
+        caps = proxy.capabilities()
+        flag = QNetworkProxy.Capability.HostNameLookupCapability
+        if conf.get("remote_dns", True):
+            caps |= flag
+        else:
+            caps &= ~flag
+        proxy.setCapabilities(caps)
+    return proxy
+
+
 class BrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Vodou Browser — private")
         self.resize(1280, 830)
+
+        # Route traffic through the configured proxy (if any) before any page
+        # loads. An authenticating proxy's credentials are supplied on demand
+        # by _on_proxy_auth — auto from the vault when unlocked, else prompted.
+        self._proxy_auth_cache: tuple[str, str] | None = None
+        self._proxy_last_offered: dict[str, tuple[str, str]] = {}
+        self._proxy_auth_failcount: dict[str, int] = {}
+        self._apply_proxy()
 
         # Hybrid profile. Fully off-the-record forced Chromium's HTTP cache
         # into RAM, which starves smaller machines during heavy browsing.
@@ -1578,6 +1644,14 @@ class BrowserWindow(QMainWindow):
 
         # --- Idle tab memory ----------------------------------------------
         self._build_discard_menu(settings_menu.addMenu("Idle tab memory"))
+
+        # --- Network -------------------------------------------------------
+        network_menu = settings_menu.addMenu("Network")
+        proxy_action = network_menu.addAction("Proxy…", self._show_proxy_dialog)
+        proxy_action.setToolTip(
+            "Route Vodou's traffic through an HTTP or SOCKS5 proxy. SOCKS5 can "
+            "resolve DNS at the proxy. Any username/password is kept in your "
+            "encrypted vault.")
 
         # --- Local AI ------------------------------------------------------
         ai_menu = settings_menu.addMenu("Local AI")
@@ -2878,6 +2952,184 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Idle background tabs will be frozen but never discarded.",
                 5000)
+
+    # -- proxy --------------------------------------------------------------
+
+    def _apply_proxy(self) -> None:
+        """(Re)apply the saved proxy to the whole application and reset the
+        per-session auth state so new settings take effect immediately."""
+        QNetworkProxy.setApplicationProxy(_build_qnetwork_proxy(_load_proxy_conf()))
+        self._proxy_auth_cache = None
+        self._proxy_last_offered = {}
+        self._proxy_auth_failcount = {}
+
+    def _on_proxy_auth(self, request_url, authenticator, proxy_host) -> None:
+        """Supply credentials when the proxy demands sign-in.
+
+        Order: the session cache, then the vault (if unlocked), else a prompt.
+        When Qt re-emits with the same username we just tried, that attempt was
+        rejected, so we prompt afresh; a small consecutive-failure cap makes a
+        wrong password fail the load cleanly instead of looping forever."""
+        host = proxy_host or ""
+        offered = self._proxy_last_offered.get(host)
+        rejected = offered is not None and authenticator.user() == offered[0]
+        if rejected:
+            fails = self._proxy_auth_failcount.get(host, 0) + 1
+            self._proxy_auth_failcount[host] = fails
+            self._proxy_auth_cache = None
+            self._proxy_last_offered.pop(host, None)
+            if fails > 3:
+                self._proxy_auth_failcount[host] = 0
+                return  # give up this round; the load fails cleanly
+            creds = self._prompt_proxy_credentials(proxy_host, rejected=True)
+        else:
+            # A fresh challenge means any previous credential was accepted.
+            self._proxy_auth_failcount[host] = 0
+            creds = self._proxy_auth_cache
+            if creds is None and self.vault.unlocked:
+                creds = self.vault.proxy_credential()
+            if creds is None:
+                creds = self._prompt_proxy_credentials(proxy_host, rejected=False)
+        if creds is None:
+            return
+        self._proxy_auth_cache = creds
+        self._proxy_last_offered[host] = creds
+        authenticator.setUser(creds[0])
+        authenticator.setPassword(creds[1])
+
+    def _prompt_proxy_credentials(self, proxy_host, rejected):
+        """Ask the user for proxy credentials (username prefilled from the saved
+        config). Returns (user, password) or None if cancelled."""
+        conf = _load_proxy_conf()
+        lead = ("The proxy rejected those credentials.\n\n" if rejected else "")
+        user, ok = QInputDialog.getText(
+            self, "Proxy sign-in",
+            f"{lead}The proxy {proxy_host or ''} requires a username and "
+            "password.\nUsername:",
+            QLineEdit.EchoMode.Normal, conf.get("username", ""))
+        if not ok:
+            return None
+        pw, ok = QInputDialog.getText(
+            self, "Proxy sign-in", "Password:", QLineEdit.EchoMode.Password)
+        if not ok:
+            return None
+        return (user.strip(), pw)
+
+    def _show_proxy_dialog(self) -> None:
+        """Settings ▸ Network ▸ Proxy…: choose no proxy or a manual HTTP/SOCKS5
+        proxy, with an optional username/password saved in the vault."""
+        conf = _load_proxy_conf()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Proxy")
+        dlg.setMinimumWidth(440)
+        outer = QVBoxLayout(dlg)
+
+        none_radio = QRadioButton("No proxy (direct connection)")
+        manual_radio = QRadioButton("Manual proxy")
+        outer.addWidget(none_radio)
+        outer.addWidget(manual_radio)
+
+        box = QGroupBox()
+        form = QFormLayout(box)
+        type_combo = QComboBox()
+        for key, label in PROXY_TYPES.items():
+            type_combo.addItem(label, key)
+        host_edit = QLineEdit(str(conf.get("host", "")))
+        host_edit.setPlaceholderText("e.g. 127.0.0.1")
+        port_spin = QSpinBox()
+        port_spin.setRange(1, 65535)
+        port_spin.setValue(int(conf.get("port") or 8080))
+        remote_dns = QCheckBox("Resolve DNS at the proxy (SOCKS5 only)")
+        remote_dns.setChecked(bool(conf.get("remote_dns", True)))
+        user_edit = QLineEdit(str(conf.get("username", "")))
+        pass_edit = QLineEdit()
+        pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        if self.vault.file_has_proxy_credential():
+            pass_edit.setPlaceholderText(
+                "saved in vault — leave blank to keep it")
+        show = QCheckBox("Show")
+        show.toggled.connect(lambda on: pass_edit.setEchoMode(
+            QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password))
+        pass_row = QHBoxLayout()
+        pass_row.addWidget(pass_edit)
+        pass_row.addWidget(show)
+        pass_holder = QWidget()
+        pass_holder.setLayout(pass_row)
+
+        form.addRow("Type:", type_combo)
+        form.addRow("Host:", host_edit)
+        form.addRow("Port:", port_spin)
+        form.addRow("", remote_dns)
+        form.addRow("Username:", user_edit)
+        form.addRow("Password:", pass_holder)
+        note = QLabel("The proxy password is stored in your encrypted vault, "
+                      "never in plain text. You'll be asked to unlock the "
+                      "vault to save it.")
+        note.setWordWrap(True)
+        form.addRow(note)
+        outer.addWidget(box)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        outer.addWidget(buttons)
+
+        idx = type_combo.findData(conf.get("type", "http"))
+        type_combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+        def sync_enabled() -> None:
+            on = manual_radio.isChecked()
+            box.setEnabled(on)
+            remote_dns.setEnabled(on and type_combo.currentData() == "socks5")
+
+        manual_radio.toggled.connect(lambda _: sync_enabled())
+        type_combo.currentIndexChanged.connect(lambda _: sync_enabled())
+        (manual_radio if conf.get("enabled") else none_radio).setChecked(True)
+        sync_enabled()
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if none_radio.isChecked():
+            save_proxy_conf({"enabled": False})
+            self._apply_proxy()
+            self.statusBar().showMessage(
+                "Proxy disabled — direct connection.", 5000)
+            return
+
+        host = host_edit.text().strip()
+        if not host:
+            plain_message(self, QMessageBox.Icon.Warning, "Proxy",
+                          "Enter the proxy host (e.g. 127.0.0.1). Nothing was "
+                          "changed.")
+            return
+        ptype = type_combo.currentData()
+        username = user_edit.text().strip()
+        save_proxy_conf({
+            "enabled": True, "type": ptype, "host": host,
+            "port": int(port_spin.value()), "username": username,
+            "remote_dns": bool(remote_dns.isChecked())})
+
+        pw = pass_edit.text()
+        if pw:
+            if ensure_unlocked(self.vault, self):
+                self.vault.set_proxy_credential(username, pw)
+            else:
+                plain_message(
+                    self, QMessageBox.Icon.Information, "Proxy",
+                    "The proxy settings were saved, but the password wasn't "
+                    "stored because the vault stayed locked. You'll be asked "
+                    "for it when the proxy requires sign-in.")
+        elif not username and self.vault.unlocked:
+            # Cleared out the username with no password: drop any stored login.
+            self.vault.clear_proxy_credential()
+
+        self._apply_proxy()
+        self.statusBar().showMessage(
+            f"Proxy set: {PROXY_TYPES.get(ptype, ptype)} "
+            f"{host}:{port_spin.value()}.", 5000)
 
     def _navigate(self) -> None:
         self.current_view().setUrl(to_url(self.url_bar.text()))

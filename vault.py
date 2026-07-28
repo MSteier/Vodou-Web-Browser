@@ -163,6 +163,13 @@ class Vault:
         self._factor_secret: bytes | None = None  # V, set iff a key enrolled
         self._hmac_salt: bytes | None = None
         self._authenticators: list[dict] = []
+        # Optional single proxy credential (username, password), stored as its
+        # own encrypted blob section — deliberately NOT a login Entry, so it
+        # never appears in the password list or shifts entry indices. Present
+        # in the file only when set, so a vault without one keeps its historical
+        # shape. Re-encrypted under the current key on every _save, so it
+        # survives master-password changes and security-key enrol/removal.
+        self._proxy_cred: tuple[str, str] | None = None
 
     # -- state ---------------------------------------------------------
 
@@ -188,6 +195,7 @@ class Vault:
         self._factor_secret = None
         self._hmac_salt = None
         self._authenticators = []
+        self._proxy_cred = None
 
     def file_has_factor(self) -> bool:
         """Peek the on-disk file: does unlocking it need a security key?
@@ -315,6 +323,20 @@ class Vault:
         self._salt = salt
         self._kdf = kdf
         self._ingest([Entry(**e) for e in json.loads(raw)])
+        self._proxy_cred = self._decrypt_proxy(blob.get("proxy"))
+
+    def _decrypt_proxy(self, token: str | None) -> tuple[str, str] | None:
+        """Decrypt the optional proxy-credential section, or None. A malformed
+        or wrong-key section is treated as absent (fail-closed) rather than
+        raising, so it can never block unlocking the actual logins."""
+        if not token:
+            return None
+        try:
+            raw = self._fernet.decrypt(base64.b64decode(token))
+            obj = json.loads(raw)
+            return str(obj["u"]), str(obj["p"])
+        except (InvalidToken, ValueError, KeyError, TypeError):
+            return None
 
     @staticmethod
     def _parse_factor(blob: dict) -> tuple[bytes | None, list[dict]]:
@@ -467,6 +489,36 @@ class Vault:
         self._require_unlocked()
         return self._open(self._secrets[index])
 
+    # -- proxy credential (single, out-of-band) --------------------------
+
+    def set_proxy_credential(self, username: str, password: str) -> None:
+        """Store the one proxy username/password, encrypted in the vault."""
+        self._require_unlocked()
+        self._proxy_cred = (username, password)
+        self._save()
+
+    def clear_proxy_credential(self) -> None:
+        """Forget any stored proxy credential."""
+        self._require_unlocked()
+        if self._proxy_cred is not None:
+            self._proxy_cred = None
+            self._save()
+
+    def proxy_credential(self) -> tuple[str, str] | None:
+        """The stored (username, password), or None. Requires an unlocked vault
+        since it is encrypted at rest like everything else here."""
+        self._require_unlocked()
+        return self._proxy_cred
+
+    def file_has_proxy_credential(self) -> bool:
+        """Peek the on-disk file: is a proxy credential stored? Never decrypts,
+        so it works while locked — lets the UI say one is saved without it."""
+        try:
+            blob = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return bool(blob.get("proxy"))
+
     def add(self, entry: Entry) -> None:
         self._require_unlocked()
         entry.site = normalize_site(entry.site)
@@ -527,6 +579,14 @@ class Vault:
         # Only stamp the format version and factor section when a security key
         # is actually enrolled, so a password-only vault stays byte-for-byte
         # the historical shape and older builds keep reading it.
+        # Optional proxy credential: its own encrypted section, only written
+        # when one is set (so a vault without a proxy password stays the
+        # historical shape and older builds keep reading it).
+        if self._proxy_cred is not None:
+            u, p = self._proxy_cred
+            payload = json.dumps({"u": u, "p": p}).encode("utf-8")
+            blob["proxy"] = base64.b64encode(
+                self._fernet.encrypt(payload)).decode("ascii")
         if self._authenticators:
             blob["version"] = 2
             blob["factor"] = {
