@@ -1047,15 +1047,51 @@ class DraggableTabBar(QTabBar):
 
 
 # Background-tab memory reclamation. A tab hidden this long is frozen (its
-# JavaScript and timers pause); hidden longer still, it is discarded — the
-# render process is killed and the page reloads when the user returns. Every
-# transition is clamped to the page's own recommendedState(), so Chromium
-# vetoes anything unsafe (an audible tab, an active download, WebRTC, recent
-# input); pinned and not-yet-loaded tabs are never touched. This is the single
-# biggest RAM lever in a multi-tab Chromium browser.
+# JavaScript and timers pause); hidden past the discard timeout, it is
+# discarded — the render process is killed and the page reloads when the user
+# returns. Every transition is clamped to the page's own recommendedState(), so
+# Chromium vetoes anything unsafe (an audible tab, an active download, WebRTC,
+# recent input); pinned and not-yet-loaded tabs are never touched. This is the
+# single biggest RAM lever in a multi-tab Chromium browser.
 TAB_FREEZE_AFTER_S = 60
-TAB_DISCARD_AFTER_S = 10 * 60
 TAB_LIFECYCLE_SWEEP_MS = 30_000
+
+# The discard timeout is user-configurable (☰ → Settings → Idle tab memory):
+# label -> seconds of idle before a background tab is discarded; 0 means never
+# discard (freezing still applies). Persisted unsigned in tabs.json — it is not
+# security-sensitive, so it stays out of the integrity-protected prefs.json.
+TABS_FILE = Path.home() / ".vodou" / "tabs.json"
+TAB_DISCARD_OPTIONS = (
+    ("Never (freeze only)", 0),
+    ("After 5 minutes", 5 * 60),
+    ("After 10 minutes", 10 * 60),
+    ("After 30 minutes", 30 * 60),
+    ("After 1 hour", 60 * 60),
+)
+TAB_DISCARD_DEFAULT_S = 10 * 60
+
+
+def _load_discard_after_s() -> int:
+    """Saved discard timeout in seconds (0 = never), or the default. An
+    unrecognized value falls back to the default rather than trusting it."""
+    try:
+        val = json.loads(TABS_FILE.read_text(encoding="utf-8")).get(
+            "discard_after_s")
+    except (OSError, ValueError, AttributeError):
+        return TAB_DISCARD_DEFAULT_S
+    valid = {sec for _, sec in TAB_DISCARD_OPTIONS}
+    return val if isinstance(val, int) and val in valid else TAB_DISCARD_DEFAULT_S
+
+
+def save_discard_after_s(seconds: int) -> None:
+    try:
+        TABS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = TABS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"discard_after_s": seconds}),
+                       encoding="utf-8")
+        tmp.replace(TABS_FILE)
+    except OSError:
+        pass
 
 
 class BrowserWindow(QMainWindow):
@@ -1233,8 +1269,10 @@ class BrowserWindow(QMainWindow):
         self._mem_timer.timeout.connect(self._poll_tab_memory)
         self._mem_timer.start()
 
-        # Reclaim RAM from idle background tabs: freeze, then discard. See
-        # _sweep_tab_lifecycle and the TAB_*_AFTER_S constants.
+        # Reclaim RAM from idle background tabs: freeze, then discard. The
+        # discard timeout is user-configurable (Settings ▸ Idle tab memory);
+        # see _sweep_tab_lifecycle.
+        self._discard_after_s = _load_discard_after_s()
         self._lifecycle_timer = QTimer(self)
         self._lifecycle_timer.setInterval(TAB_LIFECYCLE_SWEEP_MS)
         self._lifecycle_timer.timeout.connect(self._sweep_tab_lifecycle)
@@ -1537,6 +1575,9 @@ class BrowserWindow(QMainWindow):
             "Choose the page new tabs and the Home button open. Leave it "
             "blank to restore the private SearXNG start page.")
         self._build_search_engine_menu(search_menu.addMenu("Search engine"))
+
+        # --- Idle tab memory ----------------------------------------------
+        self._build_discard_menu(settings_menu.addMenu("Idle tab memory"))
 
         # --- Local AI ------------------------------------------------------
         ai_menu = settings_menu.addMenu("Local AI")
@@ -2751,9 +2792,9 @@ class BrowserWindow(QMainWindow):
         return a if order[a] <= order[b] else b
 
     def _sweep_tab_lifecycle(self) -> None:
-        """Freeze tabs idle past TAB_FREEZE_AFTER_S and discard those past
-        TAB_DISCARD_AFTER_S, so background tabs stop pinning a full render
-        process in RAM.
+        """Freeze tabs idle past TAB_FREEZE_AFTER_S and discard those past the
+        user's configured timeout (self._discard_after_s; 0 disables discard),
+        so background tabs stop pinning a full render process in RAM.
 
         Safety comes from three layers: not-yet-loaded and pinned tabs are
         skipped outright; every target is clamped to the page's own
@@ -2783,7 +2824,7 @@ class BrowserWindow(QMainWindow):
                 view._hidden_since = now
                 continue
             idle = now - hidden_since
-            if idle >= TAB_DISCARD_AFTER_S:
+            if self._discard_after_s and idle >= self._discard_after_s:
                 target = State.Discarded
             elif idle >= TAB_FREEZE_AFTER_S:
                 target = State.Frozen
@@ -2798,6 +2839,45 @@ class BrowserWindow(QMainWindow):
                 target = State.Frozen
             if page.lifecycleState() != target:
                 page.setLifecycleState(target)
+
+    def _build_discard_menu(self, menu) -> None:
+        """Populate Settings ▸ Idle tab memory: one exclusive radio per discard
+        timeout. A background tab is frozen after a minute either way; this sets
+        how long after that it is discarded (render process freed, reloads on
+        return). 'Never' keeps every tab in memory."""
+        menu.setToolTip(
+            "How long a background tab may sit idle before Vodou frees its "
+            "memory. It reloads when you return to it. 'Never' keeps every tab "
+            "in memory (they are still frozen after a minute).")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self._discard_actions = {}
+        for label, seconds in TAB_DISCARD_OPTIONS:
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(seconds == self._discard_after_s)
+            act.triggered.connect(
+                lambda _checked, s=seconds: self._set_discard_after(s))
+            group.addAction(act)
+            self._discard_actions[seconds] = act
+
+    def _set_discard_after(self, seconds: int) -> None:
+        """Apply and persist a new discard timeout; takes effect on the next
+        lifecycle sweep (within TAB_LIFECYCLE_SWEEP_MS)."""
+        self._discard_after_s = seconds
+        save_discard_after_s(seconds)
+        act = self._discard_actions.get(seconds)
+        if act is not None:
+            act.setChecked(True)
+        if seconds:
+            label = next(l for l, s in TAB_DISCARD_OPTIONS if s == seconds)
+            self.statusBar().showMessage(
+                f"Idle background tabs will be discarded {label.lower()}.",
+                5000)
+        else:
+            self.statusBar().showMessage(
+                "Idle background tabs will be frozen but never discarded.",
+                5000)
 
     def _navigate(self) -> None:
         self.current_view().setUrl(to_url(self.url_bar.text()))
