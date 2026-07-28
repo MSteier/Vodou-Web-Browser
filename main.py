@@ -887,6 +887,10 @@ class WebView(QWebEngineView):
         # Set when a deceptive-site interstitial is showing in this tab: the
         # real URL to load if the user chooses "Continue anyway".
         self._spoof_pending: QUrl | None = None
+        # monotonic() timestamp of when this tab was last hidden, or None while
+        # it is visible. Drives background-tab freeze/discard (see
+        # BrowserWindow._sweep_tab_lifecycle).
+        self._hidden_since: float | None = None
         page = WebPage(browser, self)
         page.certificateError.connect(self._on_certificate_error)
         self.setPage(page)
@@ -1040,6 +1044,18 @@ class DraggableTabBar(QTabBar):
         mime.setData(TAB_MIME, str(index).encode("ascii"))
         drag.setMimeData(mime)
         drag.exec(Qt.DropAction.MoveAction)
+
+
+# Background-tab memory reclamation. A tab hidden this long is frozen (its
+# JavaScript and timers pause); hidden longer still, it is discarded — the
+# render process is killed and the page reloads when the user returns. Every
+# transition is clamped to the page's own recommendedState(), so Chromium
+# vetoes anything unsafe (an audible tab, an active download, WebRTC, recent
+# input); pinned and not-yet-loaded tabs are never touched. This is the single
+# biggest RAM lever in a multi-tab Chromium browser.
+TAB_FREEZE_AFTER_S = 60
+TAB_DISCARD_AFTER_S = 10 * 60
+TAB_LIFECYCLE_SWEEP_MS = 30_000
 
 
 class BrowserWindow(QMainWindow):
@@ -1216,6 +1232,13 @@ class BrowserWindow(QMainWindow):
         self._mem_timer.setInterval(4000)
         self._mem_timer.timeout.connect(self._poll_tab_memory)
         self._mem_timer.start()
+
+        # Reclaim RAM from idle background tabs: freeze, then discard. See
+        # _sweep_tab_lifecycle and the TAB_*_AFTER_S constants.
+        self._lifecycle_timer = QTimer(self)
+        self._lifecycle_timer.setInterval(TAB_LIFECYCLE_SWEEP_MS)
+        self._lifecycle_timer.timeout.connect(self._sweep_tab_lifecycle)
+        self._lifecycle_timer.start()
 
         self._restarting = False   # set true only for an intentional restart
         self._build_ui()
@@ -2022,6 +2045,7 @@ class BrowserWindow(QMainWindow):
 
     def _on_split_focus(self, view: WebView) -> None:
         self._active_view = view
+        self._thaw(view)
         idx = self._index_of(view)
         if idx >= 0:
             self.tab_bar.blockSignals(True)
@@ -2511,6 +2535,7 @@ class BrowserWindow(QMainWindow):
         self._active_view = view
         self.page_area.setCurrentWidget(self.tab_stack)
         self.tab_stack.setCurrentWidget(view)
+        self._thaw(view)
         self._load_pending(view)
         self._sync_chrome_to(view)
 
@@ -2698,6 +2723,81 @@ class BrowserWindow(QMainWindow):
             pid = view.page().renderProcessPid()
             view._mem_mb = _process_working_set_mb(pid)
             self._update_tab_label(view)
+
+    def _visible_views(self) -> set["WebView"]:
+        """Views currently on screen — never candidates for freeze/discard."""
+        if (self._split_view is not None
+                and self.page_area.currentWidget() is self._split_view):
+            return set(self._split_view.views())
+        w = self.tab_stack.currentWidget()
+        return {w} if isinstance(w, WebView) else set()
+
+    def _thaw(self, view: "WebView") -> None:
+        """Return a tab to Active — resuming a frozen page, reloading a
+        discarded one — and reset its idle clock. Called the moment a tab
+        becomes visible so the switch feels instant rather than waiting for
+        the next lifecycle sweep."""
+        view._hidden_since = None
+        page = view.page()
+        if page.lifecycleState() != QWebEnginePage.LifecycleState.Active:
+            page.setLifecycleState(QWebEnginePage.LifecycleState.Active)
+
+    @staticmethod
+    def _less_aggressive(a, b):
+        """The tamer of two lifecycle states (Active < Frozen < Discarded)."""
+        order = {QWebEnginePage.LifecycleState.Active: 0,
+                 QWebEnginePage.LifecycleState.Frozen: 1,
+                 QWebEnginePage.LifecycleState.Discarded: 2}
+        return a if order[a] <= order[b] else b
+
+    def _sweep_tab_lifecycle(self) -> None:
+        """Freeze tabs idle past TAB_FREEZE_AFTER_S and discard those past
+        TAB_DISCARD_AFTER_S, so background tabs stop pinning a full render
+        process in RAM.
+
+        Safety comes from three layers: not-yet-loaded and pinned tabs are
+        skipped outright; every target is clamped to the page's own
+        recommendedState(), which Chromium keeps at Active for anything that
+        must keep running (audible media, an active download, WebRTC, recent
+        input); and discard is only ever reached from Frozen, never straight
+        from Active. Visible tabs are held Active."""
+        State = QWebEnginePage.LifecycleState
+        now = time.monotonic()
+        visible = self._visible_views()
+        for view in self._views:
+            if view in visible:
+                view._hidden_since = None
+                page = view.page()
+                if page.lifecycleState() != State.Active:
+                    page.setLifecycleState(State.Active)
+                continue
+            # Crash/session-restored tabs never opened this run hold no render
+            # process yet — nothing to reclaim, and touching them would force
+            # the load we deliberately deferred.
+            if view.pending_url is not None:
+                continue
+            if getattr(view, "_pinned", False):
+                continue
+            hidden_since = view._hidden_since
+            if hidden_since is None:
+                view._hidden_since = now
+                continue
+            idle = now - hidden_since
+            if idle >= TAB_DISCARD_AFTER_S:
+                target = State.Discarded
+            elif idle >= TAB_FREEZE_AFTER_S:
+                target = State.Frozen
+            else:
+                continue
+            page = view.page()
+            # Never exceed what the engine says is safe right now...
+            target = self._less_aggressive(target, page.recommendedState())
+            # ...and reach Discarded only via Frozen, never straight from
+            # Active (Qt forbids the direct jump).
+            if target == State.Discarded and page.lifecycleState() == State.Active:
+                target = State.Frozen
+            if page.lifecycleState() != target:
+                page.setLifecycleState(target)
 
     def _navigate(self) -> None:
         self.current_view().setUrl(to_url(self.url_bar.text()))
