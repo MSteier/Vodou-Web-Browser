@@ -1664,6 +1664,7 @@ class BrowserWindow(QMainWindow):
             "nothing is ever sent out.")
         self.ai_search_action.toggled.connect(self._set_ai_search)
         ai_menu.addAction("Local AI options…", self.show_ai_options)
+        ai_menu.addAction("Set up Local AI…", self.show_ollama_setup)
 
         # --- Display -------------------------------------------------------
         self._build_graphics_menu(settings_menu.addMenu("Graphics"))
@@ -3885,6 +3886,23 @@ class BrowserWindow(QMainWindow):
             self._close_ai_panel()
         self.statusBar().showMessage(
             f"Local AI {'on' if on else 'off'}.", 4000)
+        # Turning this on is the moment the user actually wants Ollama
+        # working, so this is the natural point to notice it isn't even
+        # installed yet rather than let them find out from a failed request.
+        if on:
+            from ollama_setup import ollama_on_path
+            if not ollama_on_path():
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Icon.Information)
+                box.setWindowTitle("Ollama not found")
+                box.setTextFormat(Qt.TextFormat.PlainText)
+                box.setText(
+                    "Local AI is on, but Ollama doesn't seem to be "
+                    "installed on this machine yet. Set it up now?")
+                box.setStandardButtons(QMessageBox.StandardButton.Yes
+                                       | QMessageBox.StandardButton.No)
+                if box.exec() == QMessageBox.StandardButton.Yes:
+                    self.show_ollama_setup()
 
     def show_ai_options(self) -> None:
         cfg = self.ai_cfg
@@ -3917,6 +3935,12 @@ class BrowserWindow(QMainWindow):
             "Tip: set \"model\" to whichever model you already keep loaded to "
             "avoid a VRAM swap.")
         box.exec()
+
+    def show_ollama_setup(self) -> None:
+        from ollama_setup_ui import OllamaSetupDialog
+        dialog = OllamaSetupDialog(
+            self, model=self.ai_cfg.get("model", "llama3.2:latest"))
+        dialog.exec()
 
     def clear_browsing_data(self) -> None:
         """Wipe the cache, cookies, visited-link history, blocking stats, and
