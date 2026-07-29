@@ -251,6 +251,29 @@ Two optional, **on-device** features powered by your own local
 general-purpose chat. Both keep the same privacy guarantee as the rest of
 Vodou — nothing leaves the machine.
 
+**Setting up Ollama** (skip if you already used the Docker `--profile ai` path
+in Installation):
+
+1. Install [Ollama](https://ollama.com) for your OS and make sure it's running
+   (`ollama serve`, or just launch the Ollama app — it runs in the background).
+2. Pull a model: `ollama pull llama3.2` (Vodou's default — any chat-capable
+   model works, pick whatever fits your hardware and set it in ☰ → Settings →
+   Local AI options).
+3. Turn the feature on: ☰ → Settings → Local AI → Local AI (Ollama) — it's
+   **off by default**.
+
+If Ollama isn't running or has no models pulled, the ✨ panel shows *"Couldn't
+reach Ollama. Is it running? (start it with `ollama serve`)"* rather than
+failing silently — everything else in Vodou works fine either way.
+
+> **Downloaded the standalone `.exe` from
+> [Releases](https://github.com/MSteier/Vodou-Web-Browser/releases)?** It's
+> Vodou only — no bundled Ollama or SearXNG, and the `docker/` bundle from
+> Installation isn't included in the zip. The native install above (steps 1–3)
+> is the simplest path to local AI. Search also needs a local SearXNG instance
+> (or just type full URLs) — clone the repo and see *Installation* above for
+> the Docker option if you want that too.
+
 **Summarize search results.** Run a search (local SearXNG as usual), then click
 the **✨ button** in the toolbar. A side panel opens and streams a concise
 summary of the top results, with citations you can click to open a source in a
