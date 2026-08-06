@@ -51,6 +51,16 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      # Audit the just-installed dependency tree (direct and transitive)
+      # against the PyPI/OSV advisory database; pip-audit exits non-zero on a
+      # known CVE, failing the job. Run once — one matrix cell is enough for a
+      # dependency check, and it avoids hammering the advisory API four times.
+      - name: Audit dependencies for known CVEs
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit
+          python -m pip_audit --progress-spinner off
+
       - name: Compile every module
         run: python -m py_compile $(python -c "import glob;print(' '.join(glob.glob('*.py')))")
         shell: bash
