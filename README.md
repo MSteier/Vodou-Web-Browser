@@ -20,7 +20,7 @@ in the footer.
 
 **Requirements**
 
-- **Python 3.9+** (developed on 3.10)
+- **Python 3.10+** (developed on 3.10)
 - **pip**
 - Windows, macOS, or Linux (the bundled Qt WebEngine build is platform-specific
   but installs automatically via pip)
@@ -121,12 +121,20 @@ page instead of the link.
 | Feature | How |
 |---|---|
 | Cookies & history never persist | Cookies are memory-only and die with the process, except for sites you explicitly allowlist — see *Cookie exceptions*. The bulky, low-sensitivity artifacts (HTTP cache, site storage) live in a size-capped disk folder for performance and are **securely shredded** on every exit — see *Performance & secure shredding* |
-| Tracker & ad blocking | Request interceptor blocks ~100 known tracker/ad domains (counter in the status bar; charts in ☰ menu → *Blocking report*). Click the counter — or ☰ menu → Settings → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
+| Tracker & ad blocking | Request interceptor blocks ~3,500 known tracker/ad domains — a small hardcoded core plus a larger curated list bundled in the repo (`trackers.txt`, refreshed with the normal update) — all matched fully on-device (counter in the status bar; charts in ☰ menu → *Blocking report*). Click the counter — or ☰ menu → Settings → Privacy & security → Pause tracker blocking — to let requests through on a site that breaks with blocking on; session-only, so protection always resumes on the next start |
 | Opt-out signals | `DNT: 1` and `Sec-GPC: 1` (Global Privacy Control) on every request |
 | Reduced fingerprinting | Generic Chrome user agent; DNS prefetch, hyperlink auditing, and plugins disabled |
 | WebRTC IP-leak protection | Chromium flag restricts WebRTC to the public interface |
+| Location Guard | On by default (☰ menu → Settings → Privacy & security → Location Guard). Blocks the page Geolocation API so a site can't read your precise GPS/Wi-Fi location — every request is answered PERMISSION_DENIED, so a site can at most estimate your area from your IP address. Toggle it per taste; reload open pages to apply |
+| Block Webcam | On by default (☰ menu → Settings → Privacy & security → Block Webcam). Denies any page request for your camera at the engine level, so a site's `getUserMedia` fails without ever reaching the hardware — no JS workaround. Turn it off to be asked (Allow / Block) per site instead; takes effect on the next request, no reload needed |
+| Block Microphone | On by default (☰ menu → Settings → Privacy & security → Block Microphone). Same engine-level gate for your microphone, toggled independently of the camera. A combined camera+microphone request is atomic, so it is denied if *either* guard is on and only offered to you when both are off. Screen capture, notifications, clipboard and font access stay denied by default regardless |
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
-| Private search | Local SearXNG instance (`https://localhost/searxng`) as home page and default search — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
+| Private search | Local SearXNG instance (`https://localhost/searxng`) is the default start page and search engine — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
+| Start page & search engine | Both are yours to change (☰ menu → Settings → Start page & search). **Set start page…** picks the page new tabs and the Home button open (blank restores the private SearXNG page). **Search engine** chooses where address-bar searches go — SearXNG (local, keeps queries on your machine) or an external service (DuckDuckGo, Startpage, Brave, Google), plus a **Custom…** template. Choosing an external engine sends your searches to that service; the SearXNG default keeps them local |
+| Start-page hijack protection | Only *you* can change the start page or search engine, and only through the Settings dialog. A start page can only ever be a normal `http`/`https` web page — `file:`, `chrome:`, `about:`, `data:`, `javascript:` and the like are refused. Vodou **signs** the saved settings with a per-install key (`~/.vodou/prefs.key`); if adware, a synced edit, or a script changes `~/.vodou/prefs.json` behind your back, the signature no longer matches, so on the next launch Vodou reverts to the private defaults and tells you. (Edit these through Settings, not by hand — a hand-edited file trips the same guard.) |
+| Light on memory | Background tabs don't hold RAM forever. A tab left idle for a minute is **frozen** (its scripts and timers pause); left past the discard timeout, it is **discarded** — its render process is freed and the page reloads the moment you return to it. The discard timeout is yours to set under ☰ → Settings → **Idle tab memory** (5 minutes, 10 minutes — the default, 30 minutes, 1 hour, or **Never** to keep every tab in memory and only ever freeze). Tabs playing audio, downloading, or otherwise busy are left running (Vodou defers to the engine's own judgement), and **pinned tabs are never touched**. Switching to a tab always wakes it instantly |
+| Proxy support | Route all of Vodou's traffic through a proxy under ☰ → Settings → **Network → Proxy…** — an **HTTP** proxy or a **SOCKS5** proxy (host and port). SOCKS5 can **resolve DNS at the proxy** rather than locally, so your lookups don't leak to the system resolver. If the proxy needs a username and password, they're stored in your **encrypted vault** (never in plain text) and supplied automatically when the vault is unlocked; while it's locked, Vodou asks you once and remembers the answer for the session. Choose "No proxy" to go direct again |
+| Open local files | Type a local path in the address bar and Vodou opens it. It accepts what you'd naturally type on Windows — `C:\Users\you\file.html`, a `file://` URL, forward or back slashes — and normalises it to the form the engine needs. A local page is sandboxed: it **can't reach the network or read other local files**, and web pages can't link into your filesystem |
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. Vodou's only outbound calls of its own are the two anonymous version checks (*About & updates*) and the anonymous periodic download of the public Safe Browsing lists (*Safe Browsing*) — public files fetched by IP, carrying no identifiers and no browsing data. The optional local AI features talk only to a **local** Ollama instance, so they add no off-device traffic either |
 | Local AI (summaries + chat) | Optional, off-by-default, powered by your **own local [Ollama](https://ollama.com) instance**: the ✨ button summarizes a search-results page, and **Ctrl+Shift+A** opens the same panel as a general chat you can ask anything. Summaries are read from the local SearXNG page; chat sends only what you type — never the page, its address, or your history. SearXNG is local, Ollama is local, so nothing leaves the machine, and Vodou is only an HTTP client of Ollama and never changes its models or config. See *Local AI* |
 | Deceptive-site protection | Every address you navigate to is checked **locally** for look-alike (homograph), mixed-alphabet/punycode, and typosquatting imitations of well-known brands. A suspected spoof is blocked with a full-screen warning that shows the real vs. deceptive address and its un-fakeable punycode spelling. See *Deceptive-site protection* |
@@ -135,8 +143,11 @@ page instead of the link.
 | Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — this session's blocking counts, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute for the cookies: exit deliberately keeps the saved cookie jar, so this is the only control that destroys it (and the only way to drop cookies without losing your open tabs) |
 | Certificate viewer | A security pill **inside** the address bar (green closed padlock = verified HTTPS, red open padlock = unencrypted, muted info dot = internal page); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
 
-Extend the blocklist by adding domains (one per line) to
-`~/.vodou/blocklist.txt`.
+The bundled list is **`trackers.txt`** in the repo (curated from
+[Peter Lowe's ad-server list](https://pgl.yoyo.org/adservers/)); it grows with
+each update. For your **own** additions that stay local, add domains (one per
+line) to `~/.vodou/blocklist.txt` — that file is never committed or sent
+anywhere.
 
 ## Performance & secure shredding
 
@@ -254,7 +265,7 @@ path on an otherwise-fine host isn't caught), and it's **periodically
 refreshed**, so a brand-new phishing domain can slip the window until the next
 update. It layers with the deceptive-site detection, which needs no list.
 
-- **☰ menu → Settings → Safe Browsing** toggles it (on by default);
+- **☰ menu → Settings → Privacy & security → Safe Browsing** toggles it (on by default);
   **Safe Browsing status…** shows the host count and last update.
 - Default sources are no-API-key public feeds (abuse.ch URLhaus for malware,
   the Phishing.Database ACTIVE list for phishing). Point it elsewhere by
@@ -267,6 +278,33 @@ Two optional, **on-device** features powered by your own local
 [Ollama](https://ollama.com) instance: a summary of your search results, and a
 general-purpose chat. Both keep the same privacy guarantee as the rest of
 Vodou — nothing leaves the machine.
+
+**Setting up Ollama** (skip if you already used the Docker `--profile ai` path
+in Installation):
+
+- **Easiest: ☰ → Settings → Local AI → Set up Local AI…** This installs
+  Ollama (Windows: downloads and opens the official installer — you agree to
+  its terms there, nothing runs silently) and pulls the default model
+  (`llama3.2`) for you. Turning on **Local AI (Ollama)** without Ollama
+  installed offers the same wizard automatically. On macOS/Linux the wizard
+  points you at [ollama.com/download](https://ollama.com/download) instead —
+  the automated installer step is Windows-only for now.
+- **Manual, if you'd rather:** install [Ollama](https://ollama.com) yourself,
+  run `ollama pull llama3.2` (or any chat-capable model — set it in ☰ →
+  Settings → Local AI options), then turn the feature on: ☰ → Settings →
+  Local AI → Local AI (Ollama) — it's **off by default**.
+
+If Ollama isn't running or has no models pulled, the ✨ panel shows *"Couldn't
+reach Ollama. Is it running? (start it with `ollama serve`)"* rather than
+failing silently — everything else in Vodou works fine either way.
+
+> **Downloaded the standalone `.exe` from
+> [Releases](https://github.com/MSteier/Vodou-Web-Browser/releases)?** It's
+> Vodou only — no bundled Ollama or SearXNG, and the `docker/` bundle from
+> Installation isn't included in the zip. The setup wizard above is the
+> simplest path to local AI. Search also needs a local SearXNG instance (or
+> just type full URLs) — clone the repo and see *Installation* above for the
+> Docker option if you want that too.
 
 **Summarize search results.** Run a search (local SearXNG as usual), then click
 the **✨ button** in the toolbar. A side panel opens and streams a concise
@@ -298,7 +336,7 @@ starts over.
   models (e.g. `deepseek-r1`) show a *Reasoning…* indicator while they think;
   their `<think>` scratchpad is hidden and only the final answer is shown.
   **Stop** ends a reply early and keeps whatever arrived.
-- **☰ menu → Settings → Local AI (Ollama)** toggles the feature (off by
+- **☰ menu → Settings → Local AI → Local AI (Ollama)** toggles the feature (off by
   default); **Local AI options…** shows the current model, endpoint, and
   config-file path.
 - Configure it in `~/.vodou/ai_search.json` — `model`, `endpoint`,
@@ -310,8 +348,8 @@ starts over.
 ## Cookie exceptions
 
 Memory-only cookies are the right default, but they also forget the logins
-and site settings you *want* kept. **☰ menu → Settings → Cookie
-exceptions…** lists the sites that are exempt: add a bare host like
+and site settings you *want* kept. **☰ menu → Settings → Privacy & security
+→ Cookie exceptions…** lists the sites that are exempt: add a bare host like
 `youtube.com` (subdomains included), `localhost`, or an IP.
 
 - Everything not on the list is unchanged: memory-only, erased on exit.
@@ -368,16 +406,51 @@ everything; **Start fresh** discards it and opens the usual home tab.
   and generate strong random passwords (`secrets` module). The vault is an
   ordinary window, not a modal dialog — it stays usable alongside the
   browser and other apps, drops behind when you click elsewhere, and
-  returns via its taskbar button.
+  returns via its taskbar button. Everyday actions sit up front (add / edit /
+  delete on the left, **Go to site** / copy on the right — *Go to site* opens
+  the selected login's site in a new tab); a **Manage** menu tucks away the
+  occasional ones (security keys, change master password, CSV import/export),
+  and a **🔒 Log out** button locks the vault right from the window.
+- The **vault toolbar button shows its state at a glance**: a **red** safe
+  with a closed padlock when locked, a **green** one with an open padlock
+  when unlocked. When a page has a login form but the vault is locked, that
+  button **pulses** to point you at unlocking first.
 - **🔑 / Ctrl+Shift+F** — fill the saved login on the current page.
   Filling is always user-initiated (never automatic), warns on non-HTTPS
   pages, and matches entries by domain (subdomains included). When several
   logins match, a picker lists them — **Select** (or double-click / Enter)
   fills the highlighted one, and **Delete login** removes stale entries
-  right from the picker.
+  right from the picker. Field detection is built for how real sign-in pages
+  are actually made: it reaches into **shadow DOM and same-origin iframes**
+  (cross-origin frames are never touched, so a fill can't leak across
+  origins), judges visibility in a way that copes with **fixed-position
+  login modals** (Target, Google's dialogs), and handles **multi-step
+  logins** (Google, OpenAI) — on an email-first screen it fills the username
+  and offers again once the password field appears. When a page has a login
+  Vodou can act on, the toolbar **pulses the button for your next step**: the
+  **key** when there's a saved login ready to fill, or the **vault** when it's
+  locked and needs unlocking first — so a pulse always points at one click.
+- **Save & update on sign-in** — when you submit a login, Vodou offers to
+  **Save** it if it's new, or **Update** the stored password if it changed
+  (nothing if it's unchanged). Multi-step and password-only pages hide the
+  username at submit, so if the site has exactly one saved login Vodou matches
+  it — a changed password becomes an *Update* rather than a duplicate. Capture
+  runs in the isolated world via a token-prefixed channel; the host is taken
+  from the URL, never from the page.
 - **Change master password** — button in the vault window; re-enters and
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).
+- **Show password** — a toggle on the unlock, create, and change-password
+  prompts reveals what you're typing (off by default), so a long passphrase
+  can be entered without a blind typo.
+- **Lock now / log out — Ctrl+Shift+L** (or ☰ menu → *Lock vault (log out)*)
+  clears the vault key from memory immediately, without waiting for the
+  auto-lock timer; the next vault access asks for the master password again.
+- **Forgot the master password?** The unlock window has a **Start over**
+  button. Because the password *is* the encryption key there is no recovery —
+  this deletes the vault so you can create a fresh, empty one. It makes you
+  type `RESET` first and erases every saved login permanently, so keep an
+  encrypted CSV export somewhere safe if that matters to you.
 - Copied passwords are wiped from the clipboard after 30 seconds.
 - The vault auto-locks after 5 minutes of inactivity; because the vault
   window can be left open in the background, auto-locking closes it too.
@@ -387,12 +460,36 @@ everything; **Start fresh** discards it and opens the usual home tab.
   decrypted at the instant it is used (fill, copy, edit).
 - **Import / export** — pull passwords in from a Chrome, Edge, Firefox, Brave,
   or Bitwarden **CSV** export, or export the vault to CSV (behind a plain-text
-  warning). Buttons are in the vault dialog; import is also on the ☰ menu.
+  warning). Both live under the vault window's **Manage** menu; import is also
+  on the ☰ menu.
 - Downloads always require confirmation (no silent drive-by downloads), and
   the server-suggested filename is sanitised: path components, NTFS
   alternate-data-stream colons (`report.pdf:evil.exe`), reserved device names
   (`CON`, `NUL`, `COM1`…), and trailing dots/spaces are stripped so a crafted
   name can't write outside Downloads or hide an executable.
+
+### Security-key two-factor (FIDO2)
+
+Optionally require a **hardware security key** (or a phone passkey) *in
+addition to* the master password. This is real cryptographic 2FA, not a UI
+gate: a random per-vault secret is mixed into the encryption key with **HKDF**
+and stored **wrapped under each key's FIDO2 `hmac-secret`** (AES-GCM), so a
+stolen `vault.dat` plus a guessed master password still opens nothing without
+a registered key present. A password-only vault derives exactly the historical
+key, so existing vaults keep opening unchanged.
+
+- **Vault window → Manage → Security keys…** — add, name, and remove keys. Enrolling
+  the first key turns 2FA on and re-encrypts the vault; each further key is an
+  independent **backup** (any one enrolled key opens the vault). Removing the
+  last key reverts the vault to password-only.
+- **No bypass — so enroll a backup.** If you lose *every* registered key the
+  saved logins cannot be recovered; that irreversibility is the whole point of
+  a second factor. Register at least two (a spare kept somewhere safe).
+- **Windows-only for now**, through the native Windows WebAuthn API. It uses
+  the `fido2` package, which `requirements.txt` installs automatically on
+  Windows; without it the feature just reports itself unavailable and the vault
+  stays password-only. A physical USB/NFC key is the most reliable; a phone
+  passkey works too wherever it supports the `hmac-secret` extension.
 
 ## Bookmarks
 
@@ -431,7 +528,14 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
   **isolated world** hidden from page scripts, and shows a **SHA-256 code
   fingerprint** so its identity is tamper-evident.
 - Bundled: *Cookie Banner Zapper*, *Glass Blur Deflicker*, *Text Selection
-  Unlocker*.
+  Unlocker*, *YouTube Ad Skip*.
+- *YouTube Ad Skip* auto-clicks "Skip Ad", fast-forwards unskippable video ads
+  to their end (and mutes them), and hides overlay/banner/display ads — without
+  touching your login. It's DOM-based, so a brief ad flash before the skip is
+  possible; and because YouTube reworks its player often, the selectors are a
+  maintenance target and it can trip YouTube's anti-ad-block notice. (Note: the
+  `youtube.com.` trailing-dot trick disables ads a different way but logs you
+  out and is unreliable, so Vodou doesn't use it.)
 - A *Dark Mode Everywhere* plugin was bundled until v1.8.0 and has been
   removed. Forcing a dark scheme onto arbitrary sites means inverting them,
   which fights whatever styling a site already has: it turned already-dark
@@ -449,12 +553,48 @@ reviewed plugins** (☰ menu → Plugins…) that you simply switch on or off.
 
 - **Window layout**, top to bottom: the **tab bar** (with a **+** button just
   to the right of the last tab), then the **address bar**, then the
-  **bookmarks bar**, then the page. Tabs can be dragged to reorder, and
-  **right-clicking a tab** offers *New tab*, *Close tab* (the one you clicked),
-  and *Close other tabs*.
-- **☰ menu → Appearance** — five built-in themes (*Vodou Violet*, *Blood
-  Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*) plus a **dark / light**
-  toggle. Each theme tints the whole chrome, so the switch is unmistakable.
+  **bookmarks bar**, then the page. Tabs can be dragged to reorder. Each tab
+  shows its **renderer memory** next to the title (e.g. *GitHub · 142 MB*),
+  refreshed every few seconds — handy for spotting a heavy page. (Chromium
+  shares a renderer across same-site tabs, so those report the same figure.)
+- **Right-clicking a tab** opens a full, Chrome-equivalent menu: *New tab*,
+  *Reopen closed tab* (also **Ctrl+Shift+T**), *Reload*, *Duplicate*,
+  *Pin / Unpin* (pinned tabs get a 📌 and cluster to the left, and are spared
+  by the bulk-close items), *Mute / Unmute site* (🔇), *Open in split view* ▸
+  (pick which other tab to pair with), *Move tab* ▸ (*to beginning*, *to end*,
+  *to new window*), *Close tab*, *Close other tabs*, and *Close tabs to the
+  right*. Items that don't apply are greyed out, as in a modern browser.
+
+### Split view
+
+Show two open tabs side by side in one window — right-click a tab → *Open in
+split view* and pick the other tab. It **borrows the existing tab views** rather
+than reloading, so each side keeps its full live state: navigation history,
+scroll position, form data, focus, JavaScript, and media playback all carry
+across entering, swapping, and leaving the split.
+
+- **Drag the divider** to resize; the ratio is remembered for the next split.
+- Click a pane (or its tab in the strip) to **focus** it — the focused pane gets
+  an accent frame and the address bar, shortcuts, and DevTools act on it.
+- **⇄ Swap sides** exchanges left and right instantly, with no reload and the
+  focused tab kept focused. **✕ Exit split** returns both tabs to the strip and
+  reselects the tab you were on before — again with no reload.
+- Each pane header has **⇄** (show a different open tab in this pane) and **⤢**
+  (send this tab back to the strip, collapsing the split). You can also **drag a
+  tab down out of the strip onto a pane** to drop it there.
+- Split tabs are marked with **◫** in the strip. Selecting any *other* tab
+  leaves the split and shows that tab. The design generalises to more panes /
+  orientations later without a rewrite.
+
+*Move tab → to new window* detaches a tab into its own top-level window that
+**shares this window's profile** (so the page keeps running — no reload, and no
+second engine profile to collide on Vodou's shredded cache). Its **⤢** button
+returns it to the main strip; closing the main window closes it too.
+- **☰ menu → Appearance** — seven built-in themes (*Vodou Violet*, *Blood
+  Ritual*, *Swamp Green*, *Midnight Blue*, *Bone Amber*, *Spider Web Grey*,
+  *Ghost White*) plus a **dark / light** toggle. Each theme tints the whole
+  chrome, so the switch is unmistakable; accent-on-fill text auto-picks black
+  or white for legibility, so even the pale themes stay readable.
 - The toolbar and address-bar icons are **crisp vectors drawn at runtime**
   (no image files) and repaint in the active theme's colours when you switch
   theme or mode — the bookmark star fills in the accent colour, the security
@@ -481,10 +621,12 @@ input field and chat bubbles pulse while the window is focused). No Chromium
 flag fixes it; switching the compositor does.
 
 - **☰ menu → Settings → Graphics** — three profiles, remembered in
-  `~/.vodou/graphics.json` and applied on the next start:
-  *Hardware* (fastest), *Compatibility* (software compositing, WebGL stays on
-  the GPU — **fixes the flicker**), and *Software* (no GPU at all, most
-  stable).
+  `~/.vodou/graphics.json`: *Hardware* (fastest), *Compatibility* (software
+  compositing, WebGL stays on the GPU — **fixes the flicker**), and *Software*
+  (no GPU at all, most stable). The graphics flags are read only when the
+  engine starts, so changing this **offers to restart Vodou now** to apply it —
+  and an intentional restart silently **reopens your open tabs** (no crash
+  prompt).
 - Per-launch override for debugging: `python main.py --gfx
   default|vanilla|compat|gl|warp|software`.
 
@@ -539,6 +681,7 @@ sent, and a failed check does nothing.
 | Keys | Action |
 |---|---|
 | Ctrl+T / Ctrl+W | New / close tab |
+| Ctrl+Shift+T | Reopen last closed tab |
 | Ctrl+Tab | Next tab |
 | Ctrl+L | Focus address bar |
 | Ctrl+R / F5 | Reload (bypasses the cache — always fetches fresh) |
@@ -546,8 +689,10 @@ sent, and a failed check does nothing.
 | Ctrl+0 | Reset zoom |
 | Ctrl+D | Bookmark current page |
 | Ctrl+J | Downloads |
+| Ctrl+Shift+A | Ask local AI / summarize |
 | Ctrl+Shift+F | Fill login |
 | Ctrl+Shift+V | Open vault |
+| Ctrl+Shift+L | Lock vault (log out) |
 | Ctrl+Shift+Del | Clear history & memory |
 | F12 | Toggle developer tools |
 

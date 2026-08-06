@@ -5,6 +5,10 @@ __pycache__/
 .venv/
 venv/
 
+# PyInstaller build output (large binaries — attached to GitHub Releases instead)
+build/
+dist/
+
 # Editor / OS
 .vscode/
 .idea/

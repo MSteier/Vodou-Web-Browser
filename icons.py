@@ -172,6 +172,37 @@ def _vault(p: QPainter, c: QColor) -> None:
     p.drawLine(QPointF(16, 10), QPointF(16, 14))         # handle
 
 
+def _vault_locked(p: QPainter, c: QColor) -> None:
+    _vault_state(p, c, open_=False)
+
+
+def _vault_unlocked(p: QPainter, c: QColor) -> None:
+    _vault_state(p, c, open_=True)
+
+
+def _vault_state(p: QPainter, c: QColor, open_: bool) -> None:
+    # The safe outline with a small padlock on its door: a closed shackle
+    # reads as locked, a shackle swung up-left as unlocked. Colour carries the
+    # state too (the caller passes a dim vs. accent colour), so the glyph and
+    # its tint reinforce each other.
+    p.setPen(_pen(c, 1.7))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawRoundedRect(QRectF(4.5, 5.5, 15, 13), 2, 2)   # safe body
+    p.drawLine(QPointF(16.5, 10), QPointF(16.5, 14))    # handle
+    # Padlock, centred on the door.
+    p.setPen(_pen(c, 1.4))
+    p.drawRoundedRect(QRectF(8.2, 11.6, 5.6, 4.6), 1, 1)  # padlock body
+    if open_:
+        p.drawArc(QRectF(6.0, 7.2, 4.4, 4.4), 20 * 16, 200 * 16)
+        p.drawLine(QPointF(8.2, 9.4), QPointF(8.2, 11.6))
+    else:
+        p.drawArc(QRectF(8.8, 7.6, 4.4, 4.4), 0, 180 * 16)
+        p.drawLine(QPointF(8.8, 9.8), QPointF(8.8, 11.6))
+        p.drawLine(QPointF(13.2, 9.8), QPointF(13.2, 11.6))
+    p.setBrush(c)
+    p.drawEllipse(QPointF(11.0, 13.9), 0.9, 0.9)          # keyhole
+
+
 def _lock(p: QPainter, c: QColor) -> None:
     _lock_body(p, c, open_=False)
 
@@ -251,6 +282,8 @@ _GLYPHS = {
     "key": _key,
     "save": _save,
     "vault": _vault,
+    "vault-locked": _vault_locked,
+    "vault-unlocked": _vault_unlocked,
     "lock": _lock,
     "lock-open": _lock_open,
     "globe": _globe,

@@ -18,9 +18,12 @@ Password manager:
 Run:  python main.py
 """
 
+import hashlib
+import hmac
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # Graphics profile. The mode names are the same everywhere (the ☰ menu and
@@ -101,6 +104,196 @@ def save_gfx_mode(mode: str) -> None:
         pass
 
 
+PRIVACY_FILE = Path.home() / ".vodou" / "privacy.json"
+
+
+def load_location_guard() -> bool:
+    """Whether Location Guard (block precise geolocation) is on. On by default
+    — Vodou is privacy-first, and precise location is rarely needed."""
+    try:
+        data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+        return bool(data.get("location_guard", True))
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def save_location_guard(on: bool) -> None:
+    try:
+        PRIVACY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        try:
+            data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data["location_guard"] = bool(on)
+        tmp = PRIVACY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(PRIVACY_FILE)
+    except OSError:
+        pass
+
+
+def load_block_webcam() -> bool:
+    """Whether webcam (camera) access is blocked. On by default — Vodou is
+    privacy-first, and a page rarely has a legitimate need for the camera."""
+    try:
+        data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+        return bool(data.get("block_webcam", True))
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def save_block_webcam(on: bool) -> None:
+    try:
+        PRIVACY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        try:
+            data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data["block_webcam"] = bool(on)
+        tmp = PRIVACY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(PRIVACY_FILE)
+    except OSError:
+        pass
+
+
+def load_block_microphone() -> bool:
+    """Whether microphone access is blocked. On by default — Vodou is
+    privacy-first, and a page rarely has a legitimate need for the mic."""
+    try:
+        data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+        return bool(data.get("block_microphone", True))
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def save_block_microphone(on: bool) -> None:
+    try:
+        PRIVACY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        try:
+            data = json.loads(PRIVACY_FILE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data["block_microphone"] = bool(on)
+        tmp = PRIVACY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(PRIVACY_FILE)
+    except OSError:
+        pass
+
+
+def _capture_label(camera: bool, mic: bool) -> str:
+    """Human name for a media request, e.g. 'camera and microphone'."""
+    if camera and mic:
+        return "camera and microphone"
+    return "camera" if camera else "microphone"
+
+
+PREFS_FILE = Path.home() / ".vodou" / "prefs.json"
+PREFS_KEY_FILE = Path.home() / ".vodou" / "prefs.key"
+
+# Prefs that are integrity-protected against start-page/search hijacking. A
+# value changed on disk by anything other than Vodou's own Settings dialog
+# (adware, a synced edit, a script) won't carry a valid HMAC signature, so it's
+# reverted to the private default on the next startup. See _prefs_sig.
+_SIGNED_KEYS = ("start_page", "search_engine")
+# A start page may only be a normal web page: file:/chrome:/about:/data:/
+# javascript:/blob: are refused, so even a tampered value can't reach local
+# files, engine-internal pages, or script.
+_SAFE_START_SCHEMES = ("http://", "https://")
+
+
+def _prefs_key() -> bytes:
+    """Per-install secret used to sign prefs; created once on first use and
+    kept owner-only. A homepage hijacker that blindly overwrites prefs.json
+    can't forge the signature without this key."""
+    try:
+        return bytes.fromhex(PREFS_KEY_FILE.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        pass
+    key = secrets.token_bytes(32)
+    try:
+        PREFS_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PREFS_KEY_FILE.with_suffix(".key.tmp")
+        tmp.write_text(key.hex(), encoding="utf-8")
+        tmp.replace(PREFS_KEY_FILE)
+        if os.name == "posix":
+            os.chmod(PREFS_KEY_FILE, 0o600)
+    except OSError:
+        pass
+    return key
+
+
+def _prefs_sig(data: dict) -> str:
+    """HMAC-SHA256 over the signed prefs, canonicalised so mere key-order
+    changes can't alter the signature."""
+    signed = {k: str(data.get(k, "")) for k in _SIGNED_KEYS}
+    payload = json.dumps(signed, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+    return hmac.new(_prefs_key(), payload, hashlib.sha256).hexdigest()
+
+
+def _load_prefs() -> dict:
+    """Raw prefs dict (including its signature) from ~/.vodou/prefs.json."""
+    try:
+        data = json.loads(PREFS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_prefs(data: dict) -> None:
+    """Write prefs.json atomically with a fresh signature over _SIGNED_KEYS."""
+    try:
+        PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        out = {k: v for k, v in data.items() if k != "_sig"}
+        out["_sig"] = _prefs_sig(out)
+        tmp = PREFS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(out), encoding="utf-8")
+        tmp.replace(PREFS_FILE)
+    except OSError:
+        pass
+
+
+def _save_pref(key: str, value: str) -> None:
+    data = _load_prefs()
+    data[key] = value
+    _write_prefs(data)
+
+
+def _prefs_trusted(data: dict) -> bool:
+    """Whether the file's stored signature matches its signed values — i.e.
+    Vodou itself wrote them and nothing has changed them since."""
+    want = str(data.get("_sig", ""))
+    return bool(want) and hmac.compare_digest(want, _prefs_sig(data))
+
+
+def _normalize_url(text: str) -> str:
+    """A start-page string the user typed -> a loadable URL (HTTPS-first)."""
+    text = text.strip()
+    if not text:
+        return text
+    if text.startswith(
+            ("http://", "https://", "about:", "file:", "chrome://")):
+        return text
+    return "https://" + text
+
+
+def _safe_start_page(url: str) -> str:
+    """The URL if it's a normal http(s) web page, else '' (use the default)."""
+    url = url.strip()
+    return url if url.startswith(_SAFE_START_SCHEMES) else ""
+
+
 def _gfx_flags() -> str:
     global GFX_MODE
     mode = _load_saved_gfx()          # ☰ menu → Graphics choice, if any
@@ -126,29 +319,43 @@ import platform
 import secrets
 from urllib.parse import quote
 
-from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PyQt6.QtCore import (
+    QEvent, QMimeData, QPoint, QProcess, QSize, Qt, QTimer, QUrl,
+    QVariantAnimation, pyqtSignal, pyqtSlot,
+)
+from PyQt6.QtGui import (
+    QAction, QActionGroup, QColor, QCursor, QDrag, QKeySequence, QShortcut,
+)
 from PyQt6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
+    QWebEnginePermission,
     QWebEngineProfile,
     QWebEngineScript,
     QWebEngineSettings,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtNetwork import QNetworkProxy
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPushButton,
+    QRadioButton,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTabBar,
@@ -175,6 +382,7 @@ from importers import parse_bookmarks_html, parse_password_csv
 from privacy import (
     FIREFOX_QUIRK_JS,
     GENERIC_USER_AGENT,
+    LOCATION_GUARD_JS,
     WEBAUTHN_SHIM_JS,
     PrivacyInterceptor,
     apply_ua_quirk,
@@ -189,8 +397,12 @@ from ai_search import (
     save_config as save_ai_config,
 )
 from safebrowsing import SafeBrowsing
-from session import clear_snapshot, load_snapshot, save_snapshot
+from session import (
+    clear_snapshot, consume_restart, load_snapshot, mark_restart,
+    save_snapshot,
+)
 from shred import shred_dir
+from splitview import TAB_MIME, SplitView
 from spoofcheck import (
     SENTINEL_HOST,
     download_risk,
@@ -286,6 +498,41 @@ ZOOM_LEVELS = (0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0,
                1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0)
 SEARCH_URL = SEARXNG_BASE + "/search?q={}"
 
+# The address bar sends searches to SEARCH_URL, with {} where the query goes.
+# SearXNG (local) keeps queries on your machine; the rest are external
+# services. Offered in the Settings ▸ Search engine menu, plus a Custom option.
+SEARCH_ENGINES = {
+    "SearXNG (local, private)": SEARXNG_BASE + "/search?q={}",
+    "DuckDuckGo": "https://duckduckgo.com/?q={}",
+    "Startpage": "https://www.startpage.com/sp/search?query={}",
+    "Brave Search": "https://search.brave.com/search?q={}",
+    "Google": "https://www.google.com/search?q={}",
+}
+
+# Apply the user's saved Settings ▸ start-page / search-engine overrides — but
+# ONLY if the file's signature verifies. A start page or search engine changed
+# on disk by anything other than Vodou (a homepage hijacker, adware, a stray
+# edit) can't carry a valid signature, so we ignore it, keep the private
+# SearXNG defaults set just above, re-sign a clean file, and leave a one-time
+# notice for the window to show. Both fall back to the SearXNG defaults.
+PREFS_RESET_NOTICE = None
+_prefs = _load_prefs()
+_has_overrides = any(str(_prefs.get(k, "")).strip() for k in _SIGNED_KEYS)
+if _has_overrides and not _prefs_trusted(_prefs):
+    PREFS_RESET_NOTICE = (
+        "Your saved start page and search engine couldn't be verified, so "
+        "Vodou restored the private defaults. If you customized them, set "
+        "them again from ☰ → Settings.")
+    _write_prefs({"start_page": "", "search_engine": ""})
+elif _has_overrides:
+    _saved_start = _safe_start_page(
+        _normalize_url(str(_prefs.get("start_page", ""))))
+    if _saved_start:
+        HOME_URL = _saved_start
+    _saved_engine = str(_prefs.get("search_engine", "")).strip()
+    if "{}" in _saved_engine:
+        SEARCH_URL = _saved_engine
+
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
 # SearXNG instance). Certificate errors anywhere else are still fatal.
 CERT_EXEMPT_HOSTS = {"localhost", "127.0.0.1"}
@@ -319,17 +566,93 @@ def plain_message(parent, icon, title, text,
     return box.exec()
 
 
+def _process_working_set_mb(pid: int) -> float | None:
+    """A process's working-set (resident RAM) in MB, or None if unreadable.
+
+    Windows-only (uses GetProcessMemoryInfo); returns None elsewhere or on any
+    failure so callers can just skip the figure. Note a Chromium renderer is
+    shared by same-site tabs, so several tabs can report the same process.
+    """
+    if sys.platform != "win32" or not pid or pid <= 0:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class _PMC(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t)]
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFO
+    if not handle:
+        return None
+    try:
+        counters = _PMC()
+        counters.cb = ctypes.sizeof(_PMC)
+        ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+            handle, ctypes.byref(counters), counters.cb)
+        if not ok:
+            return None
+        return counters.WorkingSetSize / (1024 * 1024)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _as_local_path(text: str) -> str | None:
+    """Turn address-bar text into an absolute local filesystem path, or None if
+    it isn't file-ish (so the caller falls through to host/search handling).
+
+    Handles what people actually type on Windows: an explicit ``file:`` scheme
+    with any mix of slashes and backslashes (``file://``, ``file:///``,
+    ``file:\\``), a bare drive path (``C:\\...`` or ``C:/...``), or a UNC share
+    (``\\host\share``). Backslashes are normalised to forward slashes and a
+    drive-less ``file:`` path (e.g. ``file://users\pacma\...``) is anchored to
+    the system drive so it resolves to the intended ``C:/users/pacma/...``.
+    Bare text without a scheme is only treated as a file when it clearly is a
+    drive or UNC path, so ordinary searches aren't hijacked.
+    """
+    scheme = text[:5].lower() == "file:"
+    raw = text[5:] if scheme else text
+    if scheme:
+        raw = raw.lstrip("/\\")           # eat file://, file:///, file:\\ ...
+    raw = raw.replace("\\", "/")
+    if not raw:
+        return None
+    drive = len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha()
+    if drive:                             # C:/Users/...  (with or without scheme)
+        return os.path.normpath(raw)
+    if raw.startswith("//"):              # //host/share UNC path
+        return os.path.normpath(raw)
+    if scheme:                            # file://users/... -> anchor to C:/
+        system_drive = os.environ.get("SystemDrive", "C:")
+        return os.path.normpath(os.path.join(system_drive + "/", raw))
+    return None                           # not file-ish -> host or search
+
+
 def to_url(text: str) -> QUrl:
     """Address-bar text -> URL (HTTPS-first) or search query."""
     text = text.strip()
     if not text:
         return QUrl(HOME_URL)
+    # A local file/folder (file:// or a plain Windows path) opens directly.
+    # QUrl.fromLocalFile builds the file:///C:/... form QtWebEngine needs.
+    local = _as_local_path(text)
+    if local is not None:
+        return QUrl.fromLocalFile(local)
     # chrome:// reaches the engine's own diagnostic pages (chrome://gpu is the
     # one worth knowing — it reports what's hardware-accelerated and which
     # driver workarounds are active). Without it here, such an address has no
     # dot and no known scheme, so it falls through to the search branch below
     # and gets sent to SearXNG as a query instead of opening.
-    if text.startswith(("http://", "https://", "about:", "file:", "chrome://")):
+    if text.startswith(("http://", "https://", "about:", "chrome://")):
         return QUrl(text)
     looks_like_host = " " not in text and (
         "." in text or text.startswith("localhost"))
@@ -355,6 +678,12 @@ class WebPage(QWebEnginePage):
         # True while the deceptive-site interstitial occupies this page, so its
         # own load and links aren't themselves re-inspected.
         self._interstitial_active = False
+        # Gate camera/mic/etc. permission prompts. QtWebEngine denies any
+        # permission that no slot resolves, so by owning this signal we keep
+        # Vodou's default of granting nothing unless the user opts in.
+        self.permissionRequested.connect(self._on_permission_requested)
+        # Answer proxy sign-in challenges (auto from the vault, else prompt).
+        self.proxyAuthenticationRequired.connect(browser._on_proxy_auth)
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame) -> bool:
         host = url.host()
@@ -447,6 +776,39 @@ class WebPage(QWebEnginePage):
         # handler writes page console output (which routinely includes
         # user data) to stderr/logs. DevTools has its own console feed,
         # so nothing is lost for debugging.
+
+    def _on_permission_requested(self, permission) -> None:
+        """Decide on a page's request to use a device/capability.
+
+        Camera and microphone are each gated on their own setting (Block
+        Webcam / Block Microphone): a guarded device is denied outright,
+        otherwise the user is asked. A combined audio+video request is one
+        atomic permission, so it is denied if EITHER device is blocked and
+        only offered to the user when both are allowed. Every other
+        permission (screen capture, notifications, clipboard, fonts,
+        geolocation) is denied — Vodou grants nothing on its own, and this
+        simply makes that long-standing default explicit now that we own the
+        signal. Geolocation stays additionally shielded by Location Guard's
+        JS shim.
+        """
+        ptype = QWebEnginePermission.PermissionType
+        pt = permission.permissionType()
+        wants_camera = pt in (ptype.MediaVideoCapture,
+                              ptype.MediaAudioVideoCapture)
+        wants_mic = pt in (ptype.MediaAudioCapture,
+                           ptype.MediaAudioVideoCapture)
+        if not (wants_camera or wants_mic):
+            permission.deny()
+            return
+        blocked = ((wants_camera and self.browser._block_webcam)
+                   or (wants_mic and self.browser._block_microphone))
+        what = _capture_label(wants_camera, wants_mic)
+        if blocked:
+            permission.deny()
+            self.browser._note_capture_blocked(
+                permission.origin().host(), what)
+            return
+        self.browser._prompt_capture(permission, what)
 
 
 class BookmarkBar(QToolBar):
@@ -598,6 +960,10 @@ class WebView(QWebEngineView):
         # Set when a deceptive-site interstitial is showing in this tab: the
         # real URL to load if the user chooses "Continue anyway".
         self._spoof_pending: QUrl | None = None
+        # monotonic() timestamp of when this tab was last hidden, or None while
+        # it is visible. Drives background-tab freeze/discard (see
+        # BrowserWindow._sweep_tab_lifecycle).
+        self._hidden_since: float | None = None
         page = WebPage(browser, self)
         page.certificateError.connect(self._on_certificate_error)
         self.setPage(page)
@@ -649,11 +1015,220 @@ class WebView(QWebEngineView):
         return super().eventFilter(obj, event)
 
 
+class ButtonPulser:
+    """Pulses a toolbar QToolButton's background to draw the eye to it.
+
+    Runs ~4 in-and-out accent-coloured pulses, then leaves a gentle steady
+    tint while it stays active so the cue persists for a user who looked
+    away. set_active is idempotent, so re-probing the same page doesn't
+    restart the pulse. The accent is read fresh each time it activates
+    (via accent_provider) so it always matches the live theme.
+    """
+
+    def __init__(self, button, accent_provider):
+        self._button = button
+        self._accent = accent_provider   # callable -> "#rrggbb"
+        self._active = False
+        self._rgb = (0, 0, 0)
+        self._anim = QVariantAnimation(button)
+        self._anim.setDuration(700)          # one in-out pulse
+        self._anim.setStartValue(0.0)
+        self._anim.setKeyValueAt(0.5, 1.0)
+        self._anim.setEndValue(0.0)
+        self._anim.setLoopCount(4)           # ~2.8s of pulsing, then rest
+        self._anim.valueChanged.connect(lambda v: self._paint(float(v)))
+        self._anim.finished.connect(self._settle)
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def set_active(self, on: bool) -> None:
+        if self._button is None or on == self._active:
+            return
+        self._active = on
+        self._anim.stop()
+        if on:
+            hexc = self._accent()
+            self._rgb = (int(hexc[1:3], 16), int(hexc[3:5], 16),
+                         int(hexc[5:7], 16))
+            self._anim.start()   # pulse, then _settle leaves a steady tint
+        else:
+            self._button.setStyleSheet("")
+
+    def _paint(self, value: float) -> None:
+        r, g, b = self._rgb
+        alpha = int(40 + 150 * value)   # subtle at the trough, bright at peak
+        self._button.setStyleSheet(
+            f"QToolButton {{ background: rgba({r},{g},{b},{alpha}); "
+            f"border-radius: 4px; }}")
+
+    def _settle(self) -> None:
+        if self._active:
+            self._paint(0.35)
+        else:
+            self._button.setStyleSheet("")
+
+
+class DraggableTabBar(QTabBar):
+    """The main tab bar, with a tear-off drag so a tab can be dropped into a
+    Split View pane.
+
+    Ordinary left-right reordering is untouched: QTabBar's built-in movable
+    behaviour keeps the pointer inside the bar, so it never crosses the
+    generous vertical margin that arms the tear-off. Only a clear downward
+    drag (toward the page area) starts a QDrag carrying the tab's index; a
+    Split View pane accepts that drop. The index is resolved against the
+    live view list at drop time, so a concurrent reorder can't misfire."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._press_pos: QPoint | None = None
+        self._press_index = -1
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = event.position().toPoint()
+            self._press_index = self.tabAt(self._press_pos)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (self._press_pos is not None and self._press_index >= 0
+                and event.buttons() & Qt.MouseButton.LeftButton):
+            # Arm only on a decisive move below the strip, so horizontal
+            # reordering (which stays within the bar) is never intercepted.
+            pos = event.position().toPoint()
+            if pos.y() - self.rect().bottom() > 24:
+                self._start_tear_off()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._press_pos = None
+        self._press_index = -1
+        super().mouseReleaseEvent(event)
+
+    def _start_tear_off(self) -> None:
+        index = self._press_index
+        self._press_pos = None
+        self._press_index = -1
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(TAB_MIME, str(index).encode("ascii"))
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
+
+
+# Background-tab memory reclamation. A tab hidden this long is frozen (its
+# JavaScript and timers pause); hidden past the discard timeout, it is
+# discarded — the render process is killed and the page reloads when the user
+# returns. Every transition is clamped to the page's own recommendedState(), so
+# Chromium vetoes anything unsafe (an audible tab, an active download, WebRTC,
+# recent input); pinned and not-yet-loaded tabs are never touched. This is the
+# single biggest RAM lever in a multi-tab Chromium browser.
+TAB_FREEZE_AFTER_S = 60
+TAB_LIFECYCLE_SWEEP_MS = 30_000
+
+# The discard timeout is user-configurable (☰ → Settings → Idle tab memory):
+# label -> seconds of idle before a background tab is discarded; 0 means never
+# discard (freezing still applies). Persisted unsigned in tabs.json — it is not
+# security-sensitive, so it stays out of the integrity-protected prefs.json.
+TABS_FILE = Path.home() / ".vodou" / "tabs.json"
+TAB_DISCARD_OPTIONS = (
+    ("Never (freeze only)", 0),
+    ("After 5 minutes", 5 * 60),
+    ("After 10 minutes", 10 * 60),
+    ("After 30 minutes", 30 * 60),
+    ("After 1 hour", 60 * 60),
+)
+TAB_DISCARD_DEFAULT_S = 10 * 60
+
+
+def _load_discard_after_s() -> int:
+    """Saved discard timeout in seconds (0 = never), or the default. An
+    unrecognized value falls back to the default rather than trusting it."""
+    try:
+        val = json.loads(TABS_FILE.read_text(encoding="utf-8")).get(
+            "discard_after_s")
+    except (OSError, ValueError, AttributeError):
+        return TAB_DISCARD_DEFAULT_S
+    valid = {sec for _, sec in TAB_DISCARD_OPTIONS}
+    return val if isinstance(val, int) and val in valid else TAB_DISCARD_DEFAULT_S
+
+
+def save_discard_after_s(seconds: int) -> None:
+    try:
+        TABS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = TABS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"discard_after_s": seconds}),
+                       encoding="utf-8")
+        tmp.replace(TABS_FILE)
+    except OSError:
+        pass
+
+
+# Proxy configuration (☰ → Settings → Network → Proxy…). The non-secret parts
+# live in proxy.json; any username/password lives encrypted in the vault (see
+# Vault.set_proxy_credential) and is supplied on demand by _on_proxy_auth.
+PROXY_FILE = Path.home() / ".vodou" / "proxy.json"
+PROXY_TYPES = {"http": "HTTP", "socks5": "SOCKS5"}  # key -> display label
+
+
+def _load_proxy_conf() -> dict:
+    try:
+        data = json.loads(PROXY_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_proxy_conf(conf: dict) -> None:
+    try:
+        PROXY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PROXY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(conf), encoding="utf-8")
+        tmp.replace(PROXY_FILE)
+    except OSError:
+        pass
+
+
+def _build_qnetwork_proxy(conf: dict) -> QNetworkProxy:
+    """Turn a saved proxy.json dict into a QNetworkProxy (NoProxy if disabled
+    or incomplete). Credentials are NOT baked in here — QtWebEngine asks for
+    them through proxyAuthenticationRequired, answered by _on_proxy_auth."""
+    if not conf.get("enabled") or not conf.get("host"):
+        return QNetworkProxy(QNetworkProxy.ProxyType.NoProxy)
+    is_socks = conf.get("type") == "socks5"
+    proxy = QNetworkProxy(
+        QNetworkProxy.ProxyType.Socks5Proxy if is_socks
+        else QNetworkProxy.ProxyType.HttpProxy,
+        str(conf.get("host", "")), int(conf.get("port") or 0))
+    if is_socks:
+        # SOCKS5 can resolve hostnames at the proxy, keeping DNS off the local
+        # resolver; honour the user's remote-DNS choice explicitly.
+        caps = proxy.capabilities()
+        flag = QNetworkProxy.Capability.HostNameLookupCapability
+        if conf.get("remote_dns", True):
+            caps |= flag
+        else:
+            caps &= ~flag
+        proxy.setCapabilities(caps)
+    return proxy
+
+
 class BrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Vodou Browser — private")
         self.resize(1280, 830)
+
+        # Route traffic through the configured proxy (if any) before any page
+        # loads. An authenticating proxy's credentials are supplied on demand
+        # by _on_proxy_auth — auto from the vault when unlocked, else prompted.
+        self._proxy_auth_cache: tuple[str, str] | None = None
+        self._proxy_last_offered: dict[str, tuple[str, str]] = {}
+        self._proxy_auth_failcount: dict[str, int] = {}
+        self._apply_proxy()
 
         # Hybrid profile. Fully off-the-record forced Chromium's HTTP cache
         # into RAM, which starves smaller machines during heavy browsing.
@@ -750,6 +1325,32 @@ class BrowserWindow(QMainWindow):
         webauthn_shim.setSourceCode(WEBAUTHN_SHIM_JS)
         self.profile.scripts().insert(webauthn_shim)
 
+        # Location Guard: block precise geolocation (see privacy.LOCATION_GUARD
+        # _JS). Toggled from Settings; kept as a member so it can be inserted /
+        # removed live. Main world at DocumentCreation so it replaces the API
+        # the page sees before any page script can call it.
+        self._location_guard_script = QWebEngineScript()
+        self._location_guard_script.setName("vodou-location-guard")
+        self._location_guard_script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        self._location_guard_script.setWorldId(
+            QWebEngineScript.ScriptWorldId.MainWorld)
+        self._location_guard_script.setRunsOnSubFrames(True)
+        self._location_guard_script.setSourceCode(LOCATION_GUARD_JS)
+        self._location_guard_on = load_location_guard()
+        if self._location_guard_on:
+            self.profile.scripts().insert(self._location_guard_script)
+
+        # Block Webcam / Block Microphone: deny page requests for the camera
+        # and/or mic. Enforced per-page in WebPage._on_permission_requested;
+        # kept here so every page reads one live flag each. On by default
+        # (privacy-first).
+        self._block_webcam = load_block_webcam()
+        self._block_microphone = load_block_microphone()
+        # Throttles the "capture blocked" status note so a page that hammers
+        # getUserMedia can't spam the status bar.
+        self._capture_note_at = 0.0
+
         # Reviewed, opt-in plugins injected into the isolated world. State is
         # ID-only (no code from disk); each plugin self-limits to its hosts.
         self.plugins = PluginManager()
@@ -792,9 +1393,30 @@ class BrowserWindow(QMainWindow):
         self._session_timer.setInterval(1000)
         self._session_timer.timeout.connect(self._write_session)
 
+        # Poll each tab's renderer memory and show it in the tab label.
+        self._mem_timer = QTimer(self)
+        self._mem_timer.setInterval(4000)
+        self._mem_timer.timeout.connect(self._poll_tab_memory)
+        self._mem_timer.start()
+
+        # Reclaim RAM from idle background tabs: freeze, then discard. The
+        # discard timeout is user-configurable (Settings ▸ Idle tab memory);
+        # see _sweep_tab_lifecycle.
+        self._discard_after_s = _load_discard_after_s()
+        self._lifecycle_timer = QTimer(self)
+        self._lifecycle_timer.setInterval(TAB_LIFECYCLE_SWEEP_MS)
+        self._lifecycle_timer.timeout.connect(self._sweep_tab_lifecycle)
+        self._lifecycle_timer.start()
+
+        self._restarting = False   # set true only for an intentional restart
         self._build_ui()
         self._build_shortcuts()
-        if not self._offer_crash_restore():
+        # An intentional restart (e.g. applying a graphics change) silently
+        # reopens the tabs; otherwise a leftover snapshot means a crash and we
+        # offer them back. Either falls through to a fresh home tab.
+        if consume_restart() and self._resume_after_restart():
+            pass
+        elif not self._offer_crash_restore():
             self.add_tab(QUrl(HOME_URL))
 
         # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
@@ -822,7 +1444,7 @@ class BrowserWindow(QMainWindow):
         # QStackedWidget) so the address bar and bookmark bar can sit BETWEEN
         # the tabs and the page — the vertical order top to bottom is:
         # tabs · address bar · bookmarks bar · page.
-        self.tab_bar = QTabBar()
+        self.tab_bar = DraggableTabBar()
         self.tab_bar.setObjectName("mainTabBar")
         self.tab_bar.setTabsClosable(True)
         self.tab_bar.setMovable(True)
@@ -837,6 +1459,21 @@ class BrowserWindow(QMainWindow):
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.tab_bar.customContextMenuRequested.connect(self._tab_context_menu)
         self.tab_stack = QStackedWidget()
+
+        # Ordered source of truth for the open tabs, index-aligned with the tab
+        # bar. It is kept separate from tab_stack's own child list because Split
+        # View borrows a couple of views out of the stack: the list still names
+        # every tab in order while those views live in the split panes.
+        self._views: list[WebView] = []
+        self._active_view: WebView | None = None
+        # (url, pinned) for tabs the user closed, most-recent last — powers
+        # "Reopen closed tab" / Ctrl+Shift+T. Session-only and capped.
+        self._closed_tabs: list[tuple[str, bool]] = []
+        self._split_view: SplitView | None = None
+        self._pre_split_active: WebView | None = None
+        # Top-level windows created by "Move tab to new window"; they share
+        # this window's profile, so they're closed with it.
+        self._detached_windows: list["DetachedWindow"] = []
 
         # "+" opens a new tab, sitting just to the right of the last tab.
         self.plus_button = QToolButton()
@@ -856,11 +1493,17 @@ class BrowserWindow(QMainWindow):
         strip.addWidget(self.plus_button)
         strip.addStretch(1)
 
-        # Page area: the stack of tab pages, with the DevTools panel docking to
-        # the right of this splitter when developer tools are enabled.
+        # Page area: a small stack that flips between the normal single-tab
+        # view (tab_stack) and Split View. Wrapping them keeps the DevTools / AI
+        # panels docking to the right of whichever is showing, unchanged.
+        self.page_area = QStackedWidget()
+        self.page_area.addWidget(self.tab_stack)      # index 0: normal
+
+        # DevTools / AI panels dock to the right of the page area in this
+        # splitter when enabled.
         self._split = QSplitter(Qt.Orientation.Horizontal)
         self._split.setChildrenCollapsible(False)
-        self._split.addWidget(self.tab_stack)
+        self._split.addWidget(self.page_area)
 
         self.notify_bar = NotifyBar()
         # Favicons for the bookmarks bar: captured from pages you browse /
@@ -950,43 +1593,72 @@ class BrowserWindow(QMainWindow):
         toolbar.addWidget(self.bookmarks_button)
         self._icon_targets.append((self.bookmarks_button, "bookmarks"))
 
-        action("key", "Fill saved login on this page (Ctrl+Shift+F)",
-               self.fill_login)
+        self.key_action = action(
+            "key", "Fill saved login on this page (Ctrl+Shift+F)",
+            self.fill_login)
         action("save", "Save a login for this site", self.save_login_for_site)
-        action("vault", "Open password vault (Ctrl+Shift+V)", self.open_vault)
+        self.vault_action = action(
+            "vault", "Open password vault (Ctrl+Shift+V)", self.open_vault)
+        # The toolbar renders each QAction as a QToolButton; grab the key and
+        # vault widgets so detected login forms can pulse them (key = a saved
+        # login is here to fill; vault = unlock first), and so the vault button
+        # can carry a locked/unlocked state indicator.
+        self.key_button = toolbar.widgetForAction(self.key_action)
+        self.vault_button = toolbar.widgetForAction(self.vault_action)
+        self._setup_button_pulsers()
 
         menu_button = QToolButton()
         menu_button.setToolTip("Menu")
         menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._icon_targets.append((menu_button, "menu"))
         menu = QMenu(menu_button)
-        clear_action = menu.addAction("Clear history & memory\tCtrl+Shift+Del",
-                                      self.clear_browsing_data)
-        clear_action.setToolTip(
-            "Erase visited-link history, the HTTP cache, cookies (including "
-            "the saved ones for allowlisted sites), the recorded blocking "
-            "statistics, and each tab's back/forward navigation memory")
-        menu.addSeparator()
+
+        # --- Content & tools you reach often ---
         hamburger_bookmarks = menu.addMenu("Bookmarks")
         hamburger_bookmarks.aboutToShow.connect(
             lambda: self._populate_bookmarks_menu(hamburger_bookmarks))
+        menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
+        menu.addAction("Ask local AI…\tCtrl+Shift+A", self.ask_ai)
+
+        # --- Passwords ---
+        menu.addSeparator()
+        menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
+        lock_action = menu.addAction("Lock vault (log out)\tCtrl+Shift+L",
+                                     self.lock_vault_now)
+        lock_action.setToolTip(
+            "Lock the password vault now, clearing its key from memory. "
+            "You'll need the master password to open it again.")
+        menu.addAction("Import passwords (.csv)…", self.import_passwords)
+
+        # --- View & configuration ---
+        menu.addSeparator()
         self._build_appearance_menu(menu.addMenu("Appearance"))
         zoom_menu = menu.addMenu("Zoom")
         zoom_menu.addAction("Zoom in\tCtrl++", self.zoom_in)
         zoom_menu.addAction("Zoom out\tCtrl+-", self.zoom_out)
         zoom_menu.addAction("Reset zoom\tCtrl+0", self.zoom_reset)
+
         settings_menu = menu.addMenu("Settings")
-        self._build_graphics_menu(settings_menu.addMenu("Graphics"))
-        self.pause_blocking_action = settings_menu.addAction(
+
+        # --- Privacy & security -------------------------------------------
+        # The browser's headline concern, so it leads. Internally grouped by
+        # separators: tracker blocking, then deceptive-site protection, then
+        # per-site permissions.
+        privacy_menu = settings_menu.addMenu("Privacy & security")
+        self.pause_blocking_action = privacy_menu.addAction(
             "Pause tracker blocking")
         self.pause_blocking_action.setCheckable(True)
         self.pause_blocking_action.setToolTip(
             "Let tracker/ad requests through until resumed — for sites "
             "that break with blocking on. Blocking resumes on restart.")
         self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
-        settings_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
-        self.safe_browsing_action = settings_menu.addAction(
-            "Safe Browsing")
+        blocking_report = privacy_menu.addAction(
+            "Blocking report…", self.show_blocking_report)
+        blocking_report.setToolTip(
+            "Charts of how many trackers and ads were blocked per day, "
+            "and which ones came up most")
+        privacy_menu.addSeparator()
+        self.safe_browsing_action = privacy_menu.addAction("Safe Browsing")
         self.safe_browsing_action.setCheckable(True)
         self.safe_browsing_action.setChecked(self.safe_browsing.enabled)
         self.safe_browsing_action.setToolTip(
@@ -994,10 +1666,60 @@ class BrowserWindow(QMainWindow):
             "Checked entirely on your device — nothing about your browsing "
             "is ever sent out.")
         self.safe_browsing_action.toggled.connect(self._set_safe_browsing)
-        settings_menu.addAction("Safe Browsing status…",
-                                self.show_safe_browsing_status)
-        self.ai_search_action = settings_menu.addAction(
-            "Local AI (Ollama)")
+        privacy_menu.addAction("Safe Browsing status…",
+                               self.show_safe_browsing_status)
+        privacy_menu.addSeparator()
+        privacy_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
+        self.location_guard_action = privacy_menu.addAction("Location Guard")
+        self.location_guard_action.setCheckable(True)
+        self.location_guard_action.setChecked(self._location_guard_on)
+        self.location_guard_action.setToolTip(
+            "Block websites from reading your precise (GPS/Wi-Fi) location. "
+            "Sites can at most estimate your area from your IP address. "
+            "Reload open pages after changing this.")
+        self.location_guard_action.toggled.connect(self._set_location_guard)
+        self.block_webcam_action = privacy_menu.addAction("Block Webcam")
+        self.block_webcam_action.setCheckable(True)
+        self.block_webcam_action.setChecked(self._block_webcam)
+        self.block_webcam_action.setToolTip(
+            "Stop websites from using your camera. Denied automatically while "
+            "on; turn off to be asked for each site instead. Takes effect on "
+            "the next camera request — no reload needed.")
+        self.block_webcam_action.toggled.connect(self._set_block_webcam)
+        self.block_microphone_action = privacy_menu.addAction(
+            "Block Microphone")
+        self.block_microphone_action.setCheckable(True)
+        self.block_microphone_action.setChecked(self._block_microphone)
+        self.block_microphone_action.setToolTip(
+            "Stop websites from using your microphone. Denied automatically "
+            "while on; turn off to be asked for each site instead. Takes "
+            "effect on the next microphone request — no reload needed.")
+        self.block_microphone_action.toggled.connect(
+            self._set_block_microphone)
+
+        # --- Start page & search ------------------------------------------
+        search_menu = settings_menu.addMenu("Start page & search")
+        start_action = search_menu.addAction(
+            "Set start page…", self.set_start_page)
+        start_action.setToolTip(
+            "Choose the page new tabs and the Home button open. Leave it "
+            "blank to restore the private SearXNG start page.")
+        self._build_search_engine_menu(search_menu.addMenu("Search engine"))
+
+        # --- Idle tab memory ----------------------------------------------
+        self._build_discard_menu(settings_menu.addMenu("Idle tab memory"))
+
+        # --- Network -------------------------------------------------------
+        network_menu = settings_menu.addMenu("Network")
+        proxy_action = network_menu.addAction("Proxy…", self._show_proxy_dialog)
+        proxy_action.setToolTip(
+            "Route Vodou's traffic through an HTTP or SOCKS5 proxy. SOCKS5 can "
+            "resolve DNS at the proxy. Any username/password is kept in your "
+            "encrypted vault.")
+
+        # --- Local AI ------------------------------------------------------
+        ai_menu = settings_menu.addMenu("Local AI")
+        self.ai_search_action = ai_menu.addAction("Local AI (Ollama)")
         self.ai_search_action.setCheckable(True)
         self.ai_search_action.setChecked(bool(self.ai_cfg.get("enabled")))
         self.ai_search_action.setToolTip(
@@ -1005,20 +1727,27 @@ class BrowserWindow(QMainWindow):
             "local Ollama model anything. Runs entirely on your device; "
             "nothing is ever sent out.")
         self.ai_search_action.toggled.connect(self._set_ai_search)
-        settings_menu.addAction("Local AI options…", self.show_ai_options)
+        ai_menu.addAction("Local AI options…", self.show_ai_options)
+        ai_menu.addAction("Set up Local AI…", self.show_ollama_setup)
+
+        # --- Display -------------------------------------------------------
+        self._build_graphics_menu(settings_menu.addMenu("Graphics"))
+
+        # --- Extend --------------------------------------------------------
+        settings_menu.addSeparator()
+        settings_menu.addAction("Plugins…", self.open_plugins)
+
+        # --- Data & diagnostics ---
         menu.addSeparator()
-        report = menu.addAction("Blocking report…", self.show_blocking_report)
-        report.setToolTip(
-            "Charts of how many trackers and ads were blocked per day, "
-            "and which ones came up most")
-        menu.addAction("Ask local AI…\tCtrl+Shift+A", self.ask_ai)
-        menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
-        menu.addSeparator()
-        menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
-        menu.addAction("Import passwords (.csv)…", self.import_passwords)
-        menu.addSeparator()
-        menu.addAction("Plugins…", self.open_plugins)
+        clear_action = menu.addAction("Clear history & memory\tCtrl+Shift+Del",
+                                      self.clear_browsing_data)
+        clear_action.setToolTip(
+            "Erase visited-link history, the HTTP cache, cookies (including "
+            "the saved ones for allowlisted sites), the recorded blocking "
+            "statistics, and each tab's back/forward navigation memory")
         menu.addAction("Developer tools\tF12", self.open_dev_tools)
+
+        # --- Help ---
         menu.addSeparator()
         help_menu = menu.addMenu("Help")
         report = help_menu.addAction("Report an issue…", self.report_issue)
@@ -1032,6 +1761,7 @@ class BrowserWindow(QMainWindow):
         menu_button.setMenu(menu)
         toolbar.addWidget(menu_button)
         self._apply_static_icons()
+        self._refresh_vault_indicator()   # vault state icon over the neutral one
 
         # The version tag floats as a direct child of the status bar (outside
         # its layout) so it can sit dead-centre in the footer; an event filter
@@ -1058,17 +1788,26 @@ class BrowserWindow(QMainWindow):
         # Seed the bookmarked-host set and drop favicons for bookmarks that
         # were removed in a previous session.
         self._bookmarks_changed()
+        # A start page / search engine tampered with on disk was reverted at
+        # startup; tell the user once (deferred so it lands after the window
+        # is shown).
+        if PREFS_RESET_NOTICE:
+            QTimer.singleShot(0, lambda: plain_message(
+                self, QMessageBox.Icon.Warning, "Start page protected",
+                PREFS_RESET_NOTICE))
 
     def _build_shortcuts(self) -> None:
         bindings = {
             "Ctrl+T": lambda: self.add_tab(QUrl(HOME_URL)),
             "Ctrl+W": lambda: self.close_tab(self.tab_bar.currentIndex()),
+            "Ctrl+Shift+T": self.reopen_closed_tab,
             "Ctrl+L": self._focus_url_bar,
             "Ctrl+R": self.reload_page,
             "F5": self.reload_page,
             "Ctrl+Shift+A": self.ask_ai,
             "Ctrl+Shift+F": self.fill_login,
             "Ctrl+Shift+V": self.open_vault,
+            "Ctrl+Shift+L": self.lock_vault_now,
             "Ctrl+Shift+Del": self.clear_browsing_data,
             "Ctrl+D": self.toggle_bookmark,
             "Ctrl+J": self.show_downloads,
@@ -1096,80 +1835,461 @@ class BrowserWindow(QMainWindow):
 
     # -- tabs ---------------------------------------------------------------
 
-    def add_tab(self, url: QUrl | None = None) -> WebView:
+    def add_tab(self, url: QUrl | None = None, *,
+                at: int | None = None, background: bool = False) -> WebView:
         view = WebView(self)
+        view._short_title = "New tab"   # tab label pieces (see _update_tab_label)
+        view._full_title = ""
+        view._mem_mb = None
+        view._pinned = False
         if self._zoom != 1.0:
             view.setZoomFactor(self._zoom)
-        # Keep the tab bar and the page stack index-aligned: both append.
-        index = self.tab_stack.addWidget(view)
+        # tab_stack is the parking/display surface; self._views is the ordered
+        # source of truth. Insert into the list first so any signal fired by
+        # insertTab (e.g. the first tab's currentChanged) already sees it.
+        self.tab_stack.addWidget(view)
+        index = len(self._views) if at is None else max(0, min(at, len(self._views)))
+        self._views.insert(index, view)
         self.tab_bar.insertTab(index, "New tab")
-        self.tab_bar.setCurrentIndex(index)
-        self.tab_stack.setCurrentIndex(index)
 
         view.urlChanged.connect(lambda u, v=view: self._on_url_changed(v, u))
         view.titleChanged.connect(lambda t, v=view: self._on_title_changed(v, t))
         view.iconChanged.connect(
             lambda icon, v=view: self._on_icon_changed(v, icon))
         view.page().fullScreenRequested.connect(self._on_fullscreen)
+        view.page().audioMutedChanged.connect(
+            lambda _m, v=view: self._update_tab_label(v))
         view.loadFinished.connect(
             lambda ok, v=view: self._maybe_offer_fill(v, ok))
         view.page().captured.connect(
             lambda user, pw, v=view: self._on_captured(v, user, pw))
 
+        if not background:
+            self.tab_bar.setCurrentIndex(index)
+            self._on_tab_changed(index)   # covers the no-signal (unchanged) case
         if url is not None:
             view.setUrl(url)
         return view
 
     def close_tab(self, index: int) -> None:
-        if self.tab_bar.count() == 1:
+        if not (0 <= index < len(self._views)):
+            return
+        if len(self._views) == 1:
             self.close()
             return
-        view = self.tab_stack.widget(index)
-        self.tab_bar.removeTab(index)
-        if view is not None:
+        view = self._views[index]
+        # A tab shown in Split View is dismantled from the split first (the
+        # other pane's tab returns to the strip) so nothing is left dangling.
+        if self._split_view is not None and view in self._split_view.views():
+            self._teardown_split()
+        self._remember_closed(view)
+        closing_active = view is self._active_view
+        self._views.pop(index)
+        if self.tab_stack.indexOf(view) >= 0:
             self.tab_stack.removeWidget(view)
-            view.deleteLater()
+        # Keep the tab bar consistent with the (already updated) view list
+        # without a mid-state currentChanged firing against stale indices.
+        self.tab_bar.blockSignals(True)
+        self.tab_bar.removeTab(index)
+        self.tab_bar.blockSignals(False)
+        view.deleteLater()
+        if closing_active:
+            self._on_tab_changed(self.tab_bar.currentIndex())
         self._schedule_session_save()
 
+    def _remember_closed(self, view: WebView) -> None:
+        url = view.pending_url or view.url()
+        text = url.toString()
+        if (text and url.scheme() in ("http", "https", "file")
+                and url.host() != SENTINEL_HOST):
+            self._closed_tabs.append((text, getattr(view, "_pinned", False)))
+            del self._closed_tabs[:-25]     # keep only the most recent 25
+
+    def reopen_closed_tab(self) -> None:
+        """Reopen the most recently closed tab (Ctrl+Shift+T)."""
+        if not self._closed_tabs:
+            self.statusBar().showMessage("No recently closed tabs.", 3000)
+            return
+        url, pinned = self._closed_tabs.pop()
+        view = self.add_tab(QUrl(url))
+        if pinned:
+            self._set_pinned(view, True)
+
+    def _close_other_tabs(self, keep_index: int) -> None:
+        # Close by identity so shifting indices can't close the wrong tab as
+        # the list shrinks; pinned tabs are protected, matching Chrome.
+        keep = self._views[keep_index]
+        for view in list(self._views):
+            if view is not keep and not getattr(view, "_pinned", False):
+                self.close_tab(self._index_of(view))
+
+    def _close_tabs_to_right(self, index: int) -> None:
+        anchor = self._views[index]
+        # Snapshot the tabs to the right now; closing shifts the list.
+        doomed = [v for v in self._views[self._index_of(anchor) + 1:]
+                  if not getattr(v, "_pinned", False)]
+        for view in doomed:
+            self.close_tab(self._index_of(view))
+
+    def _on_tab_moved(self, frm: int, to: int) -> None:
+        """A dragged tab reordered the strip: mirror it in the view list.
+        Display is by widget identity now, so the stack needs no reordering."""
+        if 0 <= frm < len(self._views):
+            view = self._views.pop(frm)
+            self._views.insert(to, view)
+        self._schedule_session_save()
+
+    def _index_of(self, view: WebView) -> int:
+        try:
+            return self._views.index(view)
+        except ValueError:
+            return -1
+
+    def current_view(self) -> WebView | None:
+        return self._active_view
+
+    # -- tab context menu ---------------------------------------------------
+
     def _tab_context_menu(self, pos) -> None:
-        """Right-click on the tab bar: act on the tab under the cursor."""
+        """Right-click on a tab: a Chrome-equivalent menu acting on that tab.
+        Items that don't apply are disabled or hidden, as in a modern browser.
+        """
         index = self.tab_bar.tabAt(pos)
         menu = QMenu(self)
         menu.addAction("New tab", lambda: self.add_tab(QUrl(HOME_URL)))
+        reopen = menu.addAction("Reopen closed tab", self.reopen_closed_tab)
+        reopen.setEnabled(bool(self._closed_tabs))
+
         if index >= 0:
+            view = self._views[index]
+            pinned = getattr(view, "_pinned", False)
+            muted = view.page().isAudioMuted()
+            count = len(self._views)
+            in_split = (self._split_view is not None
+                        and view in self._split_view.views())
+
+            menu.addSeparator()
+            menu.addAction("Reload", lambda v=view: self._reload_view(v))
+            menu.addAction("Duplicate",
+                           lambda i=index: self._duplicate_tab(i))
+            menu.addAction("Unpin tab" if pinned else "Pin tab",
+                           lambda v=view: self._set_pinned(v, not pinned))
+            menu.addAction("Unmute site" if muted else "Mute site",
+                           lambda v=view: self._toggle_mute(v))
+
+            menu.addSeparator()
+            # Open / manage Split View for this tab.
+            if in_split:
+                menu.addAction("Exit split view",
+                               lambda: self._exit_split_view(restore=True))
+            else:
+                split_menu = menu.addMenu("Open in split view")
+                added = False
+                for other in self._views:
+                    if other is view:
+                        continue
+                    title = self._tab_menu_title(other)
+                    split_menu.addAction(
+                        title,
+                        lambda o=other, i=index: self._open_in_split(i, o))
+                    added = True
+                if not added:
+                    empty = split_menu.addAction("Open another tab first")
+                    empty.setEnabled(False)
+
+            move_menu = menu.addMenu("Move tab")
+            to_start = move_menu.addAction(
+                "To beginning", lambda i=index: self._move_tab(i, "start"))
+            to_start.setEnabled(index > 0)
+            to_end = move_menu.addAction(
+                "To end", lambda i=index: self._move_tab(i, "end"))
+            to_end.setEnabled(index < count - 1)
+            move_menu.addSeparator()
+            move_menu.addAction(
+                "To new window",
+                lambda i=index: self._move_tab_to_new_window(i))
+
             menu.addSeparator()
             menu.addAction("Close tab", lambda i=index: self.close_tab(i))
             others = menu.addAction(
                 "Close other tabs", lambda i=index: self._close_other_tabs(i))
-            others.setEnabled(self.tab_bar.count() > 1)
+            others.setEnabled(
+                any(v is not view and not getattr(v, "_pinned", False)
+                    for v in self._views))
+            to_right = menu.addAction(
+                "Close tabs to the right",
+                lambda i=index: self._close_tabs_to_right(i))
+            to_right.setEnabled(
+                any(not getattr(v, "_pinned", False)
+                    for v in self._views[index + 1:]))
         menu.exec(self.tab_bar.mapToGlobal(pos))
 
-    def _close_other_tabs(self, keep_index: int) -> None:
-        # Close by widget identity so shifting indices can't close the wrong
-        # tab as the list shrinks.
-        keep = self.tab_stack.widget(keep_index)
-        for i in range(self.tab_bar.count() - 1, -1, -1):
-            if self.tab_stack.widget(i) is not keep:
-                self.close_tab(i)
+    def _tab_menu_title(self, view: WebView) -> str:
+        base = (getattr(view, "_short_title", "") or view.url().host()
+                or "New tab")
+        return base if len(base) <= 40 else base[:39] + "…"
 
-    def _on_tab_moved(self, frm: int, to: int) -> None:
-        """A dragged tab: reorder the page stack to match, keeping the two
-        index-aligned, then re-sync the current page."""
-        view = self.tab_stack.widget(frm)
-        if view is not None:
-            self.tab_stack.removeWidget(view)
-            self.tab_stack.insertWidget(to, view)
-        self.tab_stack.setCurrentIndex(self.tab_bar.currentIndex())
+    def _reload_view(self, view: WebView) -> None:
+        view.page().triggerAction(
+            QWebEnginePage.WebAction.ReloadAndBypassCache)
+
+    def _duplicate_tab(self, index: int) -> None:
+        if not (0 <= index < len(self._views)):
+            return
+        src = self._views[index]
+        url = src.pending_url or src.url()
+        new = self.add_tab(None, at=index + 1)
+        if url is not None and url.toString():
+            new.setUrl(url)
+
+    def _toggle_mute(self, view: WebView) -> None:
+        page = view.page()
+        page.setAudioMuted(not page.isAudioMuted())
+        # audioMutedChanged relabels the tab; nothing else to do.
+
+    def _set_pinned(self, view: WebView, pinned: bool) -> None:
+        view._pinned = pinned
+        # Pinned tabs cluster on the left, preserving relative order.
+        ordered = ([v for v in self._views if getattr(v, "_pinned", False)]
+                   + [v for v in self._views
+                      if not getattr(v, "_pinned", False)])
+        self._reorder_tabs(ordered)
+        self._update_tab_label(view)
         self._schedule_session_save()
 
-    def current_view(self) -> WebView:
-        return self.tab_stack.currentWidget()
+    def _move_tab(self, index: int, where: str) -> None:
+        if not (0 <= index < len(self._views)):
+            return
+        view = self._views[index]
+        ordered = list(self._views)
+        ordered.pop(index)
+        ordered.insert(0 if where == "start" else len(ordered), view)
+        self._reorder_tabs(ordered)
+        self._schedule_session_save()
+
+    def _reorder_tabs(self, ordered: list) -> None:
+        """Rearrange the strip to match `ordered` (a permutation of the current
+        views), keeping tab_bar and the view list in lock-step. Signals are
+        blocked so the moves don't re-enter _on_tab_moved."""
+        self.tab_bar.blockSignals(True)
+        for target, view in enumerate(ordered):
+            cur = self._index_of(view)
+            if cur < 0 or cur == target:
+                continue
+            self.tab_bar.moveTab(cur, target)
+            self._views.insert(target, self._views.pop(cur))
+        # moveTab keeps the active tab selected; re-assert its highlight.
+        if self._active_view is not None:
+            self.tab_bar.setCurrentIndex(self._index_of(self._active_view))
+        self.tab_bar.blockSignals(False)
+
+    def _move_tab_to_new_window(self, index: int) -> None:
+        """Detach the tab into its own top-level window that shares this
+        window's profile (so the very page keeps running — no reload, no second
+        engine profile to collide on disk). Closing it, or this window, tidies
+        up. See DetachedWindow."""
+        if not (0 <= index < len(self._views)) or len(self._views) == 1:
+            return
+        view = self._views[index]
+        if self._split_view is not None and view in self._split_view.views():
+            self._teardown_split()
+        was_active = view is self._active_view
+        # Remove from the strip WITHOUT deleting the view.
+        self._views.pop(index)
+        if self.tab_stack.indexOf(view) >= 0:
+            self.tab_stack.removeWidget(view)
+        self.tab_bar.blockSignals(True)
+        self.tab_bar.removeTab(index)
+        self.tab_bar.blockSignals(False)
+        if was_active:
+            self._on_tab_changed(self.tab_bar.currentIndex())
+        win = DetachedWindow(self, view)
+        self._detached_windows.append(win)
+        win.show()
+        self._schedule_session_save()
+
+    def reattach_detached(self, window: "DetachedWindow", view: WebView) -> None:
+        """Bring a detached tab back into the main strip (called when the
+        detached window is closed via its Return button)."""
+        if window in self._detached_windows:
+            self._detached_windows.remove(window)
+        if view is None:
+            return
+        self.tab_stack.addWidget(view)
+        index = len(self._views)
+        self._views.append(view)
+        self.tab_bar.insertTab(index, "New tab")
+        self._update_tab_label(view)
+        idx = self._index_of(view)
+        if self.tab_bar.tabIcon(idx).isNull():
+            self.tab_bar.setTabIcon(idx, view.icon())
+        self.tab_bar.setCurrentIndex(index)
+        self._on_tab_changed(index)
+        self._schedule_session_save()
+
+    def forget_detached(self, window: "DetachedWindow") -> None:
+        """The detached window closed for good (its tab is being destroyed)."""
+        if window in self._detached_windows:
+            self._detached_windows.remove(window)
+        self._schedule_session_save()
+
+    # -- split view ---------------------------------------------------------
+
+    def _ensure_split_view(self) -> SplitView:
+        if self._split_view is None:
+            sv = SplitView()
+            sv.set_accent(self.palette().highlight().color())
+            sv.exit_requested.connect(
+                lambda: self._exit_split_view(restore=True))
+            sv.swap_requested.connect(self._swap_split)
+            sv.focus_changed.connect(self._on_split_focus)
+            sv.replace_requested.connect(self._replace_split_pane)
+            sv.return_requested.connect(self._return_split_view_to_strip)
+            sv.tab_dropped.connect(self._on_tab_dropped_on_pane)
+            self.page_area.addWidget(sv)         # index 1
+            self._split_view = sv
+        return self._split_view
+
+    def _open_in_split(self, base_index: int, other: WebView) -> None:
+        if not (0 <= base_index < len(self._views)):
+            return
+        base = self._views[base_index]
+        if base is other or other not in self._views:
+            return
+        self._enter_split_view(base, other)
+
+    def _enter_split_view(self, left: WebView, right: WebView) -> None:
+        sv = self._ensure_split_view()
+        # Remember what to restore to when the split closes.
+        self._pre_split_active = self._active_view
+        for v in (left, right):
+            if self.tab_stack.indexOf(v) >= 0:
+                self.tab_stack.removeWidget(v)
+        sv.mount([left, right])
+        self._refresh_split_titles()
+        self.page_area.setCurrentWidget(sv)
+        for v in (left, right):     # add the split marker to their tabs
+            self._update_tab_label(v)
+        self._on_split_focus(left)
+        self.statusBar().showMessage(
+            "Split view — click a pane to focus it; drag the divider to "
+            "resize.", 5000)
+
+    def _teardown_split(self) -> None:
+        """Dismantle the split UI and hand both views back to the stack. Does
+        NOT change the current selection — callers decide what to show next."""
+        if (self._split_view is None
+                or self.page_area.currentWidget() is not self._split_view):
+            return
+        views = self._split_view.unmount()
+        for v in views:
+            if v is not None and self.tab_stack.indexOf(v) < 0:
+                self.tab_stack.addWidget(v)
+        self.page_area.setCurrentWidget(self.tab_stack)
+        for v in views:                 # drop the split markers
+            self._update_tab_label(v)
+
+    def _exit_split_view(self, restore: bool = True) -> None:
+        if (self._split_view is None
+                or self.page_area.currentWidget() is not self._split_view):
+            return
+        target = getattr(self, "_pre_split_active", None) if restore \
+            else self._active_view
+        self._teardown_split()
+        if target is None or target not in self._views:
+            target = (self._active_view if self._active_view in self._views
+                      else (self._views[0] if self._views else None))
+        if target is not None:
+            idx = self._index_of(target)
+            if self.tab_bar.currentIndex() == idx:
+                self._on_tab_changed(idx)
+            else:
+                self.tab_bar.setCurrentIndex(idx)
+
+    def _swap_split(self) -> None:
+        if self._split_view is None:
+            return
+        self._split_view.swap()
+        self._refresh_split_titles()
+        self._schedule_session_save()
+
+    def _refresh_split_titles(self) -> None:
+        if self._split_view is None:
+            return
+        titles = {}
+        for v in self._split_view.views():
+            titles[v] = (getattr(v, "_full_title", "")
+                         or getattr(v, "_short_title", "")
+                         or v.url().host() or "New tab")
+        self._split_view.set_titles(titles)
+
+    def _on_split_focus(self, view: WebView) -> None:
+        self._active_view = view
+        self._thaw(view)
+        idx = self._index_of(view)
+        if idx >= 0:
+            self.tab_bar.blockSignals(True)
+            self.tab_bar.setCurrentIndex(idx)
+            self.tab_bar.blockSignals(False)
+        self._sync_chrome_to(view)
+
+    def _replace_split_pane(self, pane) -> None:
+        """The ⇄ button on a pane: pick another tab to show there."""
+        if self._split_view is None:
+            return
+        shown = set(self._split_view.views())
+        menu = QMenu(self)
+        added = False
+        for v in self._views:
+            if v in shown:
+                continue
+            menu.addAction(self._tab_menu_title(v),
+                           lambda vv=v, pp=pane: self._put_view_in_pane(pp, vv))
+            added = True
+        if not added:
+            menu.addAction("No other tabs").setEnabled(False)
+        menu.exec(QCursor.pos())
+
+    def _put_view_in_pane(self, pane, view: WebView) -> None:
+        if self._split_view is None or view not in self._views:
+            return
+        other = self._split_view.other_pane(pane)
+        if other is not None and other.view is view:
+            self._swap_split()          # it's the other pane's tab -> swap
+            return
+        outgoing = pane.view
+        if outgoing is view:
+            return
+        if self.tab_stack.indexOf(view) >= 0:
+            self.tab_stack.removeWidget(view)
+        detached = pane.take_view()
+        if detached is not None and self.tab_stack.indexOf(detached) < 0:
+            self.tab_stack.addWidget(detached)
+        self._split_view.set_view_in_pane(pane, view)
+        self._refresh_split_titles()
+        if detached is not None:
+            self._update_tab_label(detached)
+        self._update_tab_label(view)
+        self._schedule_session_save()
+
+    def _return_split_view_to_strip(self, view: WebView) -> None:
+        # Returning one pane collapses the split; keep that tab active.
+        self._pre_split_active = view
+        self._exit_split_view(restore=True)
+
+    def _on_tab_dropped_on_pane(self, pane, src_index: int) -> None:
+        if (self._split_view is None
+                or self.page_area.currentWidget() is not self._split_view):
+            return
+        if not (0 <= src_index < len(self._views)):
+            return
+        self._put_view_in_pane(pane, self._views[src_index])
 
     def _open_bookmark(self, url: str) -> None:
         self.add_tab(QUrl(url))
 
     def _on_icon_changed(self, view: WebView, icon) -> None:
-        index = self.tab_stack.indexOf(view)
+        index = self._index_of(view)
         if index >= 0:
             self.tab_bar.setTabIcon(index, icon)
         # Capture the favicon for the bookmarks bar, but only for hosts the
@@ -1240,7 +2360,10 @@ class BrowserWindow(QMainWindow):
         clear_copied_secrets()  # no passwords left on the clipboard
         self.ai_client.cancel()  # drop any in-flight Ollama request
         self._session_timer.stop()
-        clear_snapshot()  # clean exit — a leftover file means "crashed"
+        # Clean exit clears the snapshot (a leftover file means "crashed"); an
+        # intentional restart keeps it so the new instance can reopen the tabs.
+        if not self._restarting:
+            clear_snapshot()
         self.cookie_keeper.flush()  # capture last cookie updates in the jar
         # The vault window has no parent (so it can fall behind), which also
         # means it won't be torn down with this one — close it explicitly or
@@ -1249,6 +2372,11 @@ class BrowserWindow(QMainWindow):
             self._vault_dialog.close()
         if self._report_window is not None:
             self._report_window.close()
+        # Detached tab windows share this window's profile, so they must not
+        # outlive it — close them (destroying their views) before teardown.
+        for win in list(self._detached_windows):
+            win.close_for_shutdown()
+        self._detached_windows.clear()
         # Blocking stats are in-memory only; they simply go with the process.
         super().closeEvent(event)
 
@@ -1267,6 +2395,177 @@ class BrowserWindow(QMainWindow):
         self.statusBar().showMessage(
             "Safe Browsing on — updating the list…" if on
             else "Safe Browsing off.", 5000)
+
+    def _set_location_guard(self, on: bool) -> None:
+        """Turn precise-geolocation blocking on/off by inserting or removing
+        the main-world shim. Applies to pages loaded from here on."""
+        if on == getattr(self, "_location_guard_on", None):
+            return
+        self._location_guard_on = on
+        save_location_guard(on)
+        scripts = self.profile.scripts()
+        if on:
+            scripts.insert(self._location_guard_script)
+        else:
+            for script in scripts.find("vodou-location-guard"):
+                scripts.remove(script)
+        self.statusBar().showMessage(
+            "Location Guard on — precise location blocked. Reload open pages "
+            "to apply." if on else
+            "Location Guard off — sites may request your precise location. "
+            "Reload open pages to apply.", 6000)
+
+    def _set_block_webcam(self, on: bool) -> None:
+        """Turn webcam blocking on/off. Takes effect on the next camera
+        request — no reload needed, since the gate is checked live."""
+        if on == getattr(self, "_block_webcam", None):
+            return
+        self._block_webcam = on
+        save_block_webcam(on)
+        self.statusBar().showMessage(
+            "Block Webcam on — sites can't use your camera." if on else
+            "Block Webcam off — Vodou will ask before a site uses your "
+            "camera.", 6000)
+
+    def _set_block_microphone(self, on: bool) -> None:
+        """Turn microphone blocking on/off. Takes effect on the next
+        microphone request — no reload needed, since the gate is checked
+        live."""
+        if on == getattr(self, "_block_microphone", None):
+            return
+        self._block_microphone = on
+        save_block_microphone(on)
+        self.statusBar().showMessage(
+            "Block Microphone on — sites can't use your microphone." if on else
+            "Block Microphone off — Vodou will ask before a site uses your "
+            "microphone.", 6000)
+
+    def _note_capture_blocked(self, host: str, what: str) -> None:
+        """Briefly tell the user a camera/mic request was just denied,
+        rate-limited so a page that retries in a loop can't flood the status
+        bar. `what` names the device(s), e.g. 'camera and microphone'."""
+        now = time.monotonic()
+        if now - self._capture_note_at < 4.0:
+            return
+        self._capture_note_at = now
+        who = host or "A site"
+        self.statusBar().showMessage(
+            f"Blocked a {what} request from {who}. Adjust Block Webcam / "
+            "Block Microphone in Settings to allow it.", 5000)
+
+    def _prompt_capture(self, permission, what: str) -> None:
+        """Ask the user whether to grant a camera/mic request (the relevant
+        guard is off). Kept per-request so the choice is never remembered
+        silently. `what` names the device(s) being requested."""
+        host = permission.origin().host() or "This site"
+        answer = plain_message(
+            self, QMessageBox.Icon.Question, "Device access",
+            f"{host} wants to use your {what}.\n\n"
+            f"Allow it to access your {what} for this request?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        try:
+            if answer == QMessageBox.StandardButton.Yes:
+                permission.grant()
+            else:
+                permission.deny()
+        except RuntimeError:
+            pass  # page navigated away while the prompt was open
+
+    # -- Start page & search engine -----------------------------------------
+
+    def set_start_page(self) -> None:
+        """Let the user pick the page new tabs and Home open. Blank restores
+        the private SearXNG default. Takes effect on the next new tab / Home."""
+        global HOME_URL
+        text, ok = QInputDialog.getText(
+            self, "Set start page",
+            "Start page URL (leave blank for the private SearXNG page):",
+            QLineEdit.EchoMode.Normal, HOME_URL)
+        if not ok:
+            return
+        value = _normalize_url(text)
+        if value and not _safe_start_page(value):
+            plain_message(
+                self, QMessageBox.Icon.Warning, "Set start page",
+                "The start page must be a normal web page (http:// or "
+                "https://). Nothing was changed.")
+            return
+        if value:
+            HOME_URL = value
+            _save_pref("start_page", value)
+            self.statusBar().showMessage(
+                f"Start page set to {value} — opens on the next new tab.", 5000)
+        else:
+            HOME_URL = SEARXNG_BASE
+            _save_pref("start_page", "")
+            self.statusBar().showMessage(
+                "Start page reset to the private SearXNG page.", 5000)
+
+    def _build_search_engine_menu(self, menu) -> None:
+        """Populate the Settings ▸ Search engine submenu: one exclusive radio
+        per built-in engine, plus a Custom option."""
+        menu.setToolTip(
+            "Where address-bar searches go. SearXNG (local) keeps queries on "
+            "your machine; the others are external services.")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self._engine_actions = {}
+        for name, template in SEARCH_ENGINES.items():
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.triggered.connect(
+                lambda _checked, t=template: self._set_search_engine(t))
+            group.addAction(act)
+            self._engine_actions[template] = act
+        menu.addSeparator()
+        self._custom_engine_action = menu.addAction("Custom…")
+        self._custom_engine_action.setCheckable(True)
+        self._custom_engine_action.triggered.connect(self._set_custom_engine)
+        group.addAction(self._custom_engine_action)
+        self._sync_engine_check()
+
+    def _sync_engine_check(self) -> None:
+        """Tick the radio matching the active SEARCH_URL (Custom if none do)."""
+        matched = False
+        for template, act in self._engine_actions.items():
+            on = (template == SEARCH_URL)
+            act.setChecked(on)
+            matched = matched or on
+        self._custom_engine_action.setChecked(not matched)
+
+    def _set_search_engine(self, template: str) -> None:
+        global SEARCH_URL
+        SEARCH_URL = template
+        _save_pref("search_engine", template)
+        self._sync_engine_check()
+        name = next((n for n, t in SEARCH_ENGINES.items() if t == template),
+                    template)
+        self.statusBar().showMessage(f"Search engine set to {name}.", 5000)
+
+    def _set_custom_engine(self) -> None:
+        """Prompt for a custom search-URL template (must contain {})."""
+        global SEARCH_URL
+        text, ok = QInputDialog.getText(
+            self, "Custom search engine",
+            "Search URL template — put {} where the query goes, e.g.\n"
+            "https://example.com/search?q={}",
+            QLineEdit.EchoMode.Normal, SEARCH_URL)
+        if not ok:
+            self._sync_engine_check()   # cancelled — restore the real choice
+            return
+        template = text.strip().replace("%s", "{}")
+        if "{}" not in template:
+            plain_message(
+                self, QMessageBox.Icon.Warning, "Custom search engine",
+                "The template must contain {} where the search query should "
+                "go. Nothing was changed.")
+            self._sync_engine_check()
+            return
+        SEARCH_URL = template
+        _save_pref("search_engine", template)
+        self._sync_engine_check()
+        self.statusBar().showMessage("Custom search engine set.", 5000)
 
     def show_safe_browsing_status(self) -> None:
         sb = self.safe_browsing
@@ -1315,15 +2614,62 @@ class BrowserWindow(QMainWindow):
         if box.clickedButton() is not restore:
             clear_snapshot()
             return False
-        for u in urls:
-            view = self.add_tab(None)
-            view.pending_url = QUrl(u)
-            # Label the unloaded tab with its host so it's recognizable.
-            self.tab_bar.setTabText(self.tab_stack.indexOf(view),
-                                    view.pending_url.host() or u)
-        self.tab_bar.setCurrentIndex(current)
-        self._load_pending(self.tab_stack.widget(current))
+        self._restore_snapshot_tabs(urls, current)
         return True
+
+    def _resume_after_restart(self) -> bool:
+        """Silently reopen the tabs saved just before an intentional restart."""
+        snapshot = load_snapshot()
+        if snapshot is None:
+            return False
+        self._restore_snapshot_tabs(*snapshot)
+        return True
+
+    def _restore_snapshot_tabs(self, urls: list[str], current: int) -> None:
+        """Open a snapshot's tabs lazily and select the one that was active."""
+        for u in urls:
+            view = self.add_tab(None, background=True)
+            view.pending_url = QUrl(u)
+            # Label the unloaded tab with its host so it's recognizable (store
+            # it as the title piece so the memory poll doesn't overwrite it).
+            view._short_title = view.pending_url.host() or u
+            self._update_tab_label(view)
+        if 0 <= current < len(self._views):
+            self.tab_bar.setCurrentIndex(current)
+            self._on_tab_changed(current)
+
+    def _prompt_restart(self, change: str) -> None:
+        """Ask whether to restart now so a just-changed setting takes effect."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Restart to apply")
+        box.setText(f"{change}\n\nThis takes effect after a restart. Restart "
+                    "Vodou now? Your open tabs will be reopened.")
+        restart = box.addButton("Restart now",
+                                QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(restart)
+        box.exec()
+        if box.clickedButton() is restart:
+            self._restart_app()
+
+    def _restart_app(self) -> None:
+        """Relaunch Vodou (reopening the current tabs) and close this window."""
+        self._write_session()          # snapshot the open tabs
+        mark_restart()                 # new instance reopens them silently
+        self._restarting = True        # closeEvent keeps the snapshot
+        script = str(Path(__file__).resolve())
+        # PyQt6's 3-arg startDetached returns (started, pid).
+        started, _pid = QProcess.startDetached(
+            sys.executable, [script] + sys.argv[1:], str(Path(script).parent))
+        if not started:
+            self._restarting = False   # relaunch failed — don't lose the tabs
+            QMessageBox.warning(
+                self, "Couldn't restart",
+                "Vodou couldn't relaunch itself. Please close and reopen it "
+                "to apply the change.")
+            return
+        self.close()
 
     @staticmethod
     def _load_pending(view: WebView | None) -> None:
@@ -1338,9 +2684,8 @@ class BrowserWindow(QMainWindow):
     def _write_session(self) -> None:
         urls: list[str] = []
         current = 0
-        cur = self.tab_stack.currentWidget()
-        for i in range(self.tab_stack.count()):
-            view = self.tab_stack.widget(i)
+        cur = self._active_view
+        for view in self._views:
             url = view.pending_url or view.url()
             text = url.toString()
             if (text and url.scheme() in ("http", "https", "file")
@@ -1352,24 +2697,47 @@ class BrowserWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         self.notify_bar.hide()
+        # The login cues belong to the tab that raised them; clear them on
+        # switch (the newly-shown tab isn't re-probed until its next load).
+        self._clear_login_cues()
         self._schedule_session_save()
-        if index < 0:
+        if not (0 <= index < len(self._views)):
             return
-        self.tab_stack.setCurrentIndex(index)
-        view = self.tab_stack.widget(index)
+        view = self._views[index]
+        # Selecting one of the two split tabs focuses that pane rather than
+        # collapsing the split; selecting any other tab leaves the split.
+        if self._split_view is not None and view in self._split_view.views():
+            self._split_view.set_focused_view(view)   # -> _on_split_focus
+            return
+        if (self._split_view is not None
+                and self.page_area.currentWidget() is self._split_view):
+            self._teardown_split()
+        self._active_view = view
+        self.page_area.setCurrentWidget(self.tab_stack)
+        self.tab_stack.setCurrentWidget(view)
+        self._thaw(view)
         self._load_pending(view)
-        if view is not None:
-            # A tab parked on the deceptive-site interstitial reflects the
-            # blocked host, not the internal sentinel URL.
-            if view.url().host() == SENTINEL_HOST:
-                self._on_url_changed(view, view.url())
-                return
-            self.url_bar.setText(view.url().toString())
-            self._update_security_indicator(view.url())
-            self._update_star(view.url())
-            # Keep docked DevTools pointed at whichever tab is now active.
-            if getattr(self, "_devtools_open", False):
-                view.page().setDevToolsPage(self._devtools_view.page())
+        self._sync_chrome_to(view)
+
+    def _sync_chrome_to(self, view: WebView | None) -> None:
+        """Point the address bar, security indicator, star, window title, and
+        docked DevTools at `view` (the focused tab, split or not)."""
+        if view is None:
+            return
+        # A tab parked on the deceptive-site interstitial reflects the blocked
+        # host, not the internal sentinel URL.
+        if view.url().host() == SENTINEL_HOST:
+            self._on_url_changed(view, view.url())
+            return
+        self.url_bar.setText(view.url().toString())
+        self.url_bar.setCursorPosition(0)
+        self._update_security_indicator(view.url())
+        self._update_star(view.url())
+        title = getattr(view, "_full_title", "") or view.url().host()
+        if title:
+            self.setWindowTitle(f"{title} — Vodou (private)")
+        if getattr(self, "_devtools_open", False):
+            view.page().setDevToolsPage(self._devtools_view.page())
 
     def _on_url_changed(self, view: WebView, url: QUrl) -> None:
         self._schedule_session_save()
@@ -1494,12 +2862,339 @@ class BrowserWindow(QMainWindow):
         CertificateDialog(host, probe, self).exec()
 
     def _on_title_changed(self, view: WebView, title: str) -> None:
-        index = self.tab_stack.indexOf(view)
+        index = self._index_of(view)
         short = title if len(title) <= 25 else title[:24] + "…"
-        self.tab_bar.setTabText(index, short or "New tab")
-        self.tab_bar.setTabToolTip(index, title)
+        view._short_title = short or "New tab"
+        view._full_title = title
+        if index >= 0:
+            self.tab_bar.setTabToolTip(index, title)
+        self._update_tab_label(view)  # re-adds a memory line if one is known
+        self._refresh_split_titles()
         if view is self.current_view():
             self.setWindowTitle(f"{title} — Vodou (private)")
+
+    def _update_tab_label(self, view: WebView) -> None:
+        """Set the tab text to the page title plus its renderer memory, e.g.
+        'GitHub · 142 MB', with pin / mute / split markers prefixed. Memory is
+        appended only once known."""
+        index = self._index_of(view)
+        if index < 0:
+            return
+        title = getattr(view, "_short_title", None) or "New tab"
+        markers = ""
+        if getattr(view, "_pinned", False):
+            markers += "📌 "
+        if view.page().isAudioMuted():
+            markers += "🔇 "
+        if (self._split_view is not None
+                and view in self._split_view.views()):
+            markers += "◫ "
+        mb = getattr(view, "_mem_mb", None)
+        body = f"{title}  ·  {mb:.0f} MB" if mb is not None else title
+        self.tab_bar.setTabText(index, markers + body)
+        if mb is not None:
+            full = getattr(view, "_full_title", "") or title
+            self.tab_bar.setTabToolTip(
+                index, f"{full}\nRenderer memory: {mb:.0f} MB")
+
+    def _poll_tab_memory(self) -> None:
+        """Refresh every tab's renderer-memory figure (see the timer)."""
+        for view in self._views:
+            pid = view.page().renderProcessPid()
+            view._mem_mb = _process_working_set_mb(pid)
+            self._update_tab_label(view)
+
+    def _visible_views(self) -> set["WebView"]:
+        """Views currently on screen — never candidates for freeze/discard."""
+        if (self._split_view is not None
+                and self.page_area.currentWidget() is self._split_view):
+            return set(self._split_view.views())
+        w = self.tab_stack.currentWidget()
+        return {w} if isinstance(w, WebView) else set()
+
+    def _thaw(self, view: "WebView") -> None:
+        """Return a tab to Active — resuming a frozen page, reloading a
+        discarded one — and reset its idle clock. Called the moment a tab
+        becomes visible so the switch feels instant rather than waiting for
+        the next lifecycle sweep."""
+        view._hidden_since = None
+        page = view.page()
+        if page.lifecycleState() != QWebEnginePage.LifecycleState.Active:
+            page.setLifecycleState(QWebEnginePage.LifecycleState.Active)
+
+    @staticmethod
+    def _less_aggressive(a, b):
+        """The tamer of two lifecycle states (Active < Frozen < Discarded)."""
+        order = {QWebEnginePage.LifecycleState.Active: 0,
+                 QWebEnginePage.LifecycleState.Frozen: 1,
+                 QWebEnginePage.LifecycleState.Discarded: 2}
+        return a if order[a] <= order[b] else b
+
+    def _sweep_tab_lifecycle(self) -> None:
+        """Freeze tabs idle past TAB_FREEZE_AFTER_S and discard those past the
+        user's configured timeout (self._discard_after_s; 0 disables discard),
+        so background tabs stop pinning a full render process in RAM.
+
+        Safety comes from three layers: not-yet-loaded and pinned tabs are
+        skipped outright; every target is clamped to the page's own
+        recommendedState(), which Chromium keeps at Active for anything that
+        must keep running (audible media, an active download, WebRTC, recent
+        input); and discard is only ever reached from Frozen, never straight
+        from Active. Visible tabs are held Active."""
+        State = QWebEnginePage.LifecycleState
+        now = time.monotonic()
+        visible = self._visible_views()
+        for view in self._views:
+            if view in visible:
+                view._hidden_since = None
+                page = view.page()
+                if page.lifecycleState() != State.Active:
+                    page.setLifecycleState(State.Active)
+                continue
+            # Crash/session-restored tabs never opened this run hold no render
+            # process yet — nothing to reclaim, and touching them would force
+            # the load we deliberately deferred.
+            if view.pending_url is not None:
+                continue
+            if getattr(view, "_pinned", False):
+                continue
+            hidden_since = view._hidden_since
+            if hidden_since is None:
+                view._hidden_since = now
+                continue
+            idle = now - hidden_since
+            if self._discard_after_s and idle >= self._discard_after_s:
+                target = State.Discarded
+            elif idle >= TAB_FREEZE_AFTER_S:
+                target = State.Frozen
+            else:
+                continue
+            page = view.page()
+            # Never exceed what the engine says is safe right now...
+            target = self._less_aggressive(target, page.recommendedState())
+            # ...and reach Discarded only via Frozen, never straight from
+            # Active (Qt forbids the direct jump).
+            if target == State.Discarded and page.lifecycleState() == State.Active:
+                target = State.Frozen
+            if page.lifecycleState() != target:
+                page.setLifecycleState(target)
+
+    def _build_discard_menu(self, menu) -> None:
+        """Populate Settings ▸ Idle tab memory: one exclusive radio per discard
+        timeout. A background tab is frozen after a minute either way; this sets
+        how long after that it is discarded (render process freed, reloads on
+        return). 'Never' keeps every tab in memory."""
+        menu.setToolTip(
+            "How long a background tab may sit idle before Vodou frees its "
+            "memory. It reloads when you return to it. 'Never' keeps every tab "
+            "in memory (they are still frozen after a minute).")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self._discard_actions = {}
+        for label, seconds in TAB_DISCARD_OPTIONS:
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(seconds == self._discard_after_s)
+            act.triggered.connect(
+                lambda _checked, s=seconds: self._set_discard_after(s))
+            group.addAction(act)
+            self._discard_actions[seconds] = act
+
+    def _set_discard_after(self, seconds: int) -> None:
+        """Apply and persist a new discard timeout; takes effect on the next
+        lifecycle sweep (within TAB_LIFECYCLE_SWEEP_MS)."""
+        self._discard_after_s = seconds
+        save_discard_after_s(seconds)
+        act = self._discard_actions.get(seconds)
+        if act is not None:
+            act.setChecked(True)
+        if seconds:
+            label = next(l for l, s in TAB_DISCARD_OPTIONS if s == seconds)
+            self.statusBar().showMessage(
+                f"Idle background tabs will be discarded {label.lower()}.",
+                5000)
+        else:
+            self.statusBar().showMessage(
+                "Idle background tabs will be frozen but never discarded.",
+                5000)
+
+    # -- proxy --------------------------------------------------------------
+
+    def _apply_proxy(self) -> None:
+        """(Re)apply the saved proxy to the whole application and reset the
+        per-session auth state so new settings take effect immediately."""
+        QNetworkProxy.setApplicationProxy(_build_qnetwork_proxy(_load_proxy_conf()))
+        self._proxy_auth_cache = None
+        self._proxy_last_offered = {}
+        self._proxy_auth_failcount = {}
+
+    def _on_proxy_auth(self, request_url, authenticator, proxy_host) -> None:
+        """Supply credentials when the proxy demands sign-in.
+
+        Order: the session cache, then the vault (if unlocked), else a prompt.
+        When Qt re-emits with the same username we just tried, that attempt was
+        rejected, so we prompt afresh; a small consecutive-failure cap makes a
+        wrong password fail the load cleanly instead of looping forever."""
+        host = proxy_host or ""
+        offered = self._proxy_last_offered.get(host)
+        rejected = offered is not None and authenticator.user() == offered[0]
+        if rejected:
+            fails = self._proxy_auth_failcount.get(host, 0) + 1
+            self._proxy_auth_failcount[host] = fails
+            self._proxy_auth_cache = None
+            self._proxy_last_offered.pop(host, None)
+            if fails > 3:
+                self._proxy_auth_failcount[host] = 0
+                return  # give up this round; the load fails cleanly
+            creds = self._prompt_proxy_credentials(proxy_host, rejected=True)
+        else:
+            # A fresh challenge means any previous credential was accepted.
+            self._proxy_auth_failcount[host] = 0
+            creds = self._proxy_auth_cache
+            if creds is None and self.vault.unlocked:
+                creds = self.vault.proxy_credential()
+            if creds is None:
+                creds = self._prompt_proxy_credentials(proxy_host, rejected=False)
+        if creds is None:
+            return
+        self._proxy_auth_cache = creds
+        self._proxy_last_offered[host] = creds
+        authenticator.setUser(creds[0])
+        authenticator.setPassword(creds[1])
+
+    def _prompt_proxy_credentials(self, proxy_host, rejected):
+        """Ask the user for proxy credentials (username prefilled from the saved
+        config). Returns (user, password) or None if cancelled."""
+        conf = _load_proxy_conf()
+        lead = ("The proxy rejected those credentials.\n\n" if rejected else "")
+        user, ok = QInputDialog.getText(
+            self, "Proxy sign-in",
+            f"{lead}The proxy {proxy_host or ''} requires a username and "
+            "password.\nUsername:",
+            QLineEdit.EchoMode.Normal, conf.get("username", ""))
+        if not ok:
+            return None
+        pw, ok = QInputDialog.getText(
+            self, "Proxy sign-in", "Password:", QLineEdit.EchoMode.Password)
+        if not ok:
+            return None
+        return (user.strip(), pw)
+
+    def _show_proxy_dialog(self) -> None:
+        """Settings ▸ Network ▸ Proxy…: choose no proxy or a manual HTTP/SOCKS5
+        proxy, with an optional username/password saved in the vault."""
+        conf = _load_proxy_conf()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Proxy")
+        dlg.setMinimumWidth(440)
+        outer = QVBoxLayout(dlg)
+
+        none_radio = QRadioButton("No proxy (direct connection)")
+        manual_radio = QRadioButton("Manual proxy")
+        outer.addWidget(none_radio)
+        outer.addWidget(manual_radio)
+
+        box = QGroupBox()
+        form = QFormLayout(box)
+        type_combo = QComboBox()
+        for key, label in PROXY_TYPES.items():
+            type_combo.addItem(label, key)
+        host_edit = QLineEdit(str(conf.get("host", "")))
+        host_edit.setPlaceholderText("e.g. 127.0.0.1")
+        port_spin = QSpinBox()
+        port_spin.setRange(1, 65535)
+        port_spin.setValue(int(conf.get("port") or 8080))
+        remote_dns = QCheckBox("Resolve DNS at the proxy (SOCKS5 only)")
+        remote_dns.setChecked(bool(conf.get("remote_dns", True)))
+        user_edit = QLineEdit(str(conf.get("username", "")))
+        pass_edit = QLineEdit()
+        pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        if self.vault.file_has_proxy_credential():
+            pass_edit.setPlaceholderText(
+                "saved in vault — leave blank to keep it")
+        show = QCheckBox("Show")
+        show.toggled.connect(lambda on: pass_edit.setEchoMode(
+            QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password))
+        pass_row = QHBoxLayout()
+        pass_row.addWidget(pass_edit)
+        pass_row.addWidget(show)
+        pass_holder = QWidget()
+        pass_holder.setLayout(pass_row)
+
+        form.addRow("Type:", type_combo)
+        form.addRow("Host:", host_edit)
+        form.addRow("Port:", port_spin)
+        form.addRow("", remote_dns)
+        form.addRow("Username:", user_edit)
+        form.addRow("Password:", pass_holder)
+        note = QLabel("The proxy password is stored in your encrypted vault, "
+                      "never in plain text. You'll be asked to unlock the "
+                      "vault to save it.")
+        note.setWordWrap(True)
+        form.addRow(note)
+        outer.addWidget(box)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        outer.addWidget(buttons)
+
+        idx = type_combo.findData(conf.get("type", "http"))
+        type_combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+        def sync_enabled() -> None:
+            on = manual_radio.isChecked()
+            box.setEnabled(on)
+            remote_dns.setEnabled(on and type_combo.currentData() == "socks5")
+
+        manual_radio.toggled.connect(lambda _: sync_enabled())
+        type_combo.currentIndexChanged.connect(lambda _: sync_enabled())
+        (manual_radio if conf.get("enabled") else none_radio).setChecked(True)
+        sync_enabled()
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if none_radio.isChecked():
+            save_proxy_conf({"enabled": False})
+            self._apply_proxy()
+            self.statusBar().showMessage(
+                "Proxy disabled — direct connection.", 5000)
+            return
+
+        host = host_edit.text().strip()
+        if not host:
+            plain_message(self, QMessageBox.Icon.Warning, "Proxy",
+                          "Enter the proxy host (e.g. 127.0.0.1). Nothing was "
+                          "changed.")
+            return
+        ptype = type_combo.currentData()
+        username = user_edit.text().strip()
+        save_proxy_conf({
+            "enabled": True, "type": ptype, "host": host,
+            "port": int(port_spin.value()), "username": username,
+            "remote_dns": bool(remote_dns.isChecked())})
+
+        pw = pass_edit.text()
+        if pw:
+            if ensure_unlocked(self.vault, self):
+                self.vault.set_proxy_credential(username, pw)
+            else:
+                plain_message(
+                    self, QMessageBox.Icon.Information, "Proxy",
+                    "The proxy settings were saved, but the password wasn't "
+                    "stored because the vault stayed locked. You'll be asked "
+                    "for it when the proxy requires sign-in.")
+        elif not username and self.vault.unlocked:
+            # Cleared out the username with no password: drop any stored login.
+            self.vault.clear_proxy_credential()
+
+        self._apply_proxy()
+        self.statusBar().showMessage(
+            f"Proxy set: {PROXY_TYPES.get(ptype, ptype)} "
+            f"{host}:{port_spin.value()}.", 5000)
 
     def _navigate(self) -> None:
         self.current_view().setUrl(to_url(self.url_bar.text()))
@@ -1542,6 +3237,7 @@ class BrowserWindow(QMainWindow):
         self._rebuild_icon_cache()
         self._apply_static_icons()
         self.ai_action.setIcon(self._ai_icon)  # accent-coloured, set directly
+        self._refresh_vault_indicator()  # vault locked/unlocked state icon
         self.bookmark_bar.refresh()  # recolour the globe fallback
         view = self.current_view()
         if view is not None:
@@ -1716,10 +3412,7 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Graphics mode unchanged — already in effect.", 5000)
             return
-        QMessageBox.information(
-            self, "Graphics mode saved",
-            "The new graphics mode takes effect the next time Vodou "
-            "starts.")
+        self._prompt_restart("The graphics mode has been changed.")
 
     def _set_theme(self, name: str) -> None:
         self._theme_name = name
@@ -2257,6 +3950,23 @@ class BrowserWindow(QMainWindow):
             self._close_ai_panel()
         self.statusBar().showMessage(
             f"Local AI {'on' if on else 'off'}.", 4000)
+        # Turning this on is the moment the user actually wants Ollama
+        # working, so this is the natural point to notice it isn't even
+        # installed yet rather than let them find out from a failed request.
+        if on:
+            from ollama_setup import ollama_on_path
+            if not ollama_on_path():
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Icon.Information)
+                box.setWindowTitle("Ollama not found")
+                box.setTextFormat(Qt.TextFormat.PlainText)
+                box.setText(
+                    "Local AI is on, but Ollama doesn't seem to be "
+                    "installed on this machine yet. Set it up now?")
+                box.setStandardButtons(QMessageBox.StandardButton.Yes
+                                       | QMessageBox.StandardButton.No)
+                if box.exec() == QMessageBox.StandardButton.Yes:
+                    self.show_ollama_setup()
 
     def show_ai_options(self) -> None:
         cfg = self.ai_cfg
@@ -2290,6 +4000,12 @@ class BrowserWindow(QMainWindow):
             "avoid a VRAM swap.")
         box.exec()
 
+    def show_ollama_setup(self) -> None:
+        from ollama_setup_ui import OllamaSetupDialog
+        dialog = OllamaSetupDialog(
+            self, model=self.ai_cfg.get("model", "llama3.2:latest"))
+        dialog.exec()
+
     def clear_browsing_data(self) -> None:
         """Wipe the cache, cookies, visited-link history, blocking stats, and
         each open tab's back/forward navigation memory.
@@ -2315,10 +4031,8 @@ class BrowserWindow(QMainWindow):
         self.profile.clearAllVisitedLinks()
         # Clear each tab's in-memory back/forward navigation history so the
         # trail of pages you moved through this session is dropped too.
-        for i in range(self.tab_stack.count()):
-            view = self.tab_stack.widget(i)
-            if view is not None:
-                view.history().clear()
+        for view in self._views:
+            view.history().clear()
         self.statusBar().showMessage("History and memory cleared.", 6000)
         # This summary must name the *persistent* cookie jar too. Quitting
         # keeps it (closeEvent flushes it), so this is the only control that
@@ -2438,6 +4152,7 @@ class BrowserWindow(QMainWindow):
         if not ensure_unlocked(self.vault, self):
             return False
         self._vault_lock_timer.start()
+        self._refresh_vault_indicator()
         return True
 
     def _autolock_vault(self) -> None:
@@ -2451,9 +4166,26 @@ class BrowserWindow(QMainWindow):
             if self._vault_dialog is not None:
                 self._vault_dialog.close()
             self.vault.lock()
+            self._refresh_vault_indicator()
             self.statusBar().showMessage(
                 f"Password vault auto-locked after {VAULT_AUTOLOCK_MINUTES} "
                 f"minutes of inactivity.", 6000)
+
+    def lock_vault_now(self) -> None:
+        """Manually lock the vault ("log out"), like auto-lock but on demand."""
+        if not self.vault.unlocked:
+            self.statusBar().showMessage("The vault is already locked.", 4000)
+            return
+        # Close the open vault window first, or it would sit there showing
+        # entries against a now-locked vault (and its next action would throw).
+        # Closing it fires _on_vault_dialog_closed, which restarts the lock
+        # timer while the vault is still unlocked — so stop the timer LAST.
+        if self._vault_dialog is not None:
+            self._vault_dialog.close()
+        self.vault.lock()
+        self._vault_lock_timer.stop()
+        self._refresh_vault_indicator()
+        self.statusBar().showMessage("Password vault locked.", 4000)
 
     def open_vault(self) -> None:
         if self._vault_dialog is not None:
@@ -2478,8 +4210,23 @@ class BrowserWindow(QMainWindow):
         dialog.setModal(False)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(self._on_vault_dialog_closed)
+        # "Log out" inside the vault window routes through the browser so the
+        # lock timer stops and the toolbar indicator updates (lock_vault_now
+        # closes this dialog itself).
+        dialog.logout_requested.connect(self.lock_vault_now)
+        dialog.open_site_requested.connect(self.open_saved_site)
         self._vault_dialog = dialog
         dialog.show()
+
+    def open_saved_site(self, site: str) -> None:
+        """Open a saved login's site in a new tab and bring the browser
+        forward (the vault window is a separate, modeless window)."""
+        url = to_url(site)
+        if not url.isValid() or url.scheme() not in ("http", "https"):
+            return
+        self.add_tab(url)
+        self.raise_()
+        self.activateWindow()
 
     def _on_vault_dialog_closed(self, _result: int = 0) -> None:
         self._vault_dialog = None
@@ -2521,33 +4268,90 @@ class BrowserWindow(QMainWindow):
 
     # -- autofill offer / capture -----------------------------------------
 
+    def _setup_button_pulsers(self) -> None:
+        """Wire the two attention cues: the key button (a saved login is here
+        to fill) and the vault button (a login is here but the vault is locked,
+        so unlock it first). Both pulse in the live theme accent."""
+        accent = lambda: build_palette(self._theme_name, self._mode).accent
+        self._key_pulser = ButtonPulser(self.key_button, accent)
+        self._vault_pulser = ButtonPulser(self.vault_button, accent)
+
+    def _set_key_active(self, on: bool) -> None:
+        if getattr(self, "_key_pulser", None) is not None:
+            self._key_pulser.set_active(on)
+
+    def _set_vault_active(self, on: bool) -> None:
+        if getattr(self, "_vault_pulser", None) is not None:
+            self._vault_pulser.set_active(on)
+
+    def _refresh_vault_indicator(self) -> None:
+        """Repaint the vault button so its state reads at a glance: dimmed
+        (locked) vs. accent-green (unlocked), with a matching tooltip. The icon
+        is set on the QAction (which the toolbar button displays); call this
+        after _apply_static_icons, which would otherwise reset it to neutral.
+        Called on every lock/unlock transition and on theme switches."""
+        action = getattr(self, "vault_action", None)
+        if action is None:
+            return
+        p = build_palette(self._theme_name, self._mode)
+        if not self.vault.exists():
+            action.setIcon(make_icon("vault", p.text))
+            action.setToolTip("Open password vault (Ctrl+Shift+V)")
+            return
+        if self.vault.unlocked:
+            action.setIcon(make_icon("vault-unlocked", p.ok))
+            action.setToolTip("Vault unlocked — open it (Ctrl+Shift+V)")
+            self._set_vault_active(False)   # no need to nag to unlock
+        else:
+            action.setIcon(make_icon("vault-locked", p.danger))
+            action.setToolTip("Vault locked — click to unlock (Ctrl+Shift+V)")
+
+    def _clear_login_cues(self) -> None:
+        """Stop both attention pulses (key and vault)."""
+        self._set_key_active(False)
+        self._set_vault_active(False)
+
     def _maybe_offer_fill(self, view: WebView, ok: bool) -> None:
         """After a page loads, offer to fill if the vault can help."""
-        if not ok or view is not self.current_view():
+        if view is not self.current_view():
+            return
+        if not ok:
+            self._clear_login_cues()
             return
         url = view.url()
         host = url.host().removeprefix("www.")
         if url.scheme() != "https" or not host or not self.vault.exists():
+            self._clear_login_cues()
             return
         if host in self._fill_offer_dismissed:
+            self._clear_login_cues()
             return
 
         def probed(has_password_field: bool) -> None:
             try:
                 if not has_password_field or view is not self.current_view():
+                    self._clear_login_cues()
                     return
             except RuntimeError:  # tab closed before the probe returned
                 return
             if self.vault.unlocked:
                 if not self.vault.entries_for_host(host):
+                    self._clear_login_cues()
                     return
                 text = (f"🔑 Vodou has a saved login for {host}. "
                         f"Autofill username and password?")
                 label = "Autofill"
+                # Something to fill right now — flash the key button.
+                self._set_vault_active(False)
+                self._set_key_active(True)
             else:
                 text = (f"🔑 This page has a login form. Unlock your vault "
                         f"to autofill a saved login for {host}?")
                 label = "Unlock && autofill"
+                # Can't fill until the vault is unlocked — flash the vault
+                # button to point the user at the step they need first.
+                self._set_key_active(False)
+                self._set_vault_active(True)
             self.notify_bar.offer(
                 host, text, label,
                 on_accept=self.fill_login,
@@ -2561,7 +4365,19 @@ class BrowserWindow(QMainWindow):
         if view is not self.current_view():
             return
         host = view.url().host().removeprefix("www.")
-        if not host or (host, username) in self._capture_dismissed:
+        if not host:
+            return
+
+        # A submitted login with no username (multi-step or password-only
+        # pages hide the username field) is matched to the host's sole saved
+        # login if there is exactly one, so a password change is offered as an
+        # Update rather than saved as an empty-username duplicate.
+        if self.vault.unlocked:
+            username, existing = self._resolve_capture(host, username)
+        else:
+            existing = None
+
+        if (host, username) in self._capture_dismissed:
             return
         dismiss = lambda: self._capture_dismissed.add((host, username))
         who = f"“{username}” on {host}" if username else host
@@ -2575,7 +4391,6 @@ class BrowserWindow(QMainWindow):
                 on_dismiss=dismiss)
             return
 
-        existing = self._find_entry(host, username)
         if existing is None:
             text = f"💾 Save the login you just used for {who} in your vault?"
             label = "Save"
@@ -2590,6 +4405,22 @@ class BrowserWindow(QMainWindow):
             on_accept=lambda: self._save_captured(host, username, password),
             on_dismiss=dismiss)
 
+    def _resolve_capture(self, host: str, username: str):
+        """Map a captured (host, username) to the entry it belongs to.
+
+        Returns (username, existing). On an exact username match, that entry.
+        When the captured username is empty but the host has exactly one saved
+        login, adopt that login's username so a password change updates it
+        instead of adding a duplicate. Requires the vault unlocked.
+        """
+        existing = self._find_entry(host, username)
+        if existing is None and not username:
+            matches = self.vault.entries_for_host(host)
+            if len(matches) == 1:
+                index, entry = matches[0]
+                return entry.username, (index, entry)
+        return username, existing
+
     def _find_entry(self, host: str, username: str):
         """(index, entry) for host+username, or None."""
         for index, entry in enumerate(self.vault.entries()):
@@ -2603,7 +4434,9 @@ class BrowserWindow(QMainWindow):
                        password: str) -> None:
         if not self._unlock_vault():
             return
-        existing = self._find_entry(host, username)
+        # Re-resolve now that the vault is unlocked (the capture may have been
+        # made while locked): an empty username adopts the host's sole login.
+        username, existing = self._resolve_capture(host, username)
         if existing is not None:
             index, entry = existing
             if self.vault.reveal(index) == password:
@@ -2676,10 +4509,110 @@ class BrowserWindow(QMainWindow):
         messages = {
             "ok": "Login filled.",
             "password-only": "Password filled (no username field found).",
+            "username-only": ("Username filled — continue to the password "
+                              "step and Vodou will offer to fill it."),
+            "no-login-field": "No login field found on this page.",
             "no-password-field": "No password field found on this page.",
         }
         self.statusBar().showMessage(
             messages.get(result, "Fill finished."), 5000)
+        # The user acted on the cue; retire the flashes (a following multi-step
+        # page will re-raise one on its next load if a password field appears).
+        self._clear_login_cues()
+
+
+class DetachedWindow(QMainWindow):
+    """A single tab torn off into its own top-level window ("Move tab to new
+    window"). It reuses the very WebView — no reload, full state kept — and
+    shares the parent window's QWebEngineProfile, so there is no second engine
+    profile to collide on Vodou's size-capped, shredded cache directory. It
+    carries a slim nav bar; its lifetime is tied to the parent (see
+    BrowserWindow.closeEvent)."""
+
+    def __init__(self, browser: "BrowserWindow", view: "WebView"):
+        super().__init__()
+        self.browser = browser
+        self.view = view
+        self._shutting_down = False
+        self._returned = False
+        self.setWindowTitle("Vodou — detached tab (private)")
+        self.resize(1024, 720)
+
+        tb = QToolBar("Navigation")
+        tb.setMovable(False)
+        self.addToolBar(tb)
+
+        def button(text: str, tip: str, slot) -> QToolButton:
+            b = QToolButton()
+            b.setText(text)
+            b.setToolTip(tip)
+            b.setAutoRaise(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(slot)
+            tb.addWidget(b)
+            return b
+
+        button("‹", "Back", view.back)
+        button("›", "Forward", view.forward)
+        button("⟳", "Reload",
+               lambda: view.page().triggerAction(
+                   QWebEnginePage.WebAction.ReloadAndBypassCache))
+        self._url = QLineEdit()
+        self._url.setClearButtonEnabled(True)
+        self._url.returnPressed.connect(self._navigate)
+        tb.addWidget(self._url)
+        button("⤢", "Return this tab to the main window",
+               self._return_to_main)
+
+        self.setCentralWidget(view)     # reparents the view (state preserved)
+        view.show()
+        view.urlChanged.connect(self._on_url)
+        view.titleChanged.connect(self._on_title)
+        self._on_url(view.url())
+        self._on_title(view.title())
+
+    def _navigate(self) -> None:
+        self.view.setUrl(to_url(self._url.text()))
+
+    def _on_url(self, url: QUrl) -> None:
+        self._url.setText(url.toString())
+        self._url.setCursorPosition(0)
+
+    def _on_title(self, title: str) -> None:
+        self.setWindowTitle(f"{title} — Vodou (private)" if title
+                            else "Vodou — detached tab (private)")
+
+    def _return_to_main(self) -> None:
+        self._returned = True
+        # Drop our own signal links first, or the view keeps this window alive.
+        try:
+            self.view.urlChanged.disconnect(self._on_url)
+            self.view.titleChanged.disconnect(self._on_title)
+        except TypeError:
+            pass
+        view = self.takeCentralWidget()   # release before reparenting
+        self.browser.reattach_detached(self, view)
+        self.close()
+
+    def close_for_shutdown(self) -> None:
+        """The main window is closing: drop this tab's view with it."""
+        self._shutting_down = True
+        view = self.takeCentralWidget()
+        if view is not None:
+            view.setParent(None)
+            view.deleteLater()
+        self.close()
+
+    def closeEvent(self, event) -> None:
+        # User-initiated close (not a return, not app shutdown): the tab goes
+        # away for good, so destroy its view and tell the parent to forget us.
+        if not self._returned and not self._shutting_down:
+            view = self.takeCentralWidget()
+            if view is not None:
+                view.setParent(None)
+                view.deleteLater()
+            self.browser.forget_detached(self)
+        super().closeEvent(event)
 
 
 def main() -> None:

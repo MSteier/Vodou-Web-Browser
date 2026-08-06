@@ -9,3 +9,7 @@ cryptography>=42.0
 # keyring instead (see dpapi.py). Windows skips this via the environment
 # marker — pip evaluates it, so one requirements file serves every platform.
 keyring>=24.0; sys_platform != "win32"
+# Optional: only needed to unlock the vault with a FIDO2 security key
+# (Vault → Security keys…). The app runs fine without it — that feature
+# simply reports itself unavailable. Windows-only for now (native WebAuthn).
+fido2>=2.0; sys_platform == "win32"
