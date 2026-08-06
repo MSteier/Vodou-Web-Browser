@@ -1053,10 +1053,79 @@ class DraggableTabBar(QTabBar):
     Split View pane accepts that drop. The index is resolved against the
     live view list at drop time, so a concurrent reorder can't misfire."""
 
+    # A single drop can carry a whole selection of links; cap it so a dropped
+    # multi-URL payload can't spawn an unbounded burst of tabs.
+    MAX_DROP_TABS = 20
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._press_pos: QPoint | None = None
         self._press_index = -1
+        # Accept links dragged in from other apps — the address-bar site icon
+        # or a link from Chrome/Edge/Firefox, a file from the file manager —
+        # and open each in a new tab (see dropEvent). A dragged tab from
+        # another browser's tab strip is a window-tear, not a data transfer, so
+        # it carries nothing to accept; the address-bar icon is the grab point
+        # that actually works across browsers.
+        self.setAcceptDrops(True)
+
+    @staticmethod
+    def _acceptable_drop_url(url: QUrl) -> bool:
+        """Keep a dropped URL only if it's real and safe to open in a fresh
+        tab. javascript: is refused outright — a page can seed a drag with a
+        javascript: payload, and it has no business running just because
+        something was dropped on the tab strip."""
+        return (url.isValid() and not url.isEmpty()
+                and url.scheme().lower() != "javascript")
+
+    def _dropped_urls(self, mime: QMimeData) -> list[QUrl]:
+        """URLs to open from a drop, or [] if this isn't an external link drag.
+        Our own tab tear-off (TAB_MIME) is never treated as a URL drop, so
+        reordering and Split-View tear-off keep working untouched."""
+        if mime.hasFormat(TAB_MIME):
+            return []
+        urls: list[QUrl] = []
+        if mime.hasUrls():
+            urls = [u for u in mime.urls() if self._acceptable_drop_url(u)]
+        elif mime.hasText():
+            text = mime.text().strip()
+            if text:
+                # Plain text (a selected URL, or words) goes through the same
+                # address-bar parsing as typing it: a URL opens, anything else
+                # becomes a search.
+                candidate = to_url(text)
+                if self._acceptable_drop_url(candidate):
+                    urls = [candidate]
+        return urls[:self.MAX_DROP_TABS]
+
+    def dragEnterEvent(self, event) -> None:
+        if self._dropped_urls(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self._dropped_urls(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        urls = self._dropped_urls(event.mimeData())
+        window = self.window()
+        add_tab = getattr(window, "add_tab", None)
+        if not urls or add_tab is None:
+            super().dropEvent(event)
+            return
+        # Open each dropped link; focus the last so the window surfaces the
+        # page the user just handed it. add_tab routes through the normal
+        # navigation path, so dropped URLs still meet the spoof / Safe-Browsing
+        # interstitial like any other navigation.
+        for i, url in enumerate(urls):
+            add_tab(url, background=(i < len(urls) - 1))
+        window.activateWindow()
+        window.raise_()
+        event.acceptProposedAction()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
