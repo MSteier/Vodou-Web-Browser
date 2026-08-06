@@ -578,17 +578,53 @@ def _process_working_set_mb(pid: int) -> float | None:
         kernel32.CloseHandle(handle)
 
 
+def _as_local_path(text: str) -> str | None:
+    """Turn address-bar text into an absolute local filesystem path, or None if
+    it isn't file-ish (so the caller falls through to host/search handling).
+
+    Handles what people actually type on Windows: an explicit ``file:`` scheme
+    with any mix of slashes and backslashes (``file://``, ``file:///``,
+    ``file:\\``), a bare drive path (``C:\\...`` or ``C:/...``), or a UNC share
+    (``\\host\share``). Backslashes are normalised to forward slashes and a
+    drive-less ``file:`` path (e.g. ``file://users\pacma\...``) is anchored to
+    the system drive so it resolves to the intended ``C:/users/pacma/...``.
+    Bare text without a scheme is only treated as a file when it clearly is a
+    drive or UNC path, so ordinary searches aren't hijacked.
+    """
+    scheme = text[:5].lower() == "file:"
+    raw = text[5:] if scheme else text
+    if scheme:
+        raw = raw.lstrip("/\\")           # eat file://, file:///, file:\\ ...
+    raw = raw.replace("\\", "/")
+    if not raw:
+        return None
+    drive = len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha()
+    if drive:                             # C:/Users/...  (with or without scheme)
+        return os.path.normpath(raw)
+    if raw.startswith("//"):              # //host/share UNC path
+        return os.path.normpath(raw)
+    if scheme:                            # file://users/... -> anchor to C:/
+        system_drive = os.environ.get("SystemDrive", "C:")
+        return os.path.normpath(os.path.join(system_drive + "/", raw))
+    return None                           # not file-ish -> host or search
+
+
 def to_url(text: str) -> QUrl:
     """Address-bar text -> URL (HTTPS-first) or search query."""
     text = text.strip()
     if not text:
         return QUrl(HOME_URL)
+    # A local file/folder (file:// or a plain Windows path) opens directly.
+    # QUrl.fromLocalFile builds the file:///C:/... form QtWebEngine needs.
+    local = _as_local_path(text)
+    if local is not None:
+        return QUrl.fromLocalFile(local)
     # chrome:// reaches the engine's own diagnostic pages (chrome://gpu is the
     # one worth knowing — it reports what's hardware-accelerated and which
     # driver workarounds are active). Without it here, such an address has no
     # dot and no known scheme, so it falls through to the search branch below
     # and gets sent to SearXNG as a query instead of opening.
-    if text.startswith(("http://", "https://", "about:", "file:", "chrome://")):
+    if text.startswith(("http://", "https://", "about:", "chrome://")):
         return QUrl(text)
     looks_like_host = " " not in text and (
         "." in text or text.startswith("localhost"))
