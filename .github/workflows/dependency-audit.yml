@@ -9,9 +9,6 @@ on:
   push:
     branches: [master, linux-support]
   pull_request:
-  # Manual trigger (Actions tab → Run workflow, or `gh workflow run`), so the
-  # audit can be run on demand without waiting for a push.
-  workflow_dispatch:
 
 # Read-only, and triggered by `pull_request` (not `pull_request_target`), so a
 # PR from a fork is checked out without any repository credentials.
