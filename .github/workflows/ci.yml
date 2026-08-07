@@ -11,10 +11,6 @@ on:
   push:
     branches: [master, linux-support]
   pull_request:
-  # Manual trigger (Actions tab → Run workflow, or `gh workflow run`). Note
-  # GitHub only surfaces this once the workflow file reaches the default
-  # branch; while CI lives only on linux-support, dispatch it by ref.
-  workflow_dispatch:
 
 # A workflow is the one place a merged change runs with repository
 # credentials. Read-only by default, and the trigger above is `pull_request`
