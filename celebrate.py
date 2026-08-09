@@ -116,7 +116,7 @@ _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
       x.save(); x.translate(p.x,p.y); x.rotate(p.rot);
       x.fillStyle=p.col; x.fillRect(-p.w/2,-p.h/2,p.w,p.h); x.restore();
     }
-    if(t-t0<9000 && t-last>rnd(500,900)){ last=t;
+    if(t-t0<30000 && t-last>rnd(500,900)){ last=t;
       burst(rnd(W*0.2,W*0.8), rnd(H*0.15,H*0.5)); }
     x.globalCompositeOperation='lighter';
     for(var j=parts.length-1;j>=0;j--){ var q=parts[j];
