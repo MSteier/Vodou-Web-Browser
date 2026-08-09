@@ -81,8 +81,11 @@ _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 (function(){
   var c=document.getElementById('sky');
   if(!c||!c.getContext) return;
-  var x=c.getContext('2d'),W,H,DPR=Math.min(window.devicePixelRatio||1,2);
-  function resize(){W=c.width=innerWidth*DPR;H=c.height=innerHeight*DPR;}
+  var x=c.getContext('2d'),W,H;
+  // Back the canvas at CSS resolution (1x), not devicePixelRatio: confetti and
+  // fireworks don't need a retina buffer, and a smaller canvas keeps every
+  // frame cheap so the animation stays smooth on a big / high-DPI display.
+  function resize(){W=c.width=innerWidth;H=c.height=innerHeight;}
   resize(); addEventListener('resize',resize);
   var colors=['#ff5d73','#ffd166','#06d6a0','#4cc9f0','#b57bff','#ff9f1c','#ffffff'];
   function rnd(a,b){return a+Math.random()*(b-a);}
@@ -90,37 +93,42 @@ _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 
   var conf=[];
   function newPiece(spread){
-    return {x:rnd(0,W), y:spread?rnd(-H,0):rnd(-40*DPR,0),
-      w:rnd(6,12)*DPR, h:rnd(8,16)*DPR, vx:rnd(-0.6,0.6)*DPR, vy:rnd(1.5,4)*DPR,
-      rot:rnd(0,Math.PI*2), vr:rnd(-0.2,0.2), col:pick(colors)};
+    return {x:rnd(0,W), y:spread?rnd(-H,0):rnd(-40,0),
+      w:rnd(6,12), h:rnd(8,16), vx:rnd(-0.9,0.9), vy:rnd(2.8,6.6),
+      rot:rnd(0,Math.PI*2), vr:rnd(-0.3,0.3), col:pick(colors)};
   }
-  for(var i=0;i<160;i++) conf.push(newPiece(true));
+  for(var i=0;i<170;i++) conf.push(newPiece(true));
 
   var parts=[], last=0;
   function burst(px,py){
     var n=60+((Math.random()*40)|0), col=pick(colors);
-    for(var i=0;i<n;i++){ var a=Math.random()*Math.PI*2, s=rnd(1,6)*DPR;
+    for(var i=0;i<n;i++){ var a=Math.random()*Math.PI*2, s=rnd(2,9);
       parts.push({x:px,y:py,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,col:col}); }
   }
 
-  var t0=performance.now();
+  var t0=performance.now(), prev=t0;
   function frame(t){
+    // Scale motion by the real time since the last frame (in 60fps units,
+    // clamped), so speed is consistent and a hitched frame doesn't stutter.
+    var dt=(t-prev)/16.667; if(!(dt>0))dt=1; if(dt>3)dt=3; prev=t;
     x.globalCompositeOperation='source-over';
     x.clearRect(0,0,W,H);
     for(var i=0;i<conf.length;i++){ var p=conf[i];
-      p.x+=p.vx; p.y+=p.vy; p.vy+=0.02*DPR; p.rot+=p.vr;
-      if(p.y>H+20*DPR){ conf[i]=newPiece(false); continue; }
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=0.03*dt; p.rot+=p.vr*dt;
+      if(p.y>H+20){ conf[i]=newPiece(false); continue; }
       x.save(); x.translate(p.x,p.y); x.rotate(p.rot);
       x.fillStyle=p.col; x.fillRect(-p.w/2,-p.h/2,p.w,p.h); x.restore();
     }
-    if(t-t0<30000 && t-last>rnd(500,900)){ last=t;
+    if(t-t0<30000 && t-last>rnd(350,650)){ last=t;
       burst(rnd(W*0.2,W*0.8), rnd(H*0.15,H*0.5)); }
     x.globalCompositeOperation='lighter';
+    var decay=Math.pow(0.985,dt);
     for(var j=parts.length-1;j>=0;j--){ var q=parts[j];
-      q.x+=q.vx; q.y+=q.vy; q.vy+=0.04*DPR; q.vx*=0.99; q.vy*=0.99; q.life-=0.012;
+      q.x+=q.vx*dt; q.y+=q.vy*dt; q.vy+=0.06*dt; q.vx*=decay; q.vy*=decay;
+      q.life-=0.018*dt;
       if(q.life<=0){ parts.splice(j,1); continue; }
       x.globalAlpha=Math.max(q.life,0); x.fillStyle=q.col;
-      x.beginPath(); x.arc(q.x,q.y,2.2*DPR,0,Math.PI*2); x.fill();
+      x.beginPath(); x.arc(q.x,q.y,2.4,0,Math.PI*2); x.fill();
     }
     x.globalAlpha=1;
     requestAnimationFrame(frame);
