@@ -292,7 +292,7 @@ import secrets
 from urllib.parse import quote
 
 from PyQt6.QtCore import (
-    QEvent, QMimeData, QPoint, QProcess, QSize, Qt, QTimer, QUrl,
+    QEvent, QMimeData, QObject, QPoint, QProcess, QSize, Qt, QTimer, QUrl,
     QVariantAnimation, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtGui import (
@@ -1042,90 +1042,91 @@ class ButtonPulser:
             self._button.setStyleSheet("")
 
 
-class DraggableTabBar(QTabBar):
-    """The main tab bar, with a tear-off drag so a tab can be dropped into a
-    Split View pane.
+# A single drop can carry a whole selection of links; cap it so a dropped
+# multi-URL payload can't spawn an unbounded burst of tabs.
+MAX_DROP_TABS = 20
 
-    Ordinary left-right reordering is untouched: QTabBar's built-in movable
-    behaviour keeps the pointer inside the bar, so it never crosses the
-    generous vertical margin that arms the tear-off. Only a clear downward
-    drag (toward the page area) starts a QDrag carrying the tab's index; a
-    Split View pane accepts that drop. The index is resolved against the
-    live view list at drop time, so a concurrent reorder can't misfire."""
 
-    # A single drop can carry a whole selection of links; cap it so a dropped
-    # multi-URL payload can't spawn an unbounded burst of tabs.
-    MAX_DROP_TABS = 20
+def _acceptable_drop_url(url: QUrl) -> bool:
+    """Keep a dropped URL only if it's real and safe to open in a fresh tab.
+    javascript: is refused outright — a page can seed a drag with a
+    javascript: payload, and it has no business running just because something
+    was dropped onto the window."""
+    return (url.isValid() and not url.isEmpty()
+            and url.scheme().lower() != "javascript")
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._press_pos: QPoint | None = None
-        self._press_index = -1
-        # Accept links dragged in from other apps — the address-bar site icon
-        # or a link from Chrome/Edge/Firefox, a file from the file manager —
-        # and open each in a new tab (see dropEvent). A dragged tab from
-        # another browser's tab strip is a window-tear, not a data transfer, so
-        # it carries nothing to accept; the address-bar icon is the grab point
-        # that actually works across browsers.
-        self.setAcceptDrops(True)
 
-    @staticmethod
-    def _acceptable_drop_url(url: QUrl) -> bool:
-        """Keep a dropped URL only if it's real and safe to open in a fresh
-        tab. javascript: is refused outright — a page can seed a drag with a
-        javascript: payload, and it has no business running just because
-        something was dropped on the tab strip."""
-        return (url.isValid() and not url.isEmpty()
-                and url.scheme().lower() != "javascript")
+def _urls_from_drop(mime: QMimeData) -> list[QUrl]:
+    """URLs to open from a drag dropped on the window, or [] if it isn't an
+    external link drag. Our own tab tear-off (TAB_MIME) is never treated as a
+    URL drop, so tab reordering and Split-View tear-off keep working."""
+    if mime.hasFormat(TAB_MIME):
+        return []
+    urls: list[QUrl] = []
+    if mime.hasUrls():
+        urls = [u for u in mime.urls() if _acceptable_drop_url(u)]
+    elif mime.hasText():
+        text = mime.text().strip()
+        if text:
+            # Plain text (a selected URL, or words) goes through the same
+            # address-bar parsing as typing it: a URL opens, anything else
+            # becomes a search.
+            candidate = to_url(text)
+            if _acceptable_drop_url(candidate):
+                urls = [candidate]
+    return urls[:MAX_DROP_TABS]
 
-    def _dropped_urls(self, mime: QMimeData) -> list[QUrl]:
-        """URLs to open from a drop, or [] if this isn't an external link drag.
-        Our own tab tear-off (TAB_MIME) is never treated as a URL drop, so
-        reordering and Split-View tear-off keep working untouched."""
-        if mime.hasFormat(TAB_MIME):
-            return []
-        urls: list[QUrl] = []
-        if mime.hasUrls():
-            urls = [u for u in mime.urls() if self._acceptable_drop_url(u)]
-        elif mime.hasText():
-            text = mime.text().strip()
-            if text:
-                # Plain text (a selected URL, or words) goes through the same
-                # address-bar parsing as typing it: a URL opens, anything else
-                # becomes a search.
-                candidate = to_url(text)
-                if self._acceptable_drop_url(candidate):
-                    urls = [candidate]
-        return urls[:self.MAX_DROP_TABS]
+
+class _LinkDropZone(QWidget):
+    """A chrome region (the tab strip) that opens a link dragged in from another
+    app in a new tab. Making the strip itself the drop target means a link
+    released anywhere along it lands reliably — the bare QTabBar is only as wide
+    as its tabs, so most of the strip is this widget, not the bar. Our own tab
+    tear-off (TAB_MIME) yields no URLs here, so it's ignored and passes through
+    to Split View unaffected."""
 
     def dragEnterEvent(self, event) -> None:
-        if self._dropped_urls(event.mimeData()):
+        if _urls_from_drop(event.mimeData()):
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
-        if self._dropped_urls(event.mimeData()):
+        if _urls_from_drop(event.mimeData()):
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
-        urls = self._dropped_urls(event.mimeData())
+        urls = _urls_from_drop(event.mimeData())
         window = self.window()
         add_tab = getattr(window, "add_tab", None)
         if not urls or add_tab is None:
             super().dropEvent(event)
             return
-        # Open each dropped link; focus the last so the window surfaces the
-        # page the user just handed it. add_tab routes through the normal
-        # navigation path, so dropped URLs still meet the spoof / Safe-Browsing
-        # interstitial like any other navigation.
         for i, url in enumerate(urls):
             add_tab(url, background=(i < len(urls) - 1))
         window.activateWindow()
         window.raise_()
         event.acceptProposedAction()
+
+
+class DraggableTabBar(QTabBar):
+    """The main tab bar, with a tear-off drag so a tab can be dropped into a
+    Split View pane or out into another app (Chrome's tab strip, the desktop).
+
+    Ordinary left-right reordering is untouched: QTabBar's built-in movable
+    behaviour keeps the pointer inside the bar and the window, so it never arms
+    the tear-off. A clear downward drag (toward the page area) or a drag that
+    leaves the window starts a QDrag carrying both the tab's index (for Split
+    View) and the page's URL (for an external target). The index is resolved
+    against the live view list at drop time, so a concurrent reorder can't
+    misfire."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._press_pos: QPoint | None = None
+        self._press_index = -1
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1136,10 +1137,15 @@ class DraggableTabBar(QTabBar):
     def mouseMoveEvent(self, event) -> None:
         if (self._press_pos is not None and self._press_index >= 0
                 and event.buttons() & Qt.MouseButton.LeftButton):
-            # Arm only on a decisive move below the strip, so horizontal
-            # reordering (which stays within the bar) is never intercepted.
+            # Arm the tear-off on a decisive move below the strip (toward the
+            # page area — for Split View) OR when the pointer leaves the window
+            # entirely (dragging the tab out to another app, e.g. Chrome's tab
+            # strip, to open the page there). Horizontal reordering keeps the
+            # pointer inside the bar and the window, so it's never intercepted.
             pos = event.position().toPoint()
-            if pos.y() - self.rect().bottom() > 24:
+            left_window = not self.window().frameGeometry().contains(
+                event.globalPosition().toPoint())
+            if pos.y() - self.rect().bottom() > 24 or left_window:
                 self._start_tear_off()
                 return
         super().mouseMoveEvent(event)
@@ -1156,8 +1162,23 @@ class DraggableTabBar(QTabBar):
         drag = QDrag(self)
         mime = QMimeData()
         mime.setData(TAB_MIME, str(index).encode("ascii"))
+        # Also carry the page's URL, so the tab can be dropped into another app
+        # — Chrome's tab strip, the desktop — to open that page there. A Split
+        # View pane keys off TAB_MIME and ignores the URL; an external target
+        # keys off the URL and ignores TAB_MIME. Only real web/file pages are
+        # shared (not internal or blank tabs).
+        window = self.window()
+        views = getattr(window, "_views", None)
+        if views is not None and 0 <= index < len(views):
+            url = views[index].url()
+            if (url.isValid() and not url.isEmpty()
+                    and url.scheme() in ("http", "https", "file")):
+                mime.setUrls([url])
+                mime.setText(url.toString())
         drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.MoveAction)
+        # Move for the internal Split-View case; Copy so an external app (which
+        # can't "move" a Vodou tab) still accepts the URL and opens it.
+        drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
 
 
 # Background-tab memory reclamation. A tab hidden this long is frozen (its
@@ -1258,10 +1279,44 @@ def _build_qnetwork_proxy(conf: dict) -> QNetworkProxy:
 
 
 class BrowserWindow(QMainWindow):
+    # A link dragged in from another browser (its address-bar site icon, or a
+    # link on a page) or a file from the file manager opens in a new tab. The
+    # drop is handled here at the window level, not on the tab bar: with
+    # setExpanding(False) the QTabBar is only as wide as its tabs, so the empty
+    # part of the tab strip belongs to the window — dropping there must still
+    # work. Dropping on a page instead falls through to the web view, which
+    # navigates it, matching how Chrome treats a drop on the page vs the strip.
+    def dragEnterEvent(self, event) -> None:
+        if _urls_from_drop(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if _urls_from_drop(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        urls = _urls_from_drop(event.mimeData())
+        if not urls:
+            super().dropEvent(event)
+            return
+        # Focus the last so the window surfaces the page just handed to it.
+        # add_tab routes through the normal navigation path, so a dropped URL
+        # still meets the spoof / Safe-Browsing interstitial like any other.
+        for i, url in enumerate(urls):
+            self.add_tab(url, background=(i < len(urls) - 1))
+        self.activateWindow()
+        self.raise_()
+        event.acceptProposedAction()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Vodou Browser — private")
         self.resize(1280, 830)
+        self.setAcceptDrops(True)   # open links dragged in from other apps
 
         # Route traffic through the configured proxy (if any) before any page
         # loads. An authenticating proxy's credentials are supplied on demand
@@ -1525,8 +1580,9 @@ class BrowserWindow(QMainWindow):
         self.plus_button.clicked.connect(lambda: self.add_tab(QUrl(HOME_URL)))
         self._icon_targets.append((self.plus_button, "plus"))
 
-        tab_strip = QWidget()
+        tab_strip = _LinkDropZone()
         tab_strip.setObjectName("tabStrip")
+        tab_strip.setAcceptDrops(True)   # links dragged in open in a new tab
         strip = QHBoxLayout(tab_strip)
         strip.setContentsMargins(6, 4, 6, 0)
         strip.setSpacing(4)
