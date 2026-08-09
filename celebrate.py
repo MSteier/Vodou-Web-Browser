@@ -63,9 +63,11 @@ _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   .emoji{font-size:64px;margin-bottom:10px;
     filter:drop-shadow(0 6px 16px rgba(0,0,0,.55));}
   h1{font-size:clamp(24px,5vw,44px);line-height:1.2;margin:0 0 14px;
-    max-width:16em;font-weight:700;text-shadow:0 2px 18px rgba(0,0,0,.65);}
+    max-width:16em;font-weight:700;text-shadow:0 2px 18px rgba(0,0,0,.65);
+    -webkit-text-stroke:3px #000;paint-order:stroke fill;}
   p{font-size:clamp(14px,2.5vw,18px);margin:0;color:#c7d0f0;
-    text-shadow:0 2px 10px rgba(0,0,0,.6);}
+    text-shadow:0 2px 10px rgba(0,0,0,.6);
+    -webkit-text-stroke:1.5px #000;paint-order:stroke fill;}
   .ver{margin-top:20px;font:600 13px/1 "Cascadia Mono",Consolas,monospace;
     color:#9fb0ee;background:rgba(255,255,255,.09);
     border:1px solid rgba(255,255,255,.14);padding:9px 15px;border-radius:999px;}
