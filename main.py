@@ -386,6 +386,7 @@ from ai_search import (
     results_script,
     save_config as save_ai_config,
 )
+import celebrate
 from safebrowsing import SafeBrowsing
 from session import (
     clear_snapshot, consume_restart, load_snapshot, mark_restart,
@@ -401,6 +402,7 @@ from spoofcheck import (
 )
 from spoofcheck import inspect as spoof_inspect
 from about import (
+    APP_VERSION,
     REPO_URL,
     VERSION_DISPLAY,
     AboutDialog,
@@ -1539,6 +1541,12 @@ class BrowserWindow(QMainWindow):
             pass
         elif not self._offer_crash_restore():
             self.add_tab(QUrl(STARTUP_URL))   # launch page (may differ from HOME_URL)
+
+        # First launch after an update: a one-time confetti/fireworks page.
+        # Checked after the normal tabs are in place so it opens as an extra
+        # foreground tab, and only once per version (celebrate.mark_seen).
+        if celebrate.due(APP_VERSION):
+            self._show_update_celebration()
 
         # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
         # files). Delayed so it never competes with first-page load; failures
@@ -2796,6 +2804,16 @@ class BrowserWindow(QMainWindow):
         if 0 <= current < len(self._views):
             self.tab_bar.setCurrentIndex(current)
             self._on_tab_changed(current)
+
+    def _show_update_celebration(self) -> None:
+        """Open the one-time confetti/fireworks 'latest version' page in a fresh
+        foreground tab, then record this version so it shows only once. Rendered
+        with setHtml under the sentinel host — self-contained, no file on disk,
+        no network."""
+        view = self.add_tab()
+        view.page().setHtml(celebrate.html(APP_VERSION),
+                            QUrl(f"https://{SENTINEL_HOST}/updated"))
+        celebrate.mark_seen(APP_VERSION)
 
     def _prompt_restart(self, change: str) -> None:
         """Ask whether to restart now so a just-changed setting takes effect."""
