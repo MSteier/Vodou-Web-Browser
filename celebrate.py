@@ -53,7 +53,8 @@ _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>You're up to date 🎉</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#0b1026;}
+  html,body{margin:0;height:100%;overflow:hidden;}
+  body{background:radial-gradient(1200px 600px at 50% -12%,#151d42,#0b1026);}
   #sky{position:fixed;inset:0;display:block;}
   .card{position:fixed;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;text-align:center;
@@ -68,8 +69,6 @@ _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   .ver{margin-top:20px;font:600 13px/1 "Cascadia Mono",Consolas,monospace;
     color:#9fb0ee;background:rgba(255,255,255,.09);
     border:1px solid rgba(255,255,255,.14);padding:9px 15px;border-radius:999px;}
-  @media (prefers-reduced-motion: reduce){#sky{display:none;}
-    body{background:radial-gradient(1200px 600px at 50% -10%,#1a2350,#0b1026);}}
 </style></head><body>
 <canvas id="sky"></canvas>
 <div class="card">
@@ -82,8 +81,6 @@ _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 (function(){
   var c=document.getElementById('sky');
   if(!c||!c.getContext) return;
-  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if(reduce) return;
   var x=c.getContext('2d'),W,H,DPR=Math.min(window.devicePixelRatio||1,2);
   function resize(){W=c.width=innerWidth*DPR;H=c.height=innerHeight*DPR;}
   resize(); addEventListener('resize',resize);
