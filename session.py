@@ -6,9 +6,13 @@ last run ended unexpectedly (crash, kill, power loss) and the user is offered
 their tabs back.
 
 Privacy note: this is the only place Vodou writes page URLs to disk, and only
-the URL of each open tab — no history, titles, or form data. The file is
-removed the moment the browser closes normally, and the user can decline the
-restore offer, which deletes it immediately.
+the URL of each open tab — no history, titles, or form data. On top of being
+removed the moment the browser closes normally (and immediately if the user
+declines the restore offer), the file is sealed at rest with the same per-user
+OS encryption as the cookie jar (Windows DPAPI; see dpapi.py) — so a leftover
+crash snapshot isn't a plaintext list of your open tabs another account or a
+lifted disk could read. Like the jar, it is not protection from software
+running as you.
 
 Performance: callers debounce writes (one coalesced write per burst of
 navigation), and save_snapshot() itself skips the disk entirely when nothing
@@ -19,6 +23,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from dpapi import seal as _seal, unseal as _unseal
 
 SESSION_FILE = Path.home() / ".vodou" / "session.json"
 # Set just before an *intentional* self-restart (e.g. applying a graphics
@@ -42,7 +48,9 @@ def save_snapshot(urls: list[str], current: int) -> None:
     try:
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = SESSION_FILE.with_suffix(".tmp")
-        tmp.write_text(payload, encoding="utf-8")
+        # Sealed at rest. If sealing fails (DPAPI error), write nothing rather
+        # than fall back to a plaintext tab list — fail closed.
+        tmp.write_bytes(_seal(payload.encode("utf-8")))
         tmp.replace(SESSION_FILE)
         _last_written = payload
     except OSError:
@@ -82,14 +90,16 @@ def consume_restart() -> bool:
 def load_snapshot() -> tuple[list[str], int] | None:
     """Read a leftover snapshot; None if absent or unusable.
 
-    Present file = the previous run did not exit cleanly. The content is
-    validated strictly (it sits unencrypted in the profile dir) and anything
-    malformed is treated as no snapshot.
+    Present file = the previous run did not exit cleanly. It is unsealed first
+    (a legacy plaintext snapshot from before sealing, or a tampered/foreign
+    blob, fails to unseal and is treated as no snapshot), then validated
+    strictly — anything malformed is also treated as no snapshot.
     """
     if not SESSION_FILE.exists():
         return None
     try:
-        blob = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        raw = _unseal(SESSION_FILE.read_bytes())
+        blob = json.loads(raw.decode("utf-8"))
         urls = [u for u in blob["urls"][:MAX_TABS]
                 if isinstance(u, str)
                 and u.startswith(("http://", "https://", "file://"))]
