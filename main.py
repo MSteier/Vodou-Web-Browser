@@ -177,7 +177,13 @@ PREFS_KEY_FILE = Path.home() / ".vodou" / "prefs.key"
 # value changed on disk by anything other than Vodou's own Settings dialog
 # (adware, a synced edit, a script) won't carry a valid HMAC signature, so it's
 # reverted to the private default on the next startup. See _prefs_sig.
-_SIGNED_KEYS = ("start_page", "search_engine")
+_SIGNED_KEYS = ("start_page", "search_engine", "startup_page")
+# Older Vodou signed a smaller key set. A file carrying one of these historical
+# signatures is still trusted (and re-signed under the current set on its next
+# write), so adding a signed key never silently discards a saved start page.
+_LEGACY_SIGNED_KEY_SETS = (
+    ("start_page", "search_engine"),
+)
 # A start page may only be a normal web page: file:/chrome:/about:/data:/
 # javascript:/blob: are refused, so even a tampered value can't reach local
 # files, engine-internal pages, or script.
@@ -205,13 +211,18 @@ def _prefs_key() -> bytes:
     return key
 
 
-def _prefs_sig(data: dict) -> str:
-    """HMAC-SHA256 over the signed prefs, canonicalised so mere key-order
+def _prefs_sig_over(data: dict, keys) -> str:
+    """HMAC-SHA256 over `keys` of the prefs, canonicalised so mere key-order
     changes can't alter the signature."""
-    signed = {k: str(data.get(k, "")) for k in _SIGNED_KEYS}
+    signed = {k: str(data.get(k, "")) for k in keys}
     payload = json.dumps(signed, sort_keys=True,
                          separators=(",", ":")).encode("utf-8")
     return hmac.new(_prefs_key(), payload, hashlib.sha256).hexdigest()
+
+
+def _prefs_sig(data: dict) -> str:
+    """The signature over the current signed-key set — what a fresh write uses."""
+    return _prefs_sig_over(data, _SIGNED_KEYS)
 
 
 def _load_prefs() -> dict:
@@ -244,9 +255,16 @@ def _save_pref(key: str, value: str) -> None:
 
 def _prefs_trusted(data: dict) -> bool:
     """Whether the file's stored signature matches its signed values — i.e.
-    Vodou itself wrote them and nothing has changed them since."""
+    Vodou itself wrote them and nothing has changed them since. A signature
+    from an older Vodou (a smaller signed-key set) is also accepted, so adding
+    a signed key doesn't invalidate an existing file."""
     want = str(data.get("_sig", ""))
-    return bool(want) and hmac.compare_digest(want, _prefs_sig(data))
+    if not want:
+        return False
+    if hmac.compare_digest(want, _prefs_sig(data)):
+        return True
+    return any(hmac.compare_digest(want, _prefs_sig_over(data, keys))
+               for keys in _LEGACY_SIGNED_KEY_SETS)
 
 
 def _normalize_url(text: str) -> str:
@@ -487,15 +505,19 @@ SEARCH_ENGINES = {
 # edit) can't carry a valid signature, so we ignore it, keep the private
 # SearXNG defaults set just above, re-sign a clean file, and leave a one-time
 # notice for the window to show. Both fall back to the SearXNG defaults.
+# The startup page — what a fresh launch opens — is set independently of the
+# start page (new tabs / Home button). A blank startup page follows the start
+# page, so decoupling is opt-in and existing setups are unchanged.
+STARTUP_URL = HOME_URL
 PREFS_RESET_NOTICE = None
 _prefs = _load_prefs()
 _has_overrides = any(str(_prefs.get(k, "")).strip() for k in _SIGNED_KEYS)
 if _has_overrides and not _prefs_trusted(_prefs):
     PREFS_RESET_NOTICE = (
-        "Your saved start page and search engine couldn't be verified, so "
-        "Vodou restored the private defaults. If you customized them, set "
-        "them again from ☰ → Settings.")
-    _write_prefs({"start_page": "", "search_engine": ""})
+        "Your saved start page, startup page and search engine couldn't be "
+        "verified, so Vodou restored the private defaults. If you customized "
+        "them, set them again from ☰ → Settings.")
+    _write_prefs({"start_page": "", "search_engine": "", "startup_page": ""})
 elif _has_overrides:
     _saved_start = _safe_start_page(
         _normalize_url(str(_prefs.get("start_page", ""))))
@@ -504,6 +526,9 @@ elif _has_overrides:
     _saved_engine = str(_prefs.get("search_engine", "")).strip()
     if "{}" in _saved_engine:
         SEARCH_URL = _saved_engine
+    _saved_startup = _safe_start_page(
+        _normalize_url(str(_prefs.get("startup_page", ""))))
+    STARTUP_URL = _saved_startup or HOME_URL
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
 # SearXNG instance). Certificate errors anywhere else are still fatal.
@@ -1513,7 +1538,7 @@ class BrowserWindow(QMainWindow):
         if consume_restart() and self._resume_after_restart():
             pass
         elif not self._offer_crash_restore():
-            self.add_tab(QUrl(HOME_URL))
+            self.add_tab(QUrl(STARTUP_URL))   # launch page (may differ from HOME_URL)
 
         # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
         # files). Delayed so it never competes with first-page load; failures
@@ -1801,6 +1826,11 @@ class BrowserWindow(QMainWindow):
         start_action.setToolTip(
             "Choose the page new tabs and the Home button open. Leave it "
             "blank to restore the private SearXNG start page.")
+        startup_action = search_menu.addAction(
+            "Set startup page…", self.set_startup_page)
+        startup_action.setToolTip(
+            "Choose the page Vodou opens when it launches — separately from "
+            "new tabs. Leave it blank to open your start page on launch too.")
         self._build_search_engine_menu(search_menu.addMenu("Search engine"))
 
         # --- Idle tab memory ----------------------------------------------
@@ -2598,6 +2628,38 @@ class BrowserWindow(QMainWindow):
             _save_pref("start_page", "")
             self.statusBar().showMessage(
                 "Start page reset to the private SearXNG page.", 5000)
+
+    def set_startup_page(self) -> None:
+        """Let the user pick the page a fresh launch opens, independently of the
+        start page (new tabs / Home). Blank follows the start page. Takes effect
+        on the next launch."""
+        global STARTUP_URL
+        # Show what launch currently opens; a blank value means "follow the
+        # start page", so present that case as an empty field.
+        current = "" if STARTUP_URL == HOME_URL else STARTUP_URL
+        text, ok = QInputDialog.getText(
+            self, "Set startup page",
+            "Startup page URL (leave blank to open your start page on launch):",
+            QLineEdit.EchoMode.Normal, current)
+        if not ok:
+            return
+        value = _normalize_url(text)
+        if value and not _safe_start_page(value):
+            plain_message(
+                self, QMessageBox.Icon.Warning, "Set startup page",
+                "The startup page must be a normal web page (http:// or "
+                "https://). Nothing was changed.")
+            return
+        if value:
+            STARTUP_URL = value
+            _save_pref("startup_page", value)
+            self.statusBar().showMessage(
+                f"Startup page set to {value} — opens on the next launch.", 5000)
+        else:
+            STARTUP_URL = HOME_URL
+            _save_pref("startup_page", "")
+            self.statusBar().showMessage(
+                "Startup page now follows your start page.", 5000)
 
     def _build_search_engine_menu(self, menu) -> None:
         """Populate the Settings ▸ Search engine submenu: one exclusive radio
