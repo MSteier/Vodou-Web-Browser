@@ -16,6 +16,11 @@ padlock = verified HTTPS), an alphabetical bookmarks bar with favicons, the ✦
 on-device AI-summary button, and a live tracker-blocking counter + version tag
 in the footer.
 
+The first launch after an update pops a one-time celebration — confetti and
+fireworks — congratulating you on the new version:
+
+![Update celebration with confetti and fireworks](docs/vodou-celebrate.png)
+
 ## Installation
 
 **Requirements**
