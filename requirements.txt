@@ -9,3 +9,8 @@ cryptography>=42.0
 # (Vault → Security keys…). The app runs fine without it — that feature
 # simply reports itself unavailable. Windows-only for now (native WebAuthn).
 fido2>=2.0; sys_platform == "win32"
+# Content Credentials (C2PA) verification — the official Content Authenticity
+# Initiative library (Rust core, prebuilt wheels). Powers the right-click
+# "Check content credentials" on-device provenance check. Vodou launches fine
+# without it (the check reports itself unavailable and the menu entry hides).
+c2pa-python>=0.37
