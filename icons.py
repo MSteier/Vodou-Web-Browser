@@ -269,6 +269,32 @@ def _info(p: QPainter, c: QColor) -> None:
     p.drawLine(QPointF(12, 11.5), QPointF(12, 16))
 
 
+def _eye_outline(p: QPainter, c: QColor) -> None:
+    # Almond eye: two arcs bulging apart, symmetric about the horizontal axis.
+    p.setPen(_pen(c, 1.7))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    eye = QPainterPath(QPointF(3.5, 12))
+    eye.quadTo(QPointF(12, 5), QPointF(20.5, 12))
+    eye.quadTo(QPointF(12, 19), QPointF(3.5, 12))
+    p.drawPath(eye)
+
+
+def _eye(p: QPainter, c: QColor) -> None:
+    # Open eye = password is currently visible.
+    _eye_outline(p, c)
+    p.setBrush(c)
+    p.drawEllipse(QPointF(12, 12), 2.5, 2.5)   # pupil
+
+
+def _eye_off(p: QPainter, c: QColor) -> None:
+    # Slashed eye = password is currently hidden (the default state).
+    _eye_outline(p, c)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawEllipse(QPointF(12, 12), 2.5, 2.5)   # hollow pupil
+    p.setPen(_pen(c, 1.8))
+    p.drawLine(QPointF(5, 5), QPointF(19, 19))  # slash
+
+
 _GLYPHS = {
     "back": _back,
     "forward": _forward,
@@ -289,6 +315,8 @@ _GLYPHS = {
     "globe": _globe,
     "info": _info,
     "sparkle": _sparkle,
+    "eye": _eye,
+    "eye-off": _eye_off,
 }
 
 

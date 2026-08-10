@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QGuiApplication, QKeySequence, QShortcut
+from PyQt6.QtGui import QGuiApplication, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -35,6 +35,7 @@ from authenticator import (
     WindowsWebAuthnAuthenticator,
     webauthn_supported,
 )
+from icons import make_icon
 from importers import parse_password_csv, write_password_csv
 from vault import (
     Entry,
@@ -122,18 +123,16 @@ class UnlockDialog(QDialog):
         form = QFormLayout()
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_reveal_toggle(self.password_edit)
         form.addRow("Master password:", self.password_edit)
 
         self.confirm_edit = None
         if self.creating:
             self.confirm_edit = QLineEdit()
             self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            self._add_reveal_toggle(self.confirm_edit)
             form.addRow("Confirm:", self.confirm_edit)
         layout.addLayout(form)
-
-        show = QCheckBox("Show password")
-        show.toggled.connect(self._toggle_echo)
-        layout.addWidget(show)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -171,12 +170,27 @@ class UnlockDialog(QDialog):
         self.reset_requested = True
         self.reject()
 
-    def _toggle_echo(self, on: bool) -> None:
-        mode = (QLineEdit.EchoMode.Normal if on
-                else QLineEdit.EchoMode.Password)
-        self.password_edit.setEchoMode(mode)
-        if self.confirm_edit is not None:
-            self.confirm_edit.setEchoMode(mode)
+    def _add_reveal_toggle(self, edit: QLineEdit) -> None:
+        """Put an eye icon inside the field's right edge that toggles the
+        password between hidden (default) and visible. Replaces the old
+        'Show password' checkbox; each field toggles independently, the icon
+        reflects the current state, and clicking it keeps typing focus."""
+        color = edit.palette().color(QPalette.ColorRole.Text).name()
+        eye = make_icon("eye", color)          # open eye  -> currently visible
+        eye_off = make_icon("eye-off", color)  # slashed   -> currently hidden
+        action = edit.addAction(
+            eye_off, QLineEdit.ActionPosition.TrailingPosition)
+        action.setToolTip("Show password")
+        action.setCheckable(True)
+
+        def toggle(shown: bool) -> None:
+            edit.setEchoMode(QLineEdit.EchoMode.Normal if shown
+                             else QLineEdit.EchoMode.Password)
+            action.setIcon(eye if shown else eye_off)
+            action.setToolTip("Hide password" if shown else "Show password")
+            edit.setFocus()  # a click on the icon must not steal typing focus
+
+        action.toggled.connect(toggle)
 
     def _submit(self) -> None:
         master = self.password_edit.text()
