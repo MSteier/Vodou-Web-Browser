@@ -243,6 +243,9 @@ def _write_prefs(data: dict) -> None:
         tmp = PREFS_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(out), encoding="utf-8")
         tmp.replace(PREFS_FILE)
+        # Every authorized write refreshes the sealed last-known-good snapshot,
+        # so a later on-disk tamper can be reverted to the user's real values.
+        setting_protection.save_snapshot(out)
     except OSError:
         pass
 
@@ -400,6 +403,7 @@ from ai_search import (
 )
 import celebrate
 import content_credentials
+import setting_protection
 from safebrowsing import SafeBrowsing
 from session import (
     clear_snapshot, consume_restart, load_snapshot, mark_restart,
@@ -528,12 +532,35 @@ PREFS_RESET_NOTICE = None
 _prefs = _load_prefs()
 _has_overrides = any(str(_prefs.get(k, "")).strip() for k in _SIGNED_KEYS)
 if _has_overrides and not _prefs_trusted(_prefs):
-    PREFS_RESET_NOTICE = (
-        "Your saved start page, startup page and search engine couldn't be "
-        "verified, so Vodou restored the private defaults. If you customized "
-        "them, set them again from ☰ → Settings.")
-    _write_prefs({"start_page": "", "search_engine": "", "startup_page": ""})
-elif _has_overrides:
+    # The signed values were changed on disk by something other than Vodou's own
+    # Settings UI (adware, an installer, a hand edit). We refuse the tampered
+    # file. If we still hold a sealed snapshot of the user's real last-authorized
+    # values, restore THOSE; otherwise fall back to the private defaults. Either
+    # way the event is recorded for Browser Setting Protection to show.
+    _snapshot = setting_protection.load_snapshot()
+    _restore = {k: str(_snapshot.get(k, "")) for k in _SIGNED_KEYS}
+    _have_snapshot = any(v.strip() for v in _restore.values())
+    setting_protection.record_events(setting_protection.diff_tamper(
+        _snapshot, _prefs, _SIGNED_KEYS,
+        "RESTORED" if _have_snapshot else "RESET"))
+    if _have_snapshot:
+        _write_prefs(_restore)
+        PREFS_RESET_NOTICE = (
+            "Vodou blocked an unauthorized change to your start page, startup "
+            "page or search engine and restored your saved settings. Details in "
+            "☰ → Settings → Privacy & security → Browser Setting Protection.")
+    else:
+        _write_prefs({"start_page": "", "search_engine": "", "startup_page": ""})
+        PREFS_RESET_NOTICE = (
+            "Your saved start page, startup page and search engine couldn't be "
+            "verified, so Vodou restored the private defaults. If you customized "
+            "them, set them again from ☰ → Settings.")
+    _prefs = _load_prefs()
+    _has_overrides = any(str(_prefs.get(k, "")).strip() for k in _SIGNED_KEYS)
+if _has_overrides:
+    # Trusted values — either from the start, or just restored above. Apply them,
+    # and refresh the snapshot so an existing trusted file (set before this
+    # feature) also gains a last-known-good to restore from next time.
     _saved_start = _safe_start_page(
         _normalize_url(str(_prefs.get("start_page", ""))))
     if _saved_start:
@@ -544,6 +571,8 @@ elif _has_overrides:
     _saved_startup = _safe_start_page(
         _normalize_url(str(_prefs.get("startup_page", ""))))
     STARTUP_URL = _saved_startup or HOME_URL
+    setting_protection.save_snapshot(
+        {k: str(_prefs.get(k, "")) for k in _SIGNED_KEYS})
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
 # SearXNG instance). Certificate errors anywhere else are still fatal.
@@ -1889,6 +1918,11 @@ class BrowserWindow(QMainWindow):
         self.safe_browsing_action.toggled.connect(self._set_safe_browsing)
         privacy_menu.addAction("Safe Browsing status…",
                                self.show_safe_browsing_status)
+        sp_action = privacy_menu.addAction(
+            "Browser Setting Protection…", self._show_setting_protection)
+        sp_action.setToolTip(
+            "Your home page, startup page and search engine are signed and "
+            "restored if anything changes them on disk. Review what was blocked.")
         privacy_menu.addSeparator()
         privacy_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
         self.location_guard_action = privacy_menu.addAction("Location Guard")
@@ -3458,6 +3492,94 @@ class BrowserWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Per-site overrides saved ({len(self._location_sites)}). Reload "
             "affected pages to apply.", 6000)
+
+    def _show_setting_protection(self) -> None:
+        """Browser Setting Protection: the protected settings, their signed
+        status, and the history of blocked on-disk tampering. Every value is
+        rendered as plain text — an attempted value is attacker-controlled."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Browser Setting Protection")
+        dlg.setMinimumWidth(560)
+        v = QVBoxLayout(dlg)
+
+        intro = QLabel(
+            "Your home/start page, startup page and default search engine are "
+            "integrity-signed with a per-install key. On every launch Vodou "
+            "verifies them; anything that changes them on disk (adware, an "
+            "installer, a hand edit) fails the check and is reverted to your "
+            "saved value. Always on — there is no legitimate non-Vodou writer "
+            "to allow.")
+        intro.setWordWrap(True)
+        v.addWidget(intro)
+
+        prefs = _load_prefs()
+
+        def shown(key, default_label):
+            val = str(prefs.get(key, "")).strip()
+            return val if val else default_label
+
+        status = QLabel()
+        status.setTextFormat(Qt.TextFormat.PlainText)
+        status.setWordWrap(True)
+        status.setStyleSheet("font-family:'Cascadia Mono',Consolas,monospace;")
+        status.setText("\n".join([
+            "Status: PROTECTED (signed and verified on every launch)", "",
+            f"  Home / start page : {shown('start_page', '(private default)')}",
+            f"  Startup page      : {shown('startup_page', '(follows start page)')}",
+            f"  Default search    : {shown('search_engine', '(private default)')}",
+        ]))
+        v.addWidget(status)
+
+        scope = QLabel(
+            "Scope: Vodou is a QtWebEngine browser — web pages have no path to "
+            "these settings, and there are no extensions, sync, or enterprise "
+            "policy here to guard against. The real protection is against other "
+            "programs editing the settings file on disk.")
+        scope.setWordWrap(True)
+        scope.setStyleSheet("color: palette(mid);")
+        v.addWidget(scope)
+
+        v.addWidget(QLabel("History — blocked changes (newest first):"))
+        lst = QListWidget()
+        events = setting_protection.load_events()
+
+        def show_empty():
+            lst.clear()
+            lst.addItem("No unauthorized changes have been detected.")
+            lst.setEnabled(False)
+
+        if not events:
+            show_empty()
+        else:
+            for e in events:
+                when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(e.time))
+                prev = e.previous or "(none)"
+                att = e.attempted or "(removed)"
+                verb = ("restored your value" if e.action == "RESTORED"
+                        else "reset to default")
+                lst.addItem(f"{when}   {e.label()}\n"
+                            f"    blocked: {prev}  →  {att}\n"
+                            f"    action: {verb}")
+        v.addWidget(lst, 1)
+
+        btns = QHBoxLayout()
+        clear = QPushButton("Clear history")
+
+        def do_clear():
+            setting_protection.clear_events()
+            show_empty()
+            clear.setEnabled(False)
+
+        clear.clicked.connect(do_clear)
+        clear.setEnabled(bool(events))
+        btns.addWidget(clear)
+        btns.addStretch(1)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(dlg.reject)
+        bb.accepted.connect(dlg.accept)
+        btns.addWidget(bb)
+        v.addLayout(btns)
+        dlg.exec()
 
     def check_content_credentials(self, url: QUrl) -> None:
         """Fetch an image and verify its C2PA Content Credential on-device.
