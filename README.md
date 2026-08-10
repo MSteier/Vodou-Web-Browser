@@ -453,9 +453,11 @@ everything; **Start fresh** discards it and opens the usual home tab.
 - **Change master password** — button in the vault window; re-enters and
   verifies the current master first, then re-encrypts the whole vault under
   the new one (with a fresh salt and current-strength scrypt parameters).
-- **Show password** — a toggle on the unlock, create, and change-password
-  prompts reveals what you're typing (off by default), so a long passphrase
-  can be entered without a blind typo.
+- **Reveal password** — an **eye icon inside** the master-password field on
+  the unlock / create window toggles visibility (hidden by default, the icon
+  reflects the current state), so a long passphrase can be entered without a
+  blind typo; the change-master-password dialog keeps a show-password toggle
+  too.
 - **Lock now / log out — Ctrl+Shift+L** (or ☰ menu → *Lock vault (log out)*)
   clears the vault key from memory immediately, without waiting for the
   auto-lock timer; the next vault access asks for the master password again.
