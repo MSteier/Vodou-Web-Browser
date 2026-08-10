@@ -68,7 +68,48 @@ check("script embeds latitude", "35.6762" in js)
 check("script embeds timezone", "Asia/Tokyo" in js)
 check("script overrides geolocation", "getCurrentPosition" in js)
 check("script overrides Intl timezone", "DateTimeFormat" in js and "timeZone" in js)
-check("no unfilled placeholders", "__LAT__" not in js and "__TZ__" not in js)
+check("no unfilled placeholders",
+      not any(p in js for p in ("__LAT__", "__TZ__", "__SITES__", "__GLOBAL__")))
+check("script resolves per hostname", "location.hostname" in js)
+js2 = lp.spoof_script(lp.PRESETS["london"], {"example.com": lp.PRESETS["tokyo"]})
+check("per-site override embedded", "example.com" in js2 and "139.6503" in js2)
+check("global fallback embedded", "51.5074" in js2)
+
+# --- per-site overrides ------------------------------------------------------
+print("\nper-site overrides")
+lp.SITES_FILE = Path(tempfile.mkdtemp()) / "sites.json"
+check("no file -> empty", lp.load_sites() == {})
+lp.save_sites({"a.com": "tokyo", "b.com": "paris", "bad.com": "atlantis"})
+sites = lp.load_sites()
+check("known presets kept, unknown dropped",
+      {h: p.key for h, p in sites.items()} == {"a.com": "tokyo", "b.com": "paris"})
+check("effective: site override wins",
+      lp.effective_profile("a.com", lp.PRESETS["london"], sites).key == "tokyo")
+check("effective: falls back to global",
+      lp.effective_profile("z.com", lp.PRESETS["london"], sites).key == "london")
+check("effective: no global, no site -> None",
+      lp.effective_profile("z.com", None, sites) is None)
+
+# --- Match VPN location (ipapi.co response -> custom profile) -----------------
+print("\nip-geo / custom profile")
+prof = lp.from_ipgeo({
+    "city": "Tokyo", "region": "Tokyo", "country_code": "JP",
+    "country_name": "Japan", "latitude": 35.68, "longitude": 139.76,
+    "timezone": "Asia/Tokyo", "currency": "JPY"})
+check("from_ipgeo builds custom profile",
+      prof is not None and prof.key == "custom" and prof.label == "Tokyo, Japan")
+check("from_ipgeo guesses locale from country", prof.locale == "ja-JP")
+check("from_ipgeo keeps timezone/coords",
+      prof.timezone == "Asia/Tokyo" and abs(prof.latitude - 35.68) < 1e-6)
+check("from_ipgeo error response -> None", lp.from_ipgeo({"error": True}) is None)
+check("from_ipgeo missing country -> None", lp.from_ipgeo({"timezone": "UTC"}) is None)
+# custom profile persists through save/load
+lp.CONFIG_FILE = Path(tempfile.mkdtemp()) / "location.json"
+lp.save(True, True, prof)
+en, gg, back = lp.load()
+check("custom profile round-trips",
+      en and gg and back is not None and back.key == "custom"
+      and back.city == "Tokyo" and back.locale == "ja-JP")
 
 print()
 if _failures:
