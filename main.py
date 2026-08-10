@@ -1463,7 +1463,8 @@ class BrowserWindow(QMainWindow):
         # formatting via the --lang launch flag above. Keep the real default so
         # turning emulation off restores it exactly.
         self._default_accept_language = self.profile.httpAcceptLanguage()
-        self._location_enabled, self._location_profile = location_profile.load()
+        (self._location_enabled, self._location_geo,
+         self._location_profile) = location_profile.load()
         if self._location_enabled and self._location_profile:
             self.profile.setHttpAcceptLanguage(
                 self._location_profile.accept_language())
@@ -1563,8 +1564,19 @@ class BrowserWindow(QMainWindow):
         self._location_guard_script.setRunsOnSubFrames(True)
         self._location_guard_script.setSourceCode(LOCATION_GUARD_JS)
         self._location_guard_on = load_location_guard()
-        if self._location_guard_on:
-            self.profile.scripts().insert(self._location_guard_script)
+        # Geolocation + timezone emulation (script-based; see
+        # location_profile.spoof_script). Same injection as the guard, and it
+        # supersedes the guard's block while active — a page can't be both fed
+        # fake coordinates and denied — so _sync_geolocation_scripts keeps
+        # exactly one of the two installed.
+        self._location_spoof_script = QWebEngineScript()
+        self._location_spoof_script.setName("vodou-location-spoof")
+        self._location_spoof_script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        self._location_spoof_script.setWorldId(
+            QWebEngineScript.ScriptWorldId.MainWorld)
+        self._location_spoof_script.setRunsOnSubFrames(True)
+        self._sync_geolocation_scripts()
 
         # Block Webcam / Block Microphone: deny page requests for the camera
         # and/or mic. Enforced per-page in WebPage._on_permission_requested;
@@ -2641,19 +2653,32 @@ class BrowserWindow(QMainWindow):
             "Safe Browsing on — updating the list…" if on
             else "Safe Browsing off.", 5000)
 
+    def _sync_geolocation_scripts(self) -> None:
+        """Install exactly the right main-world geolocation script. When
+        Location & region emulation is set to spoof geolocation/timezone, that
+        script wins (fake coordinates); otherwise Location Guard's block applies
+        if it's on; otherwise neither. Both target navigator.geolocation, so
+        only one may be installed at a time. Applies to pages loaded from here
+        on (a reload picks it up)."""
+        scripts = self.profile.scripts()
+        for name in ("vodou-location-guard", "vodou-location-spoof"):
+            for script in scripts.find(name):
+                scripts.remove(script)
+        if self._location_geo and self._location_profile:
+            self._location_spoof_script.setSourceCode(
+                location_profile.spoof_script(self._location_profile))
+            scripts.insert(self._location_spoof_script)
+        elif self._location_guard_on:
+            scripts.insert(self._location_guard_script)
+
     def _set_location_guard(self, on: bool) -> None:
-        """Turn precise-geolocation blocking on/off by inserting or removing
-        the main-world shim. Applies to pages loaded from here on."""
+        """Turn precise-geolocation blocking on/off. No effect on geolocation
+        while Location & region emulation is spoofing it (that supersedes)."""
         if on == getattr(self, "_location_guard_on", None):
             return
         self._location_guard_on = on
         save_location_guard(on)
-        scripts = self.profile.scripts()
-        if on:
-            scripts.insert(self._location_guard_script)
-        else:
-            for script in scripts.find("vodou-location-guard"):
-                scripts.remove(script)
+        self._sync_geolocation_scripts()
         self.statusBar().showMessage(
             "Location Guard on — precise location blocked. Reload open pages "
             "to apply." if on else
@@ -3141,6 +3166,10 @@ class BrowserWindow(QMainWindow):
         row.addWidget(combo, 1)
         v.addLayout(row)
 
+        geo = QCheckBox("Also emulate geolocation && timezone (injected script)")
+        geo.setChecked(self._location_geo)
+        v.addWidget(geo)
+
         info = QLabel()
         info.setTextFormat(Qt.TextFormat.PlainText)
         info.setWordWrap(True)
@@ -3150,8 +3179,10 @@ class BrowserWindow(QMainWindow):
         def refresh():
             prof = location_profile.PRESETS[combo.currentData()]
             on = enable.isChecked()
+            geo_on = on and geo.isChecked()
             combo.setEnabled(on)
-            info.setText("\n".join([
+            geo.setEnabled(on)
+            base = [
                 prof.label, "",
                 f"Language / locale : {prof.locale}   "
                 + ("[applied — navigator.language, Accept-Language]"
@@ -3161,15 +3192,26 @@ class BrowserWindow(QMainWindow):
                 f"Preferred langs   : {', '.join(prof.languages)}",
                 f"Currency          : {prof.currency}",
                 f"Measurement       : {prof.measurement}", "",
-                f"Timezone          : {prof.timezone}   [NOT emulated]",
+                f"Timezone          : {prof.timezone}   "
+                + ("[emulated — injected script]" if geo_on else "[NOT emulated]"),
                 f"Geolocation       : {prof.latitude:.4f}, {prof.longitude:.4f}"
-                "   [NOT emulated]", "",
-                "Emulates browser language & locale only. Timezone and",
-                "geolocation are shown for reference but left unchanged, so no",
-                "contradictory location is exposed. It does not change your IP.",
-            ]))
+                "   " + ("[emulated — injected script]" if geo_on
+                         else "[NOT emulated]"), "",
+            ]
+            note = ([
+                "Geolocation & timezone use a script injected before page load,",
+                "across frames. Honest limits: it does NOT reach web/service",
+                "workers, and a determined site can detect it. Not undetectable,",
+                "and it does not change your IP. Reload open pages to apply.",
+            ] if geo_on else [
+                "Language & locale are emulated natively. Timezone and",
+                "geolocation are shown for reference but left unchanged. Tick",
+                "the box above to emulate them too (script-based). No IP change.",
+            ])
+            info.setText("\n".join(base + note))
 
         enable.toggled.connect(refresh)
+        geo.toggled.connect(refresh)
         combo.currentIndexChanged.connect(refresh)
         refresh()
 
@@ -3178,7 +3220,7 @@ class BrowserWindow(QMainWindow):
         diag.clicked.connect(
             lambda: self._show_location_diagnostics(
                 location_profile.PRESETS[combo.currentData()],
-                enable.isChecked()))
+                enable.isChecked(), enable.isChecked() and geo.isChecked()))
         btns.addWidget(diag)
         btns.addStretch(1)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
@@ -3190,38 +3232,55 @@ class BrowserWindow(QMainWindow):
 
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self._apply_location(enable.isChecked(),
+        self._apply_location(enable.isChecked(), geo.isChecked(),
                              location_profile.PRESETS[combo.currentData()])
 
-    def _apply_location(self, enabled: bool, profile) -> None:
-        """Persist and apply the choice. navigator.language(s)/Accept-Language
-        change live; Intl formatting (the --lang launch flag) needs a restart,
-        which we ask for only when that value actually changed."""
+    def _apply_location(self, enabled: bool, geo: bool, profile) -> None:
+        """Persist and apply. navigator.language(s)/Accept-Language change live;
+        geolocation+timezone are (de)installed as an injected script and apply
+        on the next page load; Intl formatting (the --lang launch flag) needs a
+        restart, asked for only when that value actually changed."""
         before = location_profile.chromium_lang_flag()
-        location_profile.save(enabled, profile if enabled else None)
+        location_profile.save(enabled, geo, profile if enabled else None)
         self._location_enabled = enabled
+        self._location_geo = enabled and geo
         self._location_profile = profile if enabled else None
         if enabled:
             self.profile.setHttpAcceptLanguage(profile.accept_language())
-            self.statusBar().showMessage(
-                f"Location emulation on — language set to {profile.locale} "
-                "(timezone/geolocation unchanged).", 7000)
         else:
             self.profile.setHttpAcceptLanguage(self._default_accept_language)
+        self._sync_geolocation_scripts()
+        if enabled and self._location_geo:
+            self.statusBar().showMessage(
+                f"Location emulation on — {profile.label}: language, geolocation "
+                "& timezone. Reload pages for geolocation/timezone.", 8000)
+        elif enabled:
+            self.statusBar().showMessage(
+                f"Location emulation on — language {profile.locale} "
+                "(geolocation/timezone off).", 7000)
+        else:
             self.statusBar().showMessage("Location emulation off.", 5000)
         if location_profile.chromium_lang_flag() != before:
             self._prompt_restart(
                 "Date & number formatting (Intl) for the chosen region takes "
                 "effect on restart.")
 
-    def _show_location_diagnostics(self, profile, enabled: bool) -> None:
+    def _show_location_diagnostics(self, profile, enabled: bool,
+                                   geo: bool) -> None:
         real = "(your real setting)"
+        tz_line = (f"  Timezone     {profile.timezone}  — emulated (injected)"
+                   if geo else
+                   f"  Timezone     {profile.timezone}  — real timezone kept")
+        geo_line = (f"  Geolocation  {profile.latitude:.4f}, "
+                    f"{profile.longitude:.4f}  — "
+                    + ("emulated (injected)" if geo else "not overridden"))
         plain_message(self, QMessageBox.Icon.Information,
                       "Location Emulation Diagnostics", "\n".join([
             "Location Emulation Diagnostics", "",
             f"Enabled: {'YES' if enabled else 'NO'}",
+            f"Geolocation/timezone: {'YES (script)' if geo else 'NO'}",
             f"Region:  {profile.label}", "",
-            "APPLIED (native — no script injection, no debug port)",
+            "LANGUAGE / LOCALE (native — no script, no debug port)",
             f"  navigator.language   {profile.locale if enabled else real}",
             f"  navigator.languages  "
             f"{', '.join(profile.languages) if enabled else real}",
@@ -3231,17 +3290,16 @@ class BrowserWindow(QMainWindow):
             f"{(profile.locale + '  (after restart)') if enabled else real}",
             f"  Currency (display)   {profile.currency}",
             f"  Measurement          {profile.measurement}", "",
-            "NOT EMULATED (this version)",
-            f"  Timezone     {profile.timezone}  — real timezone kept",
-            f"  Geolocation  {profile.latitude:.4f}, {profile.longitude:.4f}"
-            "  — not overridden",
+            "GEOLOCATION / TIMEZONE (script-based when on)",
+            tz_line,
+            geo_line,
             "  Public IP    unchanged — the browser never changes your IP", "",
             "Consistency",
-            "  ok  language / locale / currency agree",
-            "  --  timezone & geolocation not emulated (nothing contradictory "
-            "claimed)", "",
-            "Emulates browser language & locale only. Not a VPN, not a location "
-            "or IP change.",
+            "  ok  language / locale / currency agree"
+            + ("" if not geo else "\n  ok  geolocation / timezone agree"),
+            "", "Script-based geolocation/timezone does NOT reach web/service "
+            "workers and is detectable by a determined site. Not a VPN, not an "
+            "IP change, not undetectable.",
         ]))
 
     def check_content_credentials(self, url: QUrl) -> None:

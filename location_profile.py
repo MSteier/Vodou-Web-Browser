@@ -108,23 +108,31 @@ PRESETS: dict[str, LocationProfile] = {
 }
 
 
-def load() -> tuple[bool, LocationProfile | None]:
-    """(enabled, profile) as saved. profile is a known preset or None."""
+def load() -> tuple[bool, bool, LocationProfile | None]:
+    """(enabled, geo, profile) as saved.
+
+    enabled — master switch; when on, language/locale is emulated natively.
+    geo     — additionally emulate geolocation + timezone via an injected
+              script (only meaningful when enabled and a profile is set).
+    profile — a known preset, or None.
+    """
     try:
         data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return False, None
+            return False, False, None
     except (OSError, ValueError):
-        return False, None
+        return False, False, None
     prof = PRESETS.get(str(data.get("key", "")))
-    return bool(data.get("enabled")) and prof is not None, prof
+    on = bool(data.get("enabled")) and prof is not None
+    return on, on and bool(data.get("geo")), prof
 
 
-def save(enabled: bool, profile: LocationProfile | None) -> None:
-    """Persist the on/off state and chosen preset, atomically."""
+def save(enabled: bool, geo: bool, profile: LocationProfile | None) -> None:
+    """Persist the on/off state, geolocation/timezone toggle, and preset."""
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        out = {"enabled": bool(enabled) and profile is not None,
+        on = bool(enabled) and profile is not None
+        out = {"enabled": on, "geo": on and bool(geo),
                "key": profile.key if profile else ""}
         tmp = CONFIG_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(out), encoding="utf-8")
@@ -137,5 +145,66 @@ def chromium_lang_flag() -> str:
     """' --lang=<locale>' for the saved profile when emulation is on, else ''.
     Read at launch (before Qt initializes) so Intl formatting is localized too.
     Returns nothing when disabled, so the browser keeps its real Intl locale."""
-    enabled, prof = load()
-    return f" --lang={prof.chromium_lang()}" if enabled and prof else ""
+    on, _geo, prof = load()
+    return f" --lang={prof.chromium_lang()}" if on and prof else ""
+
+
+# Injected at DocumentCreation in each frame's MAIN world (it must replace what
+# the page itself sees) when geolocation/timezone emulation is on. This is
+# script-based, so its honest limits apply: it does not reach dedicated/service
+# workers, and a determined page can detect the override. It covers the primary
+# signals — navigator.geolocation and the Intl/Date timezone.
+_SPOOF_JS = r"""(function(){
+  "use strict";
+  var LAT=__LAT__, LON=__LON__, ACC=__ACC__, TZ="__TZ__";
+  // --- geolocation -> fixed coordinates ---
+  if ("geolocation" in navigator) {
+    var proto = Object.getPrototypeOf(navigator.geolocation) || navigator.geolocation;
+    function fix(){ return {coords:{latitude:LAT,longitude:LON,accuracy:ACC,
+      altitude:null,altitudeAccuracy:null,heading:null,speed:null},
+      timestamp:Date.now()}; }
+    function def(n,v){ try{ Object.defineProperty(proto,n,
+      {value:v,configurable:true,writable:true}); }catch(e){} }
+    def("getCurrentPosition", function(ok){
+      if (typeof ok==="function") setTimeout(function(){ try{ok(fix());}catch(e){} },0); });
+    var wid=1;
+    def("watchPosition", function(ok){
+      if (typeof ok==="function") setTimeout(function(){ try{ok(fix());}catch(e){} },0);
+      return wid++; });
+    def("clearWatch", function(){});
+  }
+  // --- timezone -> Intl default + getTimezoneOffset ---
+  try {
+    var Real = Intl.DateTimeFormat;
+    function Patched(){
+      var a = Array.prototype.slice.call(arguments);
+      var o = a[1] || {};
+      if (!o.timeZone) o = Object.assign({}, o, {timeZone: TZ});
+      if (this instanceof Patched) return new Real(a[0], o);
+      return Real(a[0], o);
+    }
+    Patched.prototype = Real.prototype;
+    Patched.supportedLocalesOf = Real.supportedLocalesOf;
+    Intl.DateTimeFormat = Patched;
+    function offMin(d){
+      try {
+        var f = new Real("en-US",{timeZone:TZ,hour12:false,year:"numeric",
+          month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"});
+        var p={}; f.formatToParts(d).forEach(function(x){p[x.type]=x.value;});
+        var u = Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute,+p.second);
+        return -Math.round((u - d.getTime())/60000);
+      } catch(e){ return 0; }
+    }
+    Object.defineProperty(Date.prototype,"getTimezoneOffset",
+      {value:function(){ return offMin(this); },configurable:true,writable:true});
+  } catch(e){}
+})();"""
+
+
+def spoof_script(profile: LocationProfile) -> str:
+    """The geolocation + timezone override script for a profile."""
+    return (_SPOOF_JS
+            .replace("__LAT__", repr(float(profile.latitude)))
+            .replace("__LON__", repr(float(profile.longitude)))
+            .replace("__ACC__", repr(int(profile.accuracy)))
+            .replace("__TZ__", profile.timezone.replace('"', "")))
