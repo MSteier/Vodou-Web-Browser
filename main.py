@@ -345,6 +345,7 @@ from PyQt6.QtGui import (
     QAction, QActionGroup, QColor, QCursor, QDrag, QKeySequence, QShortcut,
 )
 from PyQt6.QtWebEngineCore import (
+    QWebEngineContextMenuRequest,
     QWebEngineDownloadRequest,
     QWebEnginePage,
     QWebEnginePermission,
@@ -353,7 +354,12 @@ from PyQt6.QtWebEngineCore import (
     QWebEngineSettings,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtNetwork import QNetworkProxy
+from PyQt6.QtNetwork import (
+    QNetworkAccessManager,
+    QNetworkProxy,
+    QNetworkReply,
+    QNetworkRequest,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -415,6 +421,7 @@ from ai_search import (
     save_config as save_ai_config,
 )
 import celebrate
+import content_credentials
 from safebrowsing import SafeBrowsing
 from session import (
     clear_snapshot, consume_restart, load_snapshot, mark_restart,
@@ -686,6 +693,32 @@ def to_url(text: str) -> QUrl:
     if looks_like_host:
         return QUrl("https://" + text)
     return QUrl(SEARCH_URL.format(QUrl.toPercentEncoding(text).data().decode()))
+
+
+def _guess_image_mime(url: QUrl) -> str:
+    """Best-effort image MIME from a URL's extension (fallback image/jpeg)."""
+    name = url.fileName()
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return {
+        "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+        "webp": "image/webp", "gif": "image/gif", "tif": "image/tiff",
+        "tiff": "image/tiff", "avif": "image/avif", "heic": "image/heic",
+        "heif": "image/heif",
+    }.get(ext, "image/jpeg")
+
+
+def _decode_data_url(s: str) -> tuple[bytes | None, str]:
+    """Bytes + MIME from a data: URL, or (None, ...) if it can't be parsed."""
+    import base64
+    import urllib.parse
+    try:
+        header, _, payload = s[len("data:"):].partition(",")
+        mime = (header.split(";")[0] or "image/jpeg").strip()
+        if ";base64" in header:
+            return base64.b64decode(payload), mime
+        return urllib.parse.unquote_to_bytes(payload), mime
+    except Exception:  # noqa: BLE001
+        return None, "image/jpeg"
 
 
 class WebPage(QWebEnginePage):
@@ -1019,6 +1052,27 @@ class WebView(QWebEngineView):
         settings.setAttribute(attr.LocalContentCanAccessFileUrls, False)
         settings.setAttribute(attr.AllowRunningInsecureContent, False)
         settings.setAttribute(attr.ScrollAnimatorEnabled, True)
+
+    def contextMenuEvent(self, event) -> None:
+        """Standard right-click menu, plus a 'Check content credentials' entry
+        on images so their C2PA provenance can be verified on-device."""
+        menu = self.createStandardContextMenu()
+        req = self.lastContextMenuRequest()
+        image = QWebEngineContextMenuRequest.MediaType.MediaTypeImage
+        if (req is not None and req.mediaType() == image
+                and content_credentials.available()):
+            url = QUrl(req.mediaUrl())
+            if url.isValid() and not url.isEmpty():
+                menu.addSeparator()
+                act = menu.addAction("Check content credentials…")
+                act.setToolTip(
+                    "Verify this image's signed provenance on-device — who "
+                    "signed it, whether it declares itself AI-generated, and "
+                    "whether it is untampered. Not a deepfake detector.")
+                act.triggered.connect(
+                    lambda _=False, u=url:
+                    self.browser.check_content_credentials(u))
+        menu.exec(event.globalPos())
 
     def createWindow(self, _type):
         return self.browser.add_tab()
@@ -1421,6 +1475,10 @@ class BrowserWindow(QMainWindow):
             lambda n: self.statusBar().showMessage(
                 f"Safe Browsing: {n:,} reported unsafe sites loaded.", 5000))
         QTimer.singleShot(12000, self.safe_browsing.start)
+
+        # Fetches an image's bytes on demand so its C2PA Content Credential can
+        # be verified locally (right-click image → Check content credentials).
+        self._cc_nam = QNetworkAccessManager(self)
 
         # On-demand local AI via a local Ollama instance (see ai_search.py):
         # summaries of search results, and free-form "ask anything" chat.
@@ -3034,6 +3092,74 @@ class BrowserWindow(QMainWindow):
         self.lock_action.setIcon(self._lock_icons[state])
         self.lock_action.setToolTip(tip)
         self._lock_state = state
+
+    def check_content_credentials(self, url: QUrl) -> None:
+        """Fetch an image and verify its C2PA Content Credential on-device.
+        data: images are read inline; http(s)/file images are re-fetched (from
+        the same place the page already loaded them). Other schemes can't be
+        read, so we say so rather than guess."""
+        scheme = url.scheme().lower()
+        if scheme == "data":
+            data, mime = _decode_data_url(url.toString())
+            if data is None:
+                plain_message(self, QMessageBox.Icon.Warning,
+                              "Content Credentials",
+                              "This inline image couldn't be read to check it.")
+                return
+            self._show_credential_result(
+                content_credentials.verify_image(data, mime))
+            return
+        if scheme not in ("http", "https", "file"):
+            plain_message(self, QMessageBox.Icon.Information,
+                          "Content Credentials",
+                          "This image can't be fetched to check — only http(s), "
+                          "local files, and inline images are supported.")
+            return
+        self.statusBar().showMessage("Checking content credentials…")
+        reply = self._cc_nam.get(QNetworkRequest(url))
+        reply.finished.connect(lambda r=reply, u=url: self._on_cc_reply(r, u))
+
+    def _on_cc_reply(self, reply, url: QUrl) -> None:
+        self.statusBar().clearMessage()
+        ok = reply.error() == QNetworkReply.NetworkError.NoError
+        data = bytes(reply.readAll())
+        ctype = reply.header(QNetworkRequest.KnownHeaders.ContentTypeHeader)
+        reply.deleteLater()
+        if not ok or not data:
+            plain_message(self, QMessageBox.Icon.Warning, "Content Credentials",
+                          "Couldn't download this image to check it.")
+            return
+        mime = (str(ctype).split(";")[0].strip() if ctype
+                else _guess_image_mime(url))
+        self._show_credential_result(
+            content_credentials.verify_image(data, mime or "image/jpeg"))
+
+    def _show_credential_result(self, result) -> None:
+        """Present a CredentialResult honestly. Text is PlainText (the signer /
+        generator are attacker-controlled), and the closing note makes clear
+        that 'no credential' means unknown, never 'authentic'."""
+        icon = {
+            "trusted": QMessageBox.Icon.Information,
+            "untrusted": QMessageBox.Icon.Warning,
+            "invalid": QMessageBox.Icon.Critical,
+            "none": QMessageBox.Icon.Information,
+        }.get(result.status, QMessageBox.Icon.Warning)
+        lines = [result.headline, "", result.detail]
+        if result.status in ("trusted", "untrusted", "invalid"):
+            if result.ai_generated:
+                lines += ["", "⚠ This credential declares the image was "
+                              "AI / algorithmically generated."]
+            if result.signer:
+                lines += ["", f"Signer: {result.signer}"]
+            if result.signed_time:
+                lines += [f"Signed: {result.signed_time}"]
+            if result.generator:
+                lines += [f"Created with: {result.generator}"]
+        lines += ["", "— Vodou verifies signed provenance (C2PA) on your "
+                      "device. It cannot detect a fake that carries no "
+                      "credential: “no credential” means unknown, not "
+                      "authentic."]
+        plain_message(self, icon, "Content Credentials", "\n".join(lines))
 
     def show_certificate(self) -> None:
         url = self.current_view().url()
