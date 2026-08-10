@@ -46,17 +46,29 @@ check("label format", tok.label == "Tokyo, Japan")
 # --- persistence round-trip (isolated file) ----------------------------------
 print("\npersistence")
 lp.CONFIG_FILE = Path(tempfile.mkdtemp()) / "location.json"
-check("no file -> disabled, no profile", lp.load() == (False, None))
-lp.save(True, lp.PRESETS["tokyo"])
-enabled, prof = lp.load()
-check("save/load enabled tokyo", enabled and prof is not None and prof.key == "tokyo")
+check("no file -> off", lp.load() == (False, False, None))
+lp.save(True, False, lp.PRESETS["tokyo"])
+en, gg, prof = lp.load()
+check("save/load enabled tokyo, geo off", en and not gg and prof.key == "tokyo")
 check("flag on -> --lang=ja-JP", lp.chromium_lang_flag() == " --lang=ja-JP")
-lp.save(False, None)
-check("save disabled", lp.load() == (False, None))
+lp.save(True, True, lp.PRESETS["tokyo"])
+check("geo persists when set", lp.load()[1] is True)
+check("geo requires enabled", lp.save(False, True, None) or lp.load()[1] is False)
+lp.save(False, False, None)
+check("save disabled -> off", lp.load() == (False, False, None))
 check("flag off -> empty", lp.chromium_lang_flag() == "")
-# a bogus key on disk must not enable anything
-lp.CONFIG_FILE.write_text('{"enabled": true, "key": "atlantis"}', encoding="utf-8")
-check("unknown preset -> disabled", lp.load()[0] is False)
+lp.CONFIG_FILE.write_text('{"enabled": true, "geo": true, "key": "atlantis"}',
+                          encoding="utf-8")
+check("unknown preset -> off", lp.load() == (False, False, None))
+
+# --- spoof script generation -------------------------------------------------
+print("\nspoof script")
+js = lp.spoof_script(lp.PRESETS["tokyo"])
+check("script embeds latitude", "35.6762" in js)
+check("script embeds timezone", "Asia/Tokyo" in js)
+check("script overrides geolocation", "getCurrentPosition" in js)
+check("script overrides Intl timezone", "DateTimeFormat" in js and "timeZone" in js)
+check("no unfilled placeholders", "__LAT__" not in js and "__TZ__" not in js)
 
 print()
 if _failures:
