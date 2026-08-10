@@ -452,7 +452,12 @@ from about import (
     VERSION_DISPLAY,
     AboutDialog,
     UpdateChecker,
+    clear_engine_outdated,
+    engine_nag_due,
     engine_versions,
+    installed_engine_version,
+    mark_engine_nagged,
+    note_engine_outdated,
 )
 from theme import THEMES, apply_theme, build_palette, load_prefs, save_prefs
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
@@ -1017,6 +1022,22 @@ class VersionLabel(QLabel):
         self.setText(f"Vodou v{VERSION_DISPLAY} — update available ⬆ ")
         self.setToolTip(f"Update available: {what}\n"
                         f"Click to open About Vodou and update")
+        self.browser._center_version()  # width changed; keep it centred
+
+    def show_engine_update_available(self, engine_ver: str,
+                                     vodou_ver, days: int) -> None:
+        """A distinct, stronger state for the security-critical engine update:
+        clicking opens About, where one click installs it."""
+        self._update_available = True
+        self.setText(f"Vodou v{VERSION_DISPLAY} — engine update ⚠ ")
+        aged = f", outdated ~{days} day{'s' if days != 1 else ''}" if days else ""
+        what = f"browser engine {engine_ver}{aged}"
+        if vodou_ver:
+            what = f"Vodou v{vodou_ver} and {what}"
+        self.setToolTip(
+            f"Security update available: {what}\n"
+            "The engine renders and sandboxes every page — keeping it current "
+            "matters most.\nClick to open About Vodou and update")
         self.browser._center_version()  # width changed; keep it centred
 
     def show_up_to_date(self, restart_needed: bool = False) -> None:
@@ -1698,10 +1719,15 @@ class BrowserWindow(QMainWindow):
 
         # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
         # files). Delayed so it never competes with first-page load; failures
-        # stay silent.
+        # stay silent. Re-run every 6 hours so a long-lived session still
+        # notices an engine security update that lands mid-run.
+        self._engine_nagged_this_session = False
         self._update_checker = UpdateChecker(self)
         self._update_checker.finished.connect(self._on_update_check)
         QTimer.singleShot(10000, self._update_checker.start)
+        self._update_recheck_timer = QTimer(self)
+        self._update_recheck_timer.timeout.connect(self._update_checker.start)
+        self._update_recheck_timer.start(6 * 3600 * 1000)
 
     # -- UI ---------------------------------------------------------------
 
@@ -4303,19 +4329,59 @@ class BrowserWindow(QMainWindow):
         self.version_label.show_up_to_date(restart_needed=updated)
 
     def _on_update_check(self, vodou_ver, engine_ver) -> None:
-        if not vodou_ver and not engine_ver:
-            self.version_label.show_up_to_date()
-            return
-        parts = []
-        if vodou_ver:
-            parts.append(f"Vodou v{vodou_ver}")
         if engine_ver:
-            parts.append(f"browser engine {engine_ver}")
-        what = " and ".join(parts)
-        self.version_label.show_update_available(what)
-        self.statusBar().showMessage(
-            f"Update available: {what} — click the version tag or open "
-            f"☰ → About Vodou to install.", 15000)
+            # The engine is the security-critical part — nudge it harder.
+            days = note_engine_outdated(engine_ver)
+            self.version_label.show_engine_update_available(
+                engine_ver, vodou_ver, days)
+            self.statusBar().showMessage(
+                f"Security update available: browser engine {engine_ver} — "
+                "click the version tag or open ☰ → About Vodou to install.",
+                20000)
+            if not self._engine_nagged_this_session and engine_nag_due():
+                self._engine_nagged_this_session = True
+                mark_engine_nagged()
+                self._show_engine_update_nudge(engine_ver, days)
+            return
+        # Engine is current: forget any staleness tracking.
+        clear_engine_outdated()
+        if vodou_ver:
+            self.version_label.show_update_available(f"Vodou v{vodou_ver}")
+            self.statusBar().showMessage(
+                f"Update available: Vodou v{vodou_ver} — click the version tag "
+                "or open ☰ → About Vodou to install.", 15000)
+        else:
+            self.version_label.show_up_to_date()
+
+    def _show_engine_update_nudge(self, engine_ver: str, days: int) -> None:
+        """A once-a-day startup reminder for an outdated engine, with wording
+        that escalates by how long it has been out of date. 'Update now' opens
+        the one-click updater; 'Remind me later' defers for a day."""
+        installed = installed_engine_version()
+        strong = days >= 14
+        aged = (f" It has been out of date for about {days} "
+                f"day{'s' if days != 1 else ''}." if days >= 1 else "")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Browser engine security update available")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(
+            "Vodou's web engine — the Chromium build that renders and "
+            "sandboxes every page — has a newer version available:\n\n"
+            f"    {installed}  →  {engine_ver}\n\n"
+            "The engine is the security-critical part of the browser, and "
+            "Vodou's engine updates less often than Chrome's, so keeping it "
+            "current is the most important thing for staying safe." + aged
+            + ("\n\nUpdating is strongly recommended." if strong else "")
+            + "\n\nUpdate now? It runs in the background — you can keep "
+              "browsing, and update later from ☰ → About Vodou.")
+        update = box.addButton("Update now…",
+                               QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Remind me later", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(update)
+        box.exec()
+        if box.clickedButton() is update:
+            self.show_about()
 
     # -- plugins ----------------------------------------------------------
 

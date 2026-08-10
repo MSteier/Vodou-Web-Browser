@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from importlib import metadata
 from pathlib import Path
 
@@ -44,7 +45,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.47.0"
+APP_VERSION = "1.48.0"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -108,6 +109,73 @@ def _read_local_app_version() -> str:
     return match.group(1) if match else ""
 
 
+def installed_engine_version() -> str:
+    """The bundled Chromium/Qt engine package version, or 'unknown'."""
+    try:
+        return metadata.version("PyQt6-WebEngine")
+    except Exception:
+        return "unknown"
+
+
+# The engine is the security-critical part of the browser and Vodou's engine
+# updates less often than Chrome's, so an outdated engine is nudged harder than
+# an outdated app: a distinct footer state, and a startup reminder throttled to
+# at most once a day. Staleness is tracked by when the newer engine was FIRST
+# seen available, an honest time-based "how far behind".
+UPDATE_STATE_FILE = Path.home() / ".vodou" / "update_state.json"
+_ENGINE_NAG_INTERVAL_S = 24 * 3600  # at most one engine reminder dialog per day
+
+
+def _load_update_state() -> dict:
+    try:
+        data = json.loads(UPDATE_STATE_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_update_state(data: dict) -> None:
+    try:
+        UPDATE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = UPDATE_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(UPDATE_STATE_FILE)
+    except OSError:
+        pass
+
+
+def note_engine_outdated(latest: str) -> int:
+    """Record that engine `latest` is available; return whole days the engine
+    has been out of date (0 the first time this version is seen)."""
+    st = _load_update_state()
+    if st.get("engine_latest") != latest:
+        st = {"engine_latest": latest, "first_seen": time.time(),
+              "last_nagged": 0.0}
+        _save_update_state(st)
+    first = float(st.get("first_seen") or time.time())
+    return max(0, int((time.time() - first) // 86400))
+
+
+def clear_engine_outdated() -> None:
+    """The engine is current — forget any staleness/reminder tracking."""
+    try:
+        UPDATE_STATE_FILE.unlink()
+    except OSError:
+        pass
+
+
+def engine_nag_due() -> bool:
+    """Whether enough time has passed to show the engine reminder again."""
+    last = float(_load_update_state().get("last_nagged") or 0.0)
+    return (time.time() - last) >= _ENGINE_NAG_INTERVAL_S
+
+
+def mark_engine_nagged() -> None:
+    st = _load_update_state()
+    st["last_nagged"] = time.time()
+    _save_update_state(st)
+
+
 class UpdateChecker(QObject):
     """Async check for newer versions of the app (GitHub) and engine (PyPI).
 
@@ -127,6 +195,10 @@ class UpdateChecker(QObject):
         self._pending = 0
 
     def start(self) -> None:
+        if self._pending:
+            return  # a check is already in flight; don't stack another
+        self._vodou = None
+        self._engine = None
         for url, handler in ((_RAW_ABOUT_URL, self._parse_vodou),
                              (_PYPI_JSON_URL, self._parse_engine)):
             reply = self._nam.get(QNetworkRequest(QUrl(url)))

@@ -680,9 +680,19 @@ successfully*, *partly applied*, *failed*, or *nothing needed updating*. It no
 longer reports "you're already current" when something was in fact updated.
 
 The footer shows the running version (click it to open the GitHub repo).
-About ten seconds after startup, Vodou checks whether a newer version of
-either part exists; if so, the footer tag changes to **"update available"**
-and clicking it takes you to the one-click updater.
+About ten seconds after startup — and every six hours while it runs — Vodou
+checks whether a newer version of either part exists; if so, the footer tag
+changes to **"update available"** and clicking it takes you to the one-click
+updater.
+
+Because the **engine** is the security-critical part (it renders and sandboxes
+every page) and Qt WebEngine ships security fixes less often than Chrome, an
+outdated engine is nudged harder than an outdated app: the footer shows a
+distinct **"engine update ⚠"** state with how long it has been out of date, and
+once a day a startup reminder spells out the installed → available versions and
+recommends updating (more firmly the longer it has lagged). It's a single
+dismissible prompt — **Remind me later** defers it for a day — never a
+per-launch nag, and it never appears once the engine is current.
 
 *Privacy note:* the startup check makes two anonymous HTTPS GETs of public
 files — `raw.githubusercontent.com` (Vodou's version number) and `pypi.org`
