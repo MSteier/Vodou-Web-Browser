@@ -379,6 +379,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -1465,6 +1466,10 @@ class BrowserWindow(QMainWindow):
         self._default_accept_language = self.profile.httpAcceptLanguage()
         (self._location_enabled, self._location_geo,
          self._location_profile) = location_profile.load()
+        # Per-site geolocation/timezone overrides (host -> preset). Language
+        # stays the global setting (one profile can't vary Accept-Language per
+        # site without leaking across tabs), so these refine geo/timezone only.
+        self._location_sites = location_profile.load_sites()
         if self._location_enabled and self._location_profile:
             self.profile.setHttpAcceptLanguage(
                 self._location_profile.accept_language())
@@ -2666,7 +2671,8 @@ class BrowserWindow(QMainWindow):
                 scripts.remove(script)
         if self._location_geo and self._location_profile:
             self._location_spoof_script.setSourceCode(
-                location_profile.spoof_script(self._location_profile))
+                location_profile.spoof_script(
+                    self._location_profile, self._location_sites))
             scripts.insert(self._location_spoof_script)
         elif self._location_guard_on:
             scripts.insert(self._location_guard_script)
@@ -3158,17 +3164,31 @@ class BrowserWindow(QMainWindow):
         row = QHBoxLayout()
         row.addWidget(QLabel("Region:"))
         combo = QComboBox()
-        keys = list(location_profile.PRESETS)
-        for k in keys:
+        profiles = dict(location_profile.PRESETS)
+        cur = self._location_profile
+        if cur is not None and cur.key == "custom":
+            profiles["custom"] = cur
+            combo.addItem("Custom (from IP): " + cur.label, "custom")
+        for k in location_profile.PRESETS:
             combo.addItem(location_profile.PRESETS[k].label, k)
-        if self._location_profile:
-            combo.setCurrentIndex(keys.index(self._location_profile.key))
+        if cur is not None:
+            i = combo.findData(cur.key)
+            if i >= 0:
+                combo.setCurrentIndex(i)
         row.addWidget(combo, 1)
         v.addLayout(row)
+
+        def sel_profile():
+            return profiles[combo.currentData()]
 
         geo = QCheckBox("Also emulate geolocation && timezone (injected script)")
         geo.setChecked(self._location_geo)
         v.addWidget(geo)
+
+        sites_note = QLabel()
+        sites_note.setTextFormat(Qt.TextFormat.PlainText)
+        sites_note.setWordWrap(True)
+        v.addWidget(sites_note)
 
         info = QLabel()
         info.setTextFormat(Qt.TextFormat.PlainText)
@@ -3177,7 +3197,13 @@ class BrowserWindow(QMainWindow):
         v.addWidget(info)
 
         def refresh():
-            prof = location_profile.PRESETS[combo.currentData()]
+            prof = sel_profile()
+            n = len(self._location_sites)
+            sites_note.setText(
+                f"Per-site overrides: {n} site(s) use their own geolocation & "
+                "timezone (applied when the box above is on)." if n else
+                "Per-site overrides: none. Use “Per-site overrides…” to give "
+                "chosen sites their own geolocation & timezone.")
             on = enable.isChecked()
             geo_on = on and geo.isChecked()
             combo.setEnabled(on)
@@ -3215,11 +3241,23 @@ class BrowserWindow(QMainWindow):
         combo.currentIndexChanged.connect(refresh)
         refresh()
 
+        tools = QHBoxLayout()
+        vpn = QPushButton("Match VPN location…")
+        vpn.clicked.connect(
+            lambda: (dlg.reject(),
+                     QTimer.singleShot(0, self._match_vpn_location)))
+        sites_btn = QPushButton("Per-site overrides…")
+        sites_btn.clicked.connect(lambda: (self._show_site_overrides(), refresh()))
+        tools.addWidget(vpn)
+        tools.addWidget(sites_btn)
+        tools.addStretch(1)
+        v.addLayout(tools)
+
         btns = QHBoxLayout()
         diag = QPushButton("Diagnostics…")
         diag.clicked.connect(
             lambda: self._show_location_diagnostics(
-                location_profile.PRESETS[combo.currentData()],
+                sel_profile(),
                 enable.isChecked(), enable.isChecked() and geo.isChecked()))
         btns.addWidget(diag)
         btns.addStretch(1)
@@ -3232,8 +3270,7 @@ class BrowserWindow(QMainWindow):
 
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self._apply_location(enable.isChecked(), geo.isChecked(),
-                             location_profile.PRESETS[combo.currentData()])
+        self._apply_location(enable.isChecked(), geo.isChecked(), sel_profile())
 
     def _apply_location(self, enabled: bool, geo: bool, profile) -> None:
         """Persist and apply. navigator.language(s)/Accept-Language change live;
@@ -3301,6 +3338,154 @@ class BrowserWindow(QMainWindow):
             "workers and is detectable by a determined site. Not a VPN, not an "
             "IP change, not undetectable.",
         ]))
+
+    def _match_vpn_location(self) -> None:
+        """Opt-in: look up the current public IP's location and emulate that
+        region. This is the one Location feature that touches the network, so it
+        is never automatic — it asks first and names the third-party service."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Match VPN / IP location")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(
+            "This sends one HTTPS request to ipapi.co to look up the location of "
+            "your CURRENT public IP address, then emulates that region "
+            "(language, geolocation & timezone).\n\n"
+            "ipapi.co will see the IP you are browsing from — so connect your "
+            "VPN/proxy first. This does NOT change your IP; it only makes the "
+            "browser's reported region match where your IP already appears.\n\n"
+            "Send the lookup now?")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        self.statusBar().showMessage("Looking up your IP location…")
+        req = QNetworkRequest(QUrl(location_profile.IPGEO_URL))
+        req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, b"Vodou")
+        req.setRawHeader(b"Accept", b"application/json")
+        reply = self._cc_nam.get(req)
+        reply.finished.connect(lambda r=reply: self._on_ipgeo_reply(r))
+
+    def _on_ipgeo_reply(self, reply) -> None:
+        self.statusBar().clearMessage()
+        ok = reply.error() == QNetworkReply.NetworkError.NoError
+        raw = bytes(reply.readAll())
+        reply.deleteLater()
+        prof = None
+        if ok and raw:
+            try:
+                prof = location_profile.from_ipgeo(
+                    json.loads(raw.decode("utf-8", "replace")))
+            except ValueError:
+                prof = None
+        if prof is None:
+            plain_message(
+                self, QMessageBox.Icon.Warning, "Match VPN location",
+                "Couldn't determine your IP location (no response, the service "
+                "was rate-limited, or the region isn't recognized). Nothing was "
+                "changed.")
+            return
+        # City/region come from a third-party service — render as plain text.
+        lines = [f"Detected location : {prof.label}"]
+        if prof.region:
+            lines.append(f"Region            : {prof.region}")
+        lines += [
+            f"Timezone          : {prof.timezone}",
+            f"Coordinates       : {prof.latitude:.4f}, {prof.longitude:.4f}",
+            f"Language (guess)  : {prof.locale}  (from country {prof.country_code})",
+            "",
+            "Emulate this region now — language, geolocation & timezone?",
+            "Your IP is not changed.",
+        ]
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Match VPN location")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText("\n".join(lines))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        self._apply_location(True, True, prof)
+
+    def _show_site_overrides(self) -> None:
+        """Manage per-site geolocation/timezone overrides (host -> preset). The
+        browser language stays the global setting — see the note in the dialog."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Per-site location overrides")
+        dlg.setMinimumWidth(460)
+        v = QVBoxLayout(dlg)
+        note = QLabel(
+            "Give specific sites their own geolocation & timezone. These apply "
+            "when “Also emulate geolocation & timezone” is on. The browser "
+            "language stays the global setting (one browser profile can't vary "
+            "Accept-Language per site without leaking across tabs).")
+        note.setWordWrap(True)
+        v.addWidget(note)
+
+        lst = QListWidget()
+        current = {h: p.key for h, p in self._location_sites.items()}
+
+        def repopulate():
+            lst.clear()
+            for host in sorted(current):
+                p = location_profile.PRESETS.get(current[host])
+                lst.addItem(f"{host}  →  {p.label if p else current[host]}")
+
+        repopulate()
+        v.addWidget(lst, 1)
+
+        addrow = QHBoxLayout()
+        host_edit = QLineEdit()
+        host_edit.setPlaceholderText("example.com")
+        combo = QComboBox()
+        for k in location_profile.PRESETS:
+            combo.addItem(location_profile.PRESETS[k].label, k)
+        add = QPushButton("Add / update")
+
+        def do_add():
+            host = host_edit.text().strip().lower().lstrip(".")
+            host = host.split("//")[-1].split("/")[0].split(":")[0]
+            if not host or "." not in host:
+                return
+            current[host] = combo.currentData()
+            host_edit.clear()
+            repopulate()
+
+        add.clicked.connect(do_add)
+        host_edit.returnPressed.connect(do_add)
+        addrow.addWidget(host_edit, 1)
+        addrow.addWidget(combo)
+        addrow.addWidget(add)
+        v.addLayout(addrow)
+
+        rm = QPushButton("Remove selected")
+
+        def do_rm():
+            it = lst.currentItem()
+            if it:
+                current.pop(it.text().split("  →  ")[0], None)
+                repopulate()
+
+        rm.clicked.connect(do_rm)
+        v.addWidget(rm)
+
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                              | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        location_profile.save_sites(current)
+        self._location_sites = location_profile.load_sites()
+        self._sync_geolocation_scripts()
+        self.statusBar().showMessage(
+            f"Per-site overrides saved ({len(self._location_sites)}). Reload "
+            "affected pages to apply.", 6000)
 
     def check_content_credentials(self, url: QUrl) -> None:
         """Fetch an image and verify its C2PA Content Credential on-device.

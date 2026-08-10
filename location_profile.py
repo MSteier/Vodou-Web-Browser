@@ -26,10 +26,11 @@ presented as being *located* in Tokyo. This keeps the feature honest.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 CONFIG_FILE = Path.home() / ".vodou" / "location.json"
+SITES_FILE = Path.home() / ".vodou" / "location_sites.json"
 
 
 @dataclass
@@ -122,23 +123,44 @@ def load() -> tuple[bool, bool, LocationProfile | None]:
             return False, False, None
     except (OSError, ValueError):
         return False, False, None
-    prof = PRESETS.get(str(data.get("key", "")))
+    key = str(data.get("key", ""))
+    prof = (_profile_from_dict(data.get("custom")) if key == "custom"
+            else PRESETS.get(key))
     on = bool(data.get("enabled")) and prof is not None
     return on, on and bool(data.get("geo")), prof
 
 
 def save(enabled: bool, geo: bool, profile: LocationProfile | None) -> None:
-    """Persist the on/off state, geolocation/timezone toggle, and preset."""
+    """Persist the on/off state, geolocation/timezone toggle, and profile (a
+    preset, or a 'custom' profile e.g. from Match VPN location)."""
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         on = bool(enabled) and profile is not None
         out = {"enabled": on, "geo": on and bool(geo),
                "key": profile.key if profile else ""}
+        if on and profile and profile.key == "custom":
+            out["custom"] = asdict(profile)
         tmp = CONFIG_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(out), encoding="utf-8")
         tmp.replace(CONFIG_FILE)
     except OSError:
         pass
+
+
+def _profile_from_dict(d) -> LocationProfile | None:
+    """Rebuild a (custom) profile from stored/derived fields; None if unusable."""
+    if not isinstance(d, dict):
+        return None
+    try:
+        names = {f.name for f in fields(LocationProfile)}
+        kw = {k: v for k, v in d.items() if k in names}
+        kw["key"] = "custom"
+        kw.setdefault("city", "Custom")
+        kw.setdefault("country", "")
+        p = LocationProfile(**kw)
+        return p if p.locale and p.timezone else None
+    except (TypeError, ValueError):
+        return None
 
 
 def chromium_lang_flag() -> str:
@@ -154,9 +176,17 @@ def chromium_lang_flag() -> str:
 # script-based, so its honest limits apply: it does not reach dedicated/service
 # workers, and a determined page can detect the override. It covers the primary
 # signals — navigator.geolocation and the Intl/Date timezone.
+#
+# It resolves the location PER FRAME by hostname: a per-site override wins,
+# otherwise the global profile applies. This is genuinely per-site (each frame
+# picks its own), unlike the language/Accept-Language dimension which is a
+# single browser-profile setting.
 _SPOOF_JS = r"""(function(){
   "use strict";
-  var LAT=__LAT__, LON=__LON__, ACC=__ACC__, TZ="__TZ__";
+  var SITES = __SITES__, GLOBAL = __GLOBAL__;
+  var P = SITES[location.hostname] || GLOBAL;
+  if (!P) return;
+  var LAT=P.lat, LON=P.lon, ACC=P.acc, TZ=P.tz;
   // --- geolocation -> fixed coordinates ---
   if ("geolocation" in navigator) {
     var proto = Object.getPrototypeOf(navigator.geolocation) || navigator.geolocation;
@@ -201,10 +231,115 @@ _SPOOF_JS = r"""(function(){
 })();"""
 
 
-def spoof_script(profile: LocationProfile) -> str:
-    """The geolocation + timezone override script for a profile."""
+def _params(p: LocationProfile) -> dict:
+    return {"lat": float(p.latitude), "lon": float(p.longitude),
+            "acc": int(p.accuracy), "tz": p.timezone}
+
+
+def spoof_script(global_profile: LocationProfile | None,
+                 sites: dict[str, LocationProfile] | None = None) -> str:
+    """The geolocation + timezone override script. `sites` maps hostname ->
+    profile (per-site overrides); `global_profile` is the fallback."""
+    site_map = {host: _params(p) for host, p in (sites or {}).items()}
+    g = _params(global_profile) if global_profile else None
     return (_SPOOF_JS
-            .replace("__LAT__", repr(float(profile.latitude)))
-            .replace("__LON__", repr(float(profile.longitude)))
-            .replace("__ACC__", repr(int(profile.accuracy)))
-            .replace("__TZ__", profile.timezone.replace('"', "")))
+            .replace("__SITES__", json.dumps(site_map))
+            .replace("__GLOBAL__", json.dumps(g)))
+
+
+# --- per-site overrides (host -> preset) -------------------------------------
+def load_sites() -> dict[str, LocationProfile]:
+    """{hostname: profile} of per-site overrides (presets only)."""
+    try:
+        data = json.loads(SITES_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for host, key in data.items():
+        prof = PRESETS.get(str(key))
+        if prof and isinstance(host, str) and host:
+            out[host] = prof
+    return out
+
+
+def save_sites(mapping: dict[str, str]) -> None:
+    """Persist {hostname: preset_key}, keeping only known presets/hosts."""
+    try:
+        SITES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        clean = {h: k for h, k in mapping.items() if k in PRESETS and h}
+        tmp = SITES_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(clean), encoding="utf-8")
+        tmp.replace(SITES_FILE)
+    except OSError:
+        pass
+
+
+def effective_profile(host: str, global_profile: LocationProfile | None,
+                      sites: dict[str, LocationProfile] | None
+                      ) -> LocationProfile | None:
+    """Precedence: an exact per-site override wins, else the global profile."""
+    return (sites or {}).get(host) or global_profile
+
+
+# --- Match VPN location: derive a profile from IP geolocation ----------------
+# countryCode -> (locale, language_name, languages, currency, measurement). A
+# best-effort guess for the region's language when only the country is known;
+# the user can always override the result.
+COUNTRY_LOCALE = {
+    "US": ("en-US", "English (United States)", ["en-US", "en"], "USD", "imperial"),
+    "GB": ("en-GB", "English (United Kingdom)", ["en-GB", "en"], "GBP", "metric"),
+    "JP": ("ja-JP", "Japanese", ["ja-JP", "ja", "en"], "JPY", "metric"),
+    "AU": ("en-AU", "English (Australia)", ["en-AU", "en"], "AUD", "metric"),
+    "FR": ("fr-FR", "French (France)", ["fr-FR", "fr", "en"], "EUR", "metric"),
+    "DE": ("de-DE", "German (Germany)", ["de-DE", "de", "en"], "EUR", "metric"),
+    "CA": ("en-CA", "English (Canada)", ["en-CA", "en", "fr-CA"], "CAD", "metric"),
+    "BR": ("pt-BR", "Portuguese (Brazil)", ["pt-BR", "pt", "en"], "BRL", "metric"),
+    "ES": ("es-ES", "Spanish (Spain)", ["es-ES", "es", "en"], "EUR", "metric"),
+    "IT": ("it-IT", "Italian (Italy)", ["it-IT", "it", "en"], "EUR", "metric"),
+    "NL": ("nl-NL", "Dutch (Netherlands)", ["nl-NL", "nl", "en"], "EUR", "metric"),
+    "MX": ("es-MX", "Spanish (Mexico)", ["es-MX", "es", "en"], "MXN", "metric"),
+    "IN": ("en-IN", "English (India)", ["en-IN", "hi", "en"], "INR", "metric"),
+    "CN": ("zh-CN", "Chinese (Simplified)", ["zh-CN", "zh", "en"], "CNY", "metric"),
+    "KR": ("ko-KR", "Korean", ["ko-KR", "ko", "en"], "KRW", "metric"),
+    "RU": ("ru-RU", "Russian", ["ru-RU", "ru", "en"], "RUB", "metric"),
+    "SE": ("sv-SE", "Swedish", ["sv-SE", "sv", "en"], "SEK", "metric"),
+    "SG": ("en-SG", "English (Singapore)", ["en-SG", "en"], "SGD", "metric"),
+    "CH": ("de-CH", "German (Switzerland)", ["de-CH", "de", "fr-CH"], "CHF", "metric"),
+    "NL": ("nl-NL", "Dutch (Netherlands)", ["nl-NL", "nl", "en"], "EUR", "metric"),
+}
+
+
+IPGEO_URL = "https://ipapi.co/json/"
+
+
+def from_ipgeo(data: dict) -> LocationProfile | None:
+    """Build a custom profile from an ipapi.co response, guessing the locale
+    from the country. Returns None on an error / malformed response."""
+    try:
+        if data.get("error"):
+            return None
+        cc = str(data.get("country_code", "")).upper()
+        if not cc:
+            return None
+        locale, lang_name, langs, currency, meas = COUNTRY_LOCALE.get(
+            cc, ("en-US", "English (United States)", ["en-US", "en"], "USD", "metric"))
+        tz = str(data.get("timezone", "") or "")
+        if not tz:
+            return None
+        return LocationProfile(
+            key="custom",
+            city=str(data.get("city", "") or "Unknown"),
+            country=str(data.get("country_name", "") or cc),
+            country_code=cc,
+            region=str(data.get("region", "") or ""),
+            latitude=float(data.get("latitude", 0.0)),
+            longitude=float(data.get("longitude", 0.0)),
+            accuracy=1000,
+            timezone=tz,
+            locale=locale, language_name=lang_name, languages=list(langs),
+            currency=str(data.get("currency", "") or currency),
+            measurement=meas)
+    except (TypeError, ValueError):
+        return None
