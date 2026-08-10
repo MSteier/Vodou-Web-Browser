@@ -298,12 +298,17 @@ def _gfx_flags() -> str:
     return GFX_MODES[mode]
 
 
+import location_profile
+
 # Must be set before Qt WebEngine initializes. The WebRTC policy stops local
-# IP enumeration (a classic IP-leak / fingerprinting vector).
+# IP enumeration (a classic IP-leak / fingerprinting vector). The --lang flag
+# (appended when Location & region emulation is on) localizes Intl date/number
+# formatting to the chosen region; it can only be read at launch, so changing
+# the region asks for a restart. The WebRTC flag is always preserved.
 os.environ.setdefault(
     "QTWEBENGINE_CHROMIUM_FLAGS",
     "--force-webrtc-ip-handling-policy=default_public_interface_only "
-    + _gfx_flags())
+    + _gfx_flags() + location_profile.chromium_lang_flag())
 
 import platform
 import secrets
@@ -1424,6 +1429,17 @@ class BrowserWindow(QMainWindow):
             QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
         self.profile.setHttpUserAgent(GENERIC_USER_AGENT)
 
+        # Location & region emulation (☰ → Settings → Privacy & security →
+        # Location & region…). The saved profile's language/locale is applied
+        # natively: navigator.language(s) and Accept-Language live here; Intl
+        # formatting via the --lang launch flag above. Keep the real default so
+        # turning emulation off restores it exactly.
+        self._default_accept_language = self.profile.httpAcceptLanguage()
+        self._location_enabled, self._location_profile = location_profile.load()
+        if self._location_enabled and self._location_profile:
+            self.profile.setHttpAcceptLanguage(
+                self._location_profile.accept_language())
+
         # Cookie exceptions: cookies stay memory-only except for sites the
         # user allowlists (☰ → Settings → Cookie exceptions…) — those are
         # mirrored to an encrypted jar and restored here at startup.
@@ -1884,6 +1900,14 @@ class BrowserWindow(QMainWindow):
             "effect on the next microphone request — no reload needed.")
         self.block_microphone_action.toggled.connect(
             self._set_block_microphone)
+
+        privacy_menu.addSeparator()
+        loc_action = privacy_menu.addAction(
+            "Location & region…", self._show_location_dialog)
+        loc_action.setToolTip(
+            "Make sites see a chosen region's browser language and locale "
+            "(navigator.language, Accept-Language, Intl formatting). Emulates "
+            "language/locale only — not your timezone, geolocation, or IP.")
 
         # --- Start page & search ------------------------------------------
         search_menu = settings_menu.addMenu("Start page & search")
@@ -3064,6 +3088,133 @@ class BrowserWindow(QMainWindow):
         self.lock_action.setIcon(self._lock_icons[state])
         self.lock_action.setToolTip(tip)
         self._lock_state = state
+
+    def _show_location_dialog(self) -> None:
+        """Pick a region to emulate its browser language & locale. The dialog is
+        explicit about which dimensions are actually applied (language/locale)
+        and which are shown for reference only (timezone, geolocation)."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Location & region emulation")
+        dlg.setMinimumWidth(480)
+        v = QVBoxLayout(dlg)
+
+        enable = QCheckBox("Emulate a region's browser language && locale")
+        enable.setChecked(self._location_enabled)
+        v.addWidget(enable)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Region:"))
+        combo = QComboBox()
+        keys = list(location_profile.PRESETS)
+        for k in keys:
+            combo.addItem(location_profile.PRESETS[k].label, k)
+        if self._location_profile:
+            combo.setCurrentIndex(keys.index(self._location_profile.key))
+        row.addWidget(combo, 1)
+        v.addLayout(row)
+
+        info = QLabel()
+        info.setTextFormat(Qt.TextFormat.PlainText)
+        info.setWordWrap(True)
+        info.setStyleSheet("font-family:'Cascadia Mono',Consolas,monospace;")
+        v.addWidget(info)
+
+        def refresh():
+            prof = location_profile.PRESETS[combo.currentData()]
+            on = enable.isChecked()
+            combo.setEnabled(on)
+            info.setText("\n".join([
+                prof.label, "",
+                f"Language / locale : {prof.locale}   "
+                + ("[applied — navigator.language, Accept-Language]"
+                   if on else "[off]"),
+                f"Intl formatting   : {prof.locale}   "
+                + ("[applied after restart]" if on else "[off]"),
+                f"Preferred langs   : {', '.join(prof.languages)}",
+                f"Currency          : {prof.currency}",
+                f"Measurement       : {prof.measurement}", "",
+                f"Timezone          : {prof.timezone}   [NOT emulated]",
+                f"Geolocation       : {prof.latitude:.4f}, {prof.longitude:.4f}"
+                "   [NOT emulated]", "",
+                "Emulates browser language & locale only. Timezone and",
+                "geolocation are shown for reference but left unchanged, so no",
+                "contradictory location is exposed. It does not change your IP.",
+            ]))
+
+        enable.toggled.connect(refresh)
+        combo.currentIndexChanged.connect(refresh)
+        refresh()
+
+        btns = QHBoxLayout()
+        diag = QPushButton("Diagnostics…")
+        diag.clicked.connect(
+            lambda: self._show_location_diagnostics(
+                location_profile.PRESETS[combo.currentData()],
+                enable.isChecked()))
+        btns.addWidget(diag)
+        btns.addStretch(1)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                              | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        btns.addWidget(bb)
+        v.addLayout(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._apply_location(enable.isChecked(),
+                             location_profile.PRESETS[combo.currentData()])
+
+    def _apply_location(self, enabled: bool, profile) -> None:
+        """Persist and apply the choice. navigator.language(s)/Accept-Language
+        change live; Intl formatting (the --lang launch flag) needs a restart,
+        which we ask for only when that value actually changed."""
+        before = location_profile.chromium_lang_flag()
+        location_profile.save(enabled, profile if enabled else None)
+        self._location_enabled = enabled
+        self._location_profile = profile if enabled else None
+        if enabled:
+            self.profile.setHttpAcceptLanguage(profile.accept_language())
+            self.statusBar().showMessage(
+                f"Location emulation on — language set to {profile.locale} "
+                "(timezone/geolocation unchanged).", 7000)
+        else:
+            self.profile.setHttpAcceptLanguage(self._default_accept_language)
+            self.statusBar().showMessage("Location emulation off.", 5000)
+        if location_profile.chromium_lang_flag() != before:
+            self._prompt_restart(
+                "Date & number formatting (Intl) for the chosen region takes "
+                "effect on restart.")
+
+    def _show_location_diagnostics(self, profile, enabled: bool) -> None:
+        real = "(your real setting)"
+        plain_message(self, QMessageBox.Icon.Information,
+                      "Location Emulation Diagnostics", "\n".join([
+            "Location Emulation Diagnostics", "",
+            f"Enabled: {'YES' if enabled else 'NO'}",
+            f"Region:  {profile.label}", "",
+            "APPLIED (native — no script injection, no debug port)",
+            f"  navigator.language   {profile.locale if enabled else real}",
+            f"  navigator.languages  "
+            f"{', '.join(profile.languages) if enabled else real}",
+            f"  Accept-Language      "
+            f"{profile.accept_language() if enabled else real}",
+            f"  Intl locale          "
+            f"{(profile.locale + '  (after restart)') if enabled else real}",
+            f"  Currency (display)   {profile.currency}",
+            f"  Measurement          {profile.measurement}", "",
+            "NOT EMULATED (this version)",
+            f"  Timezone     {profile.timezone}  — real timezone kept",
+            f"  Geolocation  {profile.latitude:.4f}, {profile.longitude:.4f}"
+            "  — not overridden",
+            "  Public IP    unchanged — the browser never changes your IP", "",
+            "Consistency",
+            "  ok  language / locale / currency agree",
+            "  --  timezone & geolocation not emulated (nothing contradictory "
+            "claimed)", "",
+            "Emulates browser language & locale only. Not a VPN, not a location "
+            "or IP change.",
+        ]))
 
     def check_content_credentials(self, url: QUrl) -> None:
         """Fetch an image and verify its C2PA Content Credential on-device.
