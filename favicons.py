@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QIcon
 
 
 class FaviconStore:

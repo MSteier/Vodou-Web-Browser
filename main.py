@@ -346,11 +346,11 @@ import secrets
 from urllib.parse import quote
 
 from PyQt6.QtCore import (
-    QEvent, QMimeData, QObject, QPoint, QProcess, QSize, Qt, QTimer, QUrl,
+    QEvent, QMimeData, QPoint, QProcess, QSize, Qt, QTimer, QUrl,
     QVariantAnimation, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtGui import (
-    QAction, QActionGroup, QColor, QCursor, QDrag, QKeySequence, QShortcut,
+    QAction, QActionGroup, QCursor, QDrag, QKeySequence, QShortcut,
 )
 from PyQt6.QtWebEngineCore import (
     QWebEngineContextMenuRequest,

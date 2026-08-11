@@ -307,7 +307,6 @@ COUNTRY_LOCALE = {
     "SE": ("sv-SE", "Swedish", ["sv-SE", "sv", "en"], "SEK", "metric"),
     "SG": ("en-SG", "English (Singapore)", ["en-SG", "en"], "SGD", "metric"),
     "CH": ("de-CH", "German (Switzerland)", ["de-CH", "de", "fr-CH"], "CHF", "metric"),
-    "NL": ("nl-NL", "Dutch (Netherlands)", ["nl-NL", "nl", "en"], "EUR", "metric"),
 }
 
 
