@@ -9,7 +9,8 @@
 # the low-level system libraries those bundled binaries load at runtime, plus
 # fonts. No Qt is built from source here.
 
-FROM python:3.13-slim
+# Base pinned by digest (supply-chain hardening). This is python:3.13-slim.
+FROM python:3.13-slim@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a
 
 # ---- Runtime system libraries Qt6 + the bundled Chromium dlopen at runtime ---
 # Grouped roughly: GL/EGL + GBM, glib/dbus, X11 + the xcb platform plugin set,
