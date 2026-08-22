@@ -653,7 +653,7 @@ def _process_working_set_mb(pid: int) -> float | None:
 
 
 def _as_local_path(text: str) -> str | None:
-    """Turn address-bar text into an absolute local filesystem path, or None if
+    r"""Turn address-bar text into an absolute local filesystem path, or None if
     it isn't file-ish (so the caller falls through to host/search handling).
 
     Handles what people actually type on Windows: an explicit ``file:`` scheme

@@ -44,8 +44,12 @@ COPY . .
 # ---- Run as a non-root user (keeps the Chromium sandbox usable and is good
 #      hygiene for a browser). HOME is where Vodou keeps ~/.vodou state; mount a
 #      volume there to persist bookmarks/vault/plugins across runs.
+# Pre-create ~/.vodou owned by the app user so a mounted volume inherits that
+# ownership; otherwise the mountpoint is root-owned and the non-root app can't
+# write its profile (EACCES).
 RUN useradd --create-home --uid 10001 vodou \
-    && chown -R vodou:vodou /app
+    && mkdir -p /home/vodou/.vodou \
+    && chown -R vodou:vodou /app /home/vodou/.vodou
 USER vodou
 ENV HOME=/home/vodou
 VOLUME ["/home/vodou/.vodou"]

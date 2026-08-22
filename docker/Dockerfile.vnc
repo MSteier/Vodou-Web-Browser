@@ -1,0 +1,108 @@
+# Vodou — "just works in a browser" container variant.
+#
+# Unlike the root ./Dockerfile (which needs a host X server), this image carries
+# its own virtual display: Xvfb + a window manager + a VNC server + the noVNC
+# web client. You run it and open http://localhost:8080 — no X server on the
+# host, identical on Windows / macOS / Linux.
+#
+# Build from the REPO ROOT so the app source is in the build context:
+#   docker build -f docker/Dockerfile.vnc -t msteier/vodou:latest .
+#
+# Trade-off: to run with no special flags, Chromium's sandbox is OFF by default
+# here (QTWEBENGINE_DISABLE_SANDBOX=1). The startup banner says so. To keep the
+# sandbox, run with:  --cap-add SYS_ADMIN -e QTWEBENGINE_DISABLE_SANDBOX=0
+
+FROM python:3.13-slim
+
+# ---- Runtime system libraries Qt6 + bundled Chromium dlopen, PLUS the headless
+#      display stack (xvfb, a light WM, x11vnc, the noVNC web client). ----------
+RUN apt-get update && apt-get install --no-install-recommends -y \
+        libgl1 libegl1 libgbm1 libglib2.0-0 libdbus-1-3 \
+        libx11-6 libx11-xcb1 libxext6 libxrender1 libxcb1 \
+        libxcb-glx0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+        libxcb-randr0 libxcb-render-util0 libxcb-render0 libxcb-shape0 \
+        libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 \
+        libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 \
+        libxkbcommon0 libxkbcommon-x11-0 libxkbfile1 \
+        libxcomposite1 libxdamage1 libxrandr2 libxi6 libxtst6 libxcursor1 \
+        libnss3 libnspr4 libasound2t64 libpulse0 \
+        libgssapi-krb5-2 libcups2 libharfbuzz0b \
+        libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libcairo-gobject2 \
+        libatk1.0-0t64 libgdk-pixbuf-2.0-0 libgtk-3-0t64 \
+        fonts-dejavu-core fontconfig \
+        xvfb x11-utils fluxbox x11vnc novnc websockify socat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Land http://localhost:8080/ straight on the auto-connecting viewer.
+RUN printf '%s\n' \
+    '<!doctype html><meta charset="utf-8">' \
+    '<meta http-equiv="refresh" content="0; url=vnc.html?autoconnect=true&resize=remote&reconnect=true">' \
+    > /usr/share/novnc/index.html
+
+# ---- Python dependencies (cached separately from app code) --------------------
+WORKDIR /app
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir --disable-pip-version-check \
+        -r requirements.txt
+
+# ---- Application source -------------------------------------------------------
+COPY . .
+
+# ---- Startup script: bring up the display stack, then launch Vodou ------------
+RUN cat > /usr/local/bin/vodou-vnc <<'EOF' \
+    && chmod +x /usr/local/bin/vodou-vnc
+#!/bin/sh
+set -e
+export DISPLAY=:0
+# A restarted container keeps its filesystem, so a stale X lock left by a
+# previous run makes Xvfb abort with "Server is already active for display 0"
+# and the whole stack crash-loops. Clear any leftover lock/socket first.
+rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
+GEOM="${VNC_GEOMETRY:-1440x900}"
+echo "[vodou] starting virtual display ${GEOM} ..."
+Xvfb :0 -screen 0 "${GEOM}x24" -nolisten tcp &
+# Wait until the X server actually accepts connections.
+for i in $(seq 1 50); do
+    xdpyinfo -display :0 >/dev/null 2>&1 && break
+    sleep 0.2
+done
+fluxbox >/dev/null 2>&1 &
+x11vnc -display :0 -forever -shared -nopw -rfbport 5900 -bg -quiet
+websockify --web=/usr/share/novnc 8080 localhost:5900 >/dev/null 2>&1 &
+if [ "${QTWEBENGINE_DISABLE_SANDBOX:-1}" = "1" ]; then
+    export QTWEBENGINE_DISABLE_SANDBOX=1
+    echo "[vodou] NOTE: Chromium sandbox is OFF (no-flags convenience mode)."
+    echo "[vodou]       To keep it on: run with --cap-add SYS_ADMIN and"
+    echo "[vodou]       -e QTWEBENGINE_DISABLE_SANDBOX=0"
+fi
+# Opt-in Ollama bridge for "Ask AI". Vodou requires a LOOPBACK endpoint (its
+# on-device privacy guard), and inside a container 127.0.0.1 is the container,
+# not the host. So instead of pointing Vodou off-box (which the guard rejects,
+# rightly), we forward the container's own 127.0.0.1:11434 to the Ollama running
+# on ${VODOU_OLLAMA_HOST} (e.g. host.docker.internal). Vodou keeps talking to
+# 127.0.0.1 — the request stays on the same physical machine, just bridged.
+if [ -n "${VODOU_OLLAMA_HOST:-}" ]; then
+    OLLAMA_PORT="${VODOU_OLLAMA_PORT:-11434}"
+    echo "[vodou] Ask AI: bridging 127.0.0.1:11434 -> ${VODOU_OLLAMA_HOST}:${OLLAMA_PORT}"
+    socat TCP4-LISTEN:11434,bind=127.0.0.1,fork,reuseaddr \
+        "TCP4:${VODOU_OLLAMA_HOST}:${OLLAMA_PORT}" >/dev/null 2>&1 &
+fi
+echo "[vodou] ready -> open  http://localhost:8080/  in your browser"
+exec python main.py
+EOF
+
+# ---- Non-root user + persistent profile volume -------------------------------
+# Pre-create ~/.vodou owned by the app user: Docker seeds the volume from this
+# path (ownership included), so the non-root app can write its profile. Without
+# it the mountpoint is created root-owned and the profile fails with EACCES.
+RUN useradd --create-home --uid 10001 vodou \
+    && mkdir -p /home/vodou/.vodou \
+    && chown -R vodou:vodou /app /home/vodou/.vodou
+USER vodou
+ENV HOME=/home/vodou
+VOLUME ["/home/vodou/.vodou"]
+
+# Off by default in THIS variant so it runs with no special flags (see banner).
+ENV QTWEBENGINE_DISABLE_SANDBOX=1
+EXPOSE 8080
+CMD ["/usr/local/bin/vodou-vnc"]
