@@ -110,43 +110,72 @@ html, body { overflow: auto !important; }
                     "YouTube. Leaves your login and the video itself untouched. "
                     "YouTube changes its player often, so this may need "
                     "updates and can trip YouTube's anti-ad-block notices.",
-        version="1.0",
+        version="1.1",
         author="Vodou (verified)",
         matches=("youtube.com", "*.youtube.com"),
         css="""
 .ytp-ad-overlay-container, .ytp-ad-overlay-slot, .ytp-ad-overlay-image,
 .ytp-ad-text, .ytp-ad-overlay-close-container,
+.ytp-ad-player-overlay, .ytp-ad-player-overlay-layout,
+.ytp-suggested-action,
 ytd-display-ad-renderer, ytd-ad-slot-renderer,
 ytd-in-feed-ad-layout-renderer, ytd-companion-slot-renderer,
-ytd-banner-promo-renderer, #masthead-ad {
+ytd-banner-promo-renderer, ytd-statement-banner-renderer,
+#masthead-ad, #player-ads {
     display: none !important;
 }
 """,
         js="""
+// DOM-level ad skipper. YouTube serves ads from the same hosts as the video,
+// so they can't be network-blocked; this clicks Skip, jumps unskippable ads to
+// their end, and self-heals across the player's frequent markup changes.
 var SKIP = [
     '.ytp-ad-skip-button',
     '.ytp-ad-skip-button-modern',
     '.ytp-skip-ad-button',
     '.ytp-ad-skip-button-container button'
 ];
+var mutedByUs = false;   // only unmute what WE muted, never the user's choice.
+var getVideo = function () {
+    return document.querySelector('video.html5-main-video')
+           || document.querySelector('video');
+};
+var clickSkip = function () {
+    for (var i = 0; i < SKIP.length; i++) {
+        var btn = document.querySelector(SKIP[i]);
+        if (btn) { btn.click(); return true; }
+    }
+    // Fallback for renamed variants: any Skip control inside the ad UI.
+    var cands = document.querySelectorAll(
+        '[class*="ytp-ad-skip" i], [class*="skip-ad" i]');
+    for (var j = 0; j < cands.length; j++) {
+        var el = cands[j];
+        if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') {
+            el.click(); return true;
+        }
+    }
+    return false;
+};
 var tick = function () {
     try {
-        for (var i = 0; i < SKIP.length; i++) {
-            var btn = document.querySelector(SKIP[i]);
-            if (btn) { btn.click(); }
-        }
         var player = document.querySelector('.html5-video-player');
-        if (player && player.classList.contains('ad-showing')) {
-            var video = document.querySelector('video.html5-main-video')
-                        || document.querySelector('video');
+        var adShowing = !!(player && player.classList.contains('ad-showing'));
+        clickSkip();
+        var video = getVideo();
+        if (adShowing) {
             if (video && isFinite(video.duration) && video.duration > 0) {
+                // Mute only while jumping, so a live ad can't blast audio.
+                if (!video.muted) { video.muted = true; mutedByUs = true; }
                 video.currentTime = video.duration;   // jump past the ad
-                video.muted = true;
             }
+        } else if (mutedByUs) {
+            // Ad's gone — undo the mute we applied (leave user mutes alone).
+            if (video) { video.muted = false; }
+            mutedByUs = false;
         }
     } catch (e) {}
 };
-setInterval(tick, 400);
+setInterval(tick, 250);
 try {
     var mo = new MutationObserver(tick);
     mo.observe(document.documentElement, {childList: true, subtree: true});
