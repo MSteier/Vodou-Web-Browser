@@ -19,6 +19,19 @@ Everything stays on-device: search goes through your own SearXNG, and `vodou_ask
 refuses any Ollama endpoint that isn't loopback (the same guard Vodou enforces),
 so a question never leaves the machine.
 
+### Live control tools (only when Vodou is running with control enabled)
+
+| Tool | What it does |
+|------|--------------|
+| `vodou_live_tabs()` | List the tabs open in the **running** browser |
+| `vodou_open_url(url)` | Open an http(s) URL in a **new** tab |
+| `vodou_navigate(url)` | Navigate the **active** tab to an http(s) URL |
+| `vodou_live_blocking_stats(period)` | Live blocking totals + top hosts (`'1h'`/`'24h'`) |
+
+These talk to a running Vodou over a **loopback** socket and are inert unless
+Vodou was started with `VODOU_ENABLE_CONTROL=1` (see below); otherwise they
+return `{ok: false, error: ...}`.
+
 ## Install
 
 ```sh
@@ -64,16 +77,33 @@ The server reads the same settings Vodou does:
   `http://127.0.0.1:11434` / `llama3.2:latest`. A non-loopback `endpoint` is
   refused and the default is used instead.
 
+## Live control — enabling it
+
+The live-control tools require Vodou to be started with the control surface on:
+
+```sh
+# Windows (PowerShell):
+$env:VODOU_ENABLE_CONTROL = "1"; pythonw main.py
+# macOS / Linux:
+VODOU_ENABLE_CONTROL=1 python main.py
+```
+
+When enabled, Vodou opens a `QTcpServer` bound to `127.0.0.1` on an OS-assigned
+port and writes that port plus a **per-run random token** to
+`~/.vodou/control.json`. The MCP server reads that file to reach the browser.
+The socket is **loopback-only**, every request must carry the token, and the
+command set is fixed (open/navigate tabs, read blocking stats) — no file, shell,
+or vault access. The file is removed when Vodou closes. Leave
+`VODOU_ENABLE_CONTROL` unset to keep the surface off entirely.
+
 ## Security notes / deliberate non-goals
 
 - **No vault secrets.** The password vault is encrypted under a master password
   this server neither holds nor should handle, so only a non-secret
   "configured" flag is exposed — never entries or passwords.
-- **No live browser control, no live blocking stats.** Those live in the
-  running GUI process; blocking stats are in-memory only and there is no IPC
-  surface to reach a running Vodou. Adding a **loopback-only control socket** to
-  Vodou (open/navigate/read-page, live stats) is the planned next phase — it is
-  a change to the app itself, not to this server.
+- **Live control is off by default** and, when on, is loopback + token-gated
+  with a minimal command set (see above). It never reads page contents, files,
+  or credentials.
 - No passwords are logged, echoed, or returned by any tool.
 
 ## Test
