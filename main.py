@@ -3331,7 +3331,16 @@ class BrowserWindow(QMainWindow):
         """Persist and apply. navigator.language(s)/Accept-Language change live;
         geolocation+timezone are (de)installed as an injected script and apply
         on the next page load; Intl formatting (the --lang launch flag) needs a
-        restart, asked for only when that value actually changed."""
+        restart, asked for only when that value actually changed.
+
+        enabled=False (unchecking the box, including after Match VPN location)
+        is the "VPN disconnected" case: it restores non-emulated behavior —
+        Location Guard's real-geolocation block if that's on, Vodou's real
+        Accept-Language/locale otherwise. There is no "back to the physical
+        location" state to restore to, because Vodou never exposes real
+        geolocation to a site in the first place (see WebPage.
+        _on_permission_requested); the pre-emulation default already is the
+        private default."""
         before = location_profile.chromium_lang_flag()
         location_profile.save(enabled, geo, profile if enabled else None)
         self._location_enabled = enabled
@@ -3397,7 +3406,18 @@ class BrowserWindow(QMainWindow):
     def _match_vpn_location(self) -> None:
         """Opt-in: look up the current public IP's location and emulate that
         region. This is the one Location feature that touches the network, so it
-        is never automatic — it asks first and names the third-party service."""
+        is never automatic — it asks first and names the third-party service.
+
+        Rapid repeat clicks (e.g. double-click, or checking again right after
+        a first lookup) reuse the last result instead of re-hitting the
+        network — see location_profile.cached_lookup. Anything older than
+        that window always triggers a fresh request, since the whole point is
+        to reflect whatever the current VPN/exit IP is *right now*."""
+        cached = location_profile.cached_lookup()
+        if cached is not None:
+            _ip, prof = cached
+            self._offer_matched_location(prof, from_cache=True)
+            return
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle("Match VPN / IP location")
@@ -3408,7 +3428,9 @@ class BrowserWindow(QMainWindow):
             "(language, geolocation & timezone).\n\n"
             "ipapi.co will see the IP you are browsing from — so connect your "
             "VPN/proxy first. This does NOT change your IP; it only makes the "
-            "browser's reported region match where your IP already appears.\n\n"
+            "browser's reported region match where your IP already appears. "
+            "Works the same over IPv4 or IPv6 — whichever your connection "
+            "actually uses.\n\n"
             "Send the lookup now?")
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
@@ -3419,28 +3441,55 @@ class BrowserWindow(QMainWindow):
         req = QNetworkRequest(QUrl(location_profile.IPGEO_URL))
         req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, b"Vodou")
         req.setRawHeader(b"Accept", b"application/json")
+        # Bound how long a hung/slow provider can block the feature — without
+        # this, "provider timeout" (a required failure mode) would just hang
+        # indefinitely instead of failing visibly.
+        req.setTransferTimeout(10_000)
         reply = self._cc_nam.get(req)
         reply.finished.connect(lambda r=reply: self._on_ipgeo_reply(r))
 
     def _on_ipgeo_reply(self, reply) -> None:
         self.statusBar().clearMessage()
-        ok = reply.error() == QNetworkReply.NetworkError.NoError
+        err = reply.error()
+        ok = err == QNetworkReply.NetworkError.NoError
+        status = reply.attribute(
+            QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         raw = bytes(reply.readAll())
         reply.deleteLater()
         prof = None
+        ip_info = None
         if ok and raw:
             try:
-                prof = location_profile.from_ipgeo(
-                    json.loads(raw.decode("utf-8", "replace")))
+                data = json.loads(raw.decode("utf-8", "replace"))
             except ValueError:
-                prof = None
+                data = None
+            if data is not None:
+                prof = location_profile.from_ipgeo(data)
+                ip_info = location_profile.ipgeo_ip_info(data)
         if prof is None:
+            reason = location_profile.classify_ipgeo_failure(
+                timed_out=err == QNetworkReply.NetworkError.TimeoutError,
+                network_error=not ok,
+                http_status=status,
+                raw=raw)
             plain_message(
                 self, QMessageBox.Icon.Warning, "Match VPN location",
-                "Couldn't determine your IP location (no response, the service "
-                "was rate-limited, or the region isn't recognized). Nothing was "
-                "changed.")
+                location_profile.ipgeo_failure_message(reason)
+                + " Nothing was changed.")
             return
+        changed = None
+        if ip_info is not None:
+            ip, version = ip_info
+            changed = location_profile.note_lookup(ip, prof)
+        self._offer_matched_location(prof, ip_version=ip_info[1]
+                                     if ip_info else "", endpoint_changed=changed)
+
+    def _offer_matched_location(self, prof, *, from_cache: bool = False,
+                                ip_version: str = "",
+                                endpoint_changed: bool | None = None) -> None:
+        """Confirm and apply a profile from Match VPN location — whether it
+        just came back from the network or was reused from the short-lived
+        cache (see _match_vpn_location)."""
         # City/region come from a third-party service — render as plain text.
         lines = [f"Detected location : {prof.label}"]
         if prof.region:
@@ -3449,6 +3498,17 @@ class BrowserWindow(QMainWindow):
             f"Timezone          : {prof.timezone}",
             f"Coordinates       : {prof.latitude:.4f}, {prof.longitude:.4f}",
             f"Language (guess)  : {prof.locale}  (from country {prof.country_code})",
+        ]
+        if ip_version:
+            lines.append(f"Looked up over    : {ip_version}")
+        if endpoint_changed is True:
+            lines.append("Note: this is a DIFFERENT exit IP than last time.")
+        elif endpoint_changed is False:
+            lines.append("Note: same exit IP as last time — unchanged.")
+        if from_cache:
+            lines.append("(Reusing a lookup from a few seconds ago — no new "
+                         "request sent.)")
+        lines += [
             "",
             "Emulate this region now — language, geolocation & timezone?",
             "Your IP is not changed.",
