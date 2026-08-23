@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import socket
 import ssl
 import sys
 import urllib.parse
@@ -226,6 +227,70 @@ def read_open_tabs() -> dict:
         return {"urls": [], "current": -1}
     urls, current = snap
     return {"urls": urls, "current": current}
+
+
+# -- live control client (talks to a RUNNING Vodou) --------------------------
+#
+# Only works when Vodou is running with VODOU_ENABLE_CONTROL=1, which publishes
+# ~/.vodou/control.json {port, token} for a loopback socket (see the app's
+# remote_control.py). If that file is absent/stale, the tools report that control
+# is unavailable rather than failing obscurely.
+
+class ControlUnavailable(RuntimeError):
+    """Vodou's loopback control surface isn't reachable (not enabled/running)."""
+
+
+def read_control_info(vodou_dir: Path = VODOU_DIR) -> dict | None:
+    info = _read_json(Path(vodou_dir) / "control.json")
+    if not isinstance(info, dict) or "port" not in info or "token" not in info:
+        return None
+    return info
+
+
+def build_control_request(token: str, cmd: str,
+                          params: dict | None = None) -> bytes:
+    return (json.dumps({"token": token, "cmd": cmd,
+                        "params": params or {}}) + "\n").encode("utf-8")
+
+
+def parse_control_response(line: bytes):
+    """Return the result of a control reply, or raise. Raises RuntimeError on an
+    ``ok:false`` reply, ValueError on malformed JSON."""
+    resp = json.loads(line.decode("utf-8"))
+    if not resp.get("ok"):
+        raise RuntimeError(str(resp.get("error", "control error")))
+    return resp.get("result")
+
+
+def control_request(cmd: str, params: dict | None = None,
+                    vodou_dir: Path = VODOU_DIR, timeout: float = 5.0):
+    """Send one command to the running Vodou and return its result.
+
+    Raises ControlUnavailable if control isn't enabled/running, or RuntimeError
+    if the command was rejected.
+    """
+    info = read_control_info(vodou_dir)
+    if not info:
+        raise ControlUnavailable(
+            "Vodou remote control is not available. Start Vodou with the "
+            "environment variable VODOU_ENABLE_CONTROL=1 to enable it.")
+    req = build_control_request(str(info["token"]), cmd, params)
+    try:
+        with socket.create_connection(("127.0.0.1", int(info["port"])),
+                                      timeout=timeout) as s:
+            s.settimeout(timeout)
+            s.sendall(req)
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+    except OSError as exc:
+        raise ControlUnavailable(
+            "Vodou remote control is not reachable (is Vodou running with "
+            f"VODOU_ENABLE_CONTROL=1?): {exc}") from exc
+    return parse_control_response(buf.split(b"\n", 1)[0])
 
 
 def vault_status(vault_file: Path | None = None) -> dict:
