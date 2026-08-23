@@ -547,6 +547,10 @@ def _searxng_base() -> str:
 
 SEARXNG_BASE = _searxng_base()
 HOME_URL = SEARXNG_BASE
+# The host half of SEARXNG_BASE, e.g. "host.docker.internal" for the bundled
+# Docker deployment's default — see ai_search.is_search_results, which needs
+# this to recognize the actual results page rather than only localhost.
+SEARXNG_HOST = QUrl(SEARXNG_BASE).host()
 
 # On-disk half of the hybrid profile: capped HTTP cache + site storage.
 # Created by the engine at startup, shredded on every exit and at the next
@@ -4754,7 +4758,7 @@ class BrowserWindow(QMainWindow):
     def open_ai_panel(self) -> None:
         """The ✨ button: summarize if this is a results page, else ask."""
         view = self.current_view()
-        if view is not None and is_search_results(view.url()):
+        if view is not None and is_search_results(view.url(), SEARXNG_HOST):
             self.summarize_search()
         else:
             self.ask_ai()
@@ -4785,7 +4789,7 @@ class BrowserWindow(QMainWindow):
         if view is None:
             return
         url = view.url()
-        if not is_search_results(url):
+        if not is_search_results(url, SEARXNG_HOST):
             self.statusBar().showMessage(
                 "Run a search first, then use the ✨ button to summarize the "
                 "results.", 6000)
