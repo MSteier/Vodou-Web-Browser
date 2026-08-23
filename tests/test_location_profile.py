@@ -111,6 +111,83 @@ check("custom profile round-trips",
       en and gg and back is not None and back.key == "custom"
       and back.city == "Tokyo" and back.locale == "ja-JP")
 
+# --- ipgeo_ip_info: IPv4 / IPv6 ----------------------------------------------
+print("\nip version handling")
+check("IPv4 response -> (ip, 'IPv4')",
+      lp.ipgeo_ip_info({"ip": "203.0.113.7", "version": "IPv4"})
+      == ("203.0.113.7", "IPv4"))
+check("IPv6 response -> (ip, 'IPv6')",
+      lp.ipgeo_ip_info({"ip": "2001:db8::1", "version": "IPv6"})
+      == ("2001:db8::1", "IPv6"))
+check("missing 'version' field -> guessed from ':' in the address",
+      lp.ipgeo_ip_info({"ip": "2001:db8::2"}) == ("2001:db8::2", "IPv6"))
+check("missing 'version' field, IPv4 shape -> guessed IPv4",
+      lp.ipgeo_ip_info({"ip": "198.51.100.9"}) == ("198.51.100.9", "IPv4"))
+check("no ip field -> None", lp.ipgeo_ip_info({}) is None)
+check("from_ipgeo builds the same profile regardless of IP family", (
+    lp.from_ipgeo({"country_code": "GB", "timezone": "Europe/London",
+                    "ip": "198.51.100.9", "version": "IPv4"})
+    == lp.from_ipgeo({"country_code": "GB", "timezone": "Europe/London",
+                       "ip": "2001:db8::9", "version": "IPv6"})))
+
+# --- IP-geolocation failure classification -----------------------------------
+print("\nip-geo failure classification")
+check("timeout takes priority",
+      lp.classify_ipgeo_failure(timed_out=True, http_status=429)
+      == lp.IPGEO_TIMEOUT)
+check("HTTP 429 -> rate_limited",
+      lp.classify_ipgeo_failure(http_status=429) == lp.IPGEO_RATE_LIMITED)
+check("transport error -> network_error",
+      lp.classify_ipgeo_failure(network_error=True) == lp.IPGEO_NETWORK_ERROR)
+check("empty body -> malformed_response",
+      lp.classify_ipgeo_failure(raw=b"") == lp.IPGEO_MALFORMED)
+check("unparsable body -> malformed_response",
+      lp.classify_ipgeo_failure(raw=b"not json") == lp.IPGEO_MALFORMED)
+check("well-formed but unusable body -> unrecognized_response",
+      lp.classify_ipgeo_failure(raw=b'{"error": true}') == lp.IPGEO_UNRECOGNIZED)
+check("every reason has a non-generic message", all(
+    lp.ipgeo_failure_message(r) != lp.ipgeo_failure_message("bogus-reason")
+    for r in (lp.IPGEO_TIMEOUT, lp.IPGEO_RATE_LIMITED, lp.IPGEO_NETWORK_ERROR,
+              lp.IPGEO_MALFORMED, lp.IPGEO_UNRECOGNIZED)))
+check("unknown reason code -> generic fallback, does not raise",
+      bool(lp.ipgeo_failure_message("bogus-reason")))
+
+# --- lookup de-duplication cache (in-memory only) ----------------------------
+print("\nlookup cache / endpoint-change detection")
+lp.clear_lookup_cache()
+check("no lookup yet -> cache empty", lp.cached_lookup() is None)
+tokyo = lp.PRESETS["tokyo"]
+london = lp.PRESETS["london"]
+check("first lookup is not reported as a change",
+      lp.note_lookup("203.0.113.1", tokyo) is False)
+check("fresh cache hit returns the same (ip, profile)",
+      lp.cached_lookup() == ("203.0.113.1", tokyo))
+check("negative max_age -> always treated as stale",
+      lp.cached_lookup(max_age=-1) is None)
+check("same IP again -> not reported as a change",
+      lp.note_lookup("203.0.113.1", tokyo) is False)
+check("different IP -> reported as a change (VPN endpoint changed)",
+      lp.note_lookup("198.51.100.9", london) is True)
+check("cache now reflects the new lookup",
+      lp.cached_lookup() == ("198.51.100.9", london))
+lp.clear_lookup_cache()
+check("clear_lookup_cache invalidates it", lp.cached_lookup() is None)
+
+# --- no accidental leakage of the real/VPN IP --------------------------------
+print("\nno IP leakage")
+check("LocationProfile has no 'ip' field (nothing to persist by accident)",
+      "ip" not in {f.name for f in lp.fields(lp.LocationProfile)})
+lp.clear_lookup_cache()
+leak_file = Path(tempfile.mkdtemp()) / "location.json"
+lp.CONFIG_FILE = leak_file
+lp.note_lookup("203.0.113.55", tokyo)
+check("note_lookup performs no disk I/O", not leak_file.exists())
+lp.save(True, True, tokyo)  # an ordinary save, unrelated to the lookup above
+saved_raw = leak_file.read_text(encoding="utf-8")
+check("a saved profile never contains the looked-up IP",
+      "203.0.113.55" not in saved_raw)
+lp.clear_lookup_cache()
+
 print()
 if _failures:
     print(f"{len(_failures)} FAILURE(S): " + "; ".join(_failures))

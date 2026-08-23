@@ -3,21 +3,42 @@
 A LocationProfile bundles a *coherent* set of regional signals for one place, so
 the browser can never expose contradictory ones (Tokyo locale with a New York
 timezone, etc.). This module owns the data and main.py applies the parts Vodou
-can emulate *natively* today.
+can emulate.
 
-Honest scope (v1 — the clean, native, no-debug-port parts):
+Honest scope:
 
-  APPLIED
+  APPLIED NATIVELY (no script, no debug port)
     * navigator.language / navigator.languages / Accept-Language
         — live, via QWebEngineProfile.setHttpAcceptLanguage()
     * Intl date / number / currency formatting locale
         — via the Chromium --lang flag, which takes effect on the next restart
 
-  NOT emulated yet (in the model for the UI/diagnostics and future stages;
-  QtWebEngine exposes no native override, and the alternatives — a remote-
-  debugging port or script injection — were deliberately deferred):
+  APPLIED VIA SCRIPT INJECTION (opt-in, "Also emulate geolocation && timezone")
     * timezone      (Intl timezone / Date)
     * geolocation   (navigator.geolocation coordinates)
+        QtWebEngine exposes no native geolocation-provider override reachable
+        from a PyQt6 embedder (no equivalent of Chrome's --geo-override or a
+        platform location-provider hook) — confirmed, not assumed. A script
+        injected at DocumentCreation in the page's MAIN world (main.py,
+        _sync_geolocation_scripts) is the closest available mechanism: it
+        replaces navigator.geolocation before any page script runs. Honest
+        limits, stated in the Settings UI and Diagnostics view: it does not
+        reach dedicated/service workers, and a determined page can detect it.
+        It never changes the browser's real IP or IP stack (v4/v6) — see
+        "Match VPN location" below for the IP-geolocation half of that.
+
+  MATCH VPN LOCATION (opt-in, never automatic — see _match_vpn_location in
+  main.py): a one-shot lookup of the current public IP's approximate region,
+  used to fill in a "custom" LocationProfile. Vodou has no VPN client of its
+  own and does not detect VPN connect/disconnect — this only reads whatever
+  public IP the OS is already routing through (a VPN, a proxy, or the real
+  connection) at the moment the user clicks the button. There is deliberately
+  no background polling for a changed exit IP: that would mean silently
+  re-contacting a third party on a timer, which this feature's own consent
+  dialog explicitly promises not to do. `note_lookup`/`cached_lookup` below
+  only cover the *same click session* (in-memory, cleared on restart) — they
+  detect "did this lookup return a different IP than last time" and avoid
+  re-hitting the network for rapid repeat clicks, not silent background sync.
 
 The UI marks exactly which dimensions are active, so a "Tokyo" *locale* is never
 presented as being *located* in Tokyo. This keeps the feature honest.
@@ -26,6 +47,7 @@ presented as being *located* in Tokyo. This keeps the feature honest.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -342,3 +364,107 @@ def from_ipgeo(data: dict) -> LocationProfile | None:
             measurement=meas)
     except (TypeError, ValueError):
         return None
+
+
+def ipgeo_ip_info(data: dict) -> tuple[str, str] | None:
+    """(ip, version) — "IPv4" or "IPv6" — from an ipapi.co response, or None.
+
+    Deliberately NOT a LocationProfile field: LocationProfile is what
+    save()/asdict() persist to disk, and the whole point of this function is
+    a value that must never end up there — the raw public IP is used
+    transiently (cache de-duplication, the confirmation dialog, diagnostics)
+    and is never written to CONFIG_FILE. ipapi.co reports whichever protocol
+    the request actually used, so IPv4 and IPv6 need no separate handling
+    here beyond reading the field it already sends.
+    """
+    ip = str(data.get("ip", "") or "").strip()
+    if not ip:
+        return None
+    version = str(data.get("version", "") or "").strip()
+    if version not in ("IPv4", "IPv6"):
+        version = "IPv6" if ":" in ip else "IPv4"
+    return ip, version
+
+
+# --- IP-geolocation failure classification -----------------------------------
+# Pure and Qt-free so it's unit-testable without a live network. main.py maps
+# a QNetworkReply's outcome onto these inputs.
+IPGEO_TIMEOUT = "timeout"
+IPGEO_RATE_LIMITED = "rate_limited"
+IPGEO_NETWORK_ERROR = "network_error"
+IPGEO_MALFORMED = "malformed_response"
+IPGEO_UNRECOGNIZED = "unrecognized_response"
+
+_IPGEO_MESSAGES = {
+    IPGEO_TIMEOUT:
+        "The location lookup timed out.",
+    IPGEO_RATE_LIMITED:
+        "The location service is rate-limiting requests — try again shortly.",
+    IPGEO_NETWORK_ERROR:
+        "Couldn't reach the location service (no network, or it's down).",
+    IPGEO_MALFORMED:
+        "The location service returned an unreadable response.",
+    IPGEO_UNRECOGNIZED:
+        "The location service didn't return a recognizable region for this IP.",
+}
+
+
+def classify_ipgeo_failure(*, timed_out: bool = False,
+                           network_error: bool = False,
+                           http_status: int | None = None,
+                           raw: bytes | None = None) -> str:
+    """Best-effort reason code for why a lookup failed, in priority order:
+    transfer timeout, HTTP 429 (rate limit), any other transport error, an
+    empty/unparsable body, else "unrecognized_response" — a well-formed
+    response `from_ipgeo` still couldn't use (e.g. no timezone for the IP)."""
+    if timed_out:
+        return IPGEO_TIMEOUT
+    if http_status == 429:
+        return IPGEO_RATE_LIMITED
+    if network_error:
+        return IPGEO_NETWORK_ERROR
+    if not raw:
+        return IPGEO_MALFORMED
+    try:
+        json.loads(raw.decode("utf-8", "replace"))
+    except ValueError:
+        return IPGEO_MALFORMED
+    return IPGEO_UNRECOGNIZED
+
+
+def ipgeo_failure_message(reason: str) -> str:
+    """User-facing sentence for a classify_ipgeo_failure() reason code."""
+    return _IPGEO_MESSAGES.get(reason, "Couldn't determine your IP location.")
+
+
+# --- lookup de-duplication (in-memory only — never persisted, never a
+# background poller) -----------------------------------------------------
+_last_lookup: dict | None = None  # {"ip": str, "profile": LocationProfile, "at": float}
+
+
+def note_lookup(ip: str, profile: LocationProfile) -> bool:
+    """Record a successful lookup. Returns True if `ip` differs from the
+    previously recorded lookup (the VPN/exit IP changed since last time);
+    False on the first lookup of a session or when it's unchanged."""
+    global _last_lookup
+    changed = _last_lookup is not None and _last_lookup["ip"] != ip
+    _last_lookup = {"ip": ip, "profile": profile, "at": time.monotonic()}
+    return changed
+
+
+def cached_lookup(max_age: float = 30.0) -> tuple[str, LocationProfile] | None:
+    """(ip, profile) from the last recorded lookup if younger than max_age
+    seconds, else None. Only for de-duplicating rapid repeat clicks of
+    "Match VPN location" — never used to skip the user's explicit action or
+    to answer navigator.geolocation on its own."""
+    if _last_lookup is None:
+        return None
+    if time.monotonic() - _last_lookup["at"] > max_age:
+        return None
+    return _last_lookup["ip"], _last_lookup["profile"]
+
+
+def clear_lookup_cache() -> None:
+    """Drop the recorded lookup — test isolation, or an explicit reset."""
+    global _last_lookup
+    _last_lookup = None
