@@ -2076,8 +2076,8 @@ class BrowserWindow(QMainWindow):
 
         self.statusBar().installEventFilter(self)
         self.statusBar().showMessage(
-            "Private session: history, cookies and cache are memory-only "
-            "and erased on exit.", 8000)
+            "Private session: history and cookies stay in memory (never "
+            "written to disk); the cache is securely shredded on exit.", 8000)
         self._center_version()
         # Seed the bookmarked-host set and drop favicons for bookmarks that
         # were removed in a previous session.
