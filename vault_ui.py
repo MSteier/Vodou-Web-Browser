@@ -524,6 +524,47 @@ class EntryDialog(QDialog):
                      notes=self.notes_edit.text())
 
 
+def _is_current_site(site: str, current: str) -> bool:
+    """True when a stored login's `site` belongs to the same site as the
+    page the user is currently on (`current`).
+
+    Both are reduced to a bare domain with normalize_site (drops scheme, path
+    and a leading "www."), then matched symmetrically so a login saved for the
+    parent domain matches on a subdomain and vice-versa:
+
+        current=replica.com      site=replica.com       -> equal
+        current=www.replica.com  site=replica.com       -> equal (www stripped)
+        current=app.replica.com  site=replica.com       -> current under site
+        current=replica.com      site=app.replica.com   -> site under current
+
+    Kept deliberately conservative (a label-boundary suffix, no public-suffix
+    list) so unrelated hosts that merely share a suffix are not grouped.
+    """
+    site = normalize_site(site)
+    current = normalize_site(current)
+    if not site or not current:
+        return False
+    return (current == site
+            or current.endswith("." + site)
+            or site.endswith("." + current))
+
+
+def prioritize_by_site(matches: list[tuple[int, Entry]],
+                       current_site: str) -> list[tuple[int, Entry]]:
+    """Reorder (index, Entry) pairs so logins for `current_site` come first.
+
+    A stable sort: current-site matches keep their relative order and so do the
+    rest, so this only lifts the matches to the top — it never filters, and with
+    no detectable current site it leaves the order untouched. Returns a new
+    list; the input is not mutated.
+    """
+    if not normalize_site(current_site):
+        return list(matches)
+    return sorted(matches,
+                  key=lambda pair: not _is_current_site(pair[1].site,
+                                                        current_site))
+
+
 class VaultDialog(QDialog):
     """Table view of all saved logins with add/edit/delete/copy."""
 
@@ -640,12 +681,29 @@ class VaultDialog(QDialog):
                    or query in e.site.lower()
                    or query in e.username.lower()
                    or query in e.notes.lower()]
+        # Float logins for the site the user is currently on to the top, keeping
+        # everything else in its existing order (a no-op when there's no current
+        # site). Applied after the search filter, so it reorders whatever the
+        # current search shows rather than fighting it.
+        matches = prioritize_by_site(matches, self.current_site)
         self.table.setRowCount(len(matches))
         for row, (i, e) in enumerate(matches):
             for col, text in enumerate((e.site, e.username, e.notes)):
                 item = QTableWidgetItem(text)
                 item.setData(Qt.ItemDataRole.UserRole, i)
                 self.table.setItem(row, col, item)
+
+    def set_current_site(self, site: str) -> None:
+        """Update which site counts as "current" and re-prioritize the list.
+
+        Called by the browser when the active tab or its URL changes while this
+        (modeless) window is open, so the current-site logins stay at the top.
+        """
+        site = site or ""
+        if site == self.current_site:
+            return
+        self.current_site = site
+        self._refresh()
 
     def _selected_index(self) -> int | None:
         items = self.table.selectedItems()

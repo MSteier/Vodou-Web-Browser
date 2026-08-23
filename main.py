@@ -2104,8 +2104,8 @@ class BrowserWindow(QMainWindow):
 
         self.statusBar().installEventFilter(self)
         self.statusBar().showMessage(
-            "Private session: history, cookies and cache are memory-only "
-            "and erased on exit.", 8000)
+            "Private session: history and cookies stay in memory (never "
+            "written to disk); the cache is securely shredded on exit.", 8000)
         self._center_version()
         # Seed the bookmarked-host set and drop favicons for bookmarks that
         # were removed in a previous session.
@@ -3116,6 +3116,7 @@ class BrowserWindow(QMainWindow):
             self.setWindowTitle(f"{title} — Vodou (private)")
         if getattr(self, "_devtools_open", False):
             view.page().setDevToolsPage(self._devtools_view.page())
+        self._sync_vault_current_site(view)
 
     def _on_url_changed(self, view: WebView, url: QUrl) -> None:
         self._schedule_session_save()
@@ -3141,6 +3142,7 @@ class BrowserWindow(QMainWindow):
         # (logging in usually navigates); drop them when leaving.
         if url.host().removeprefix("www.") != self.notify_bar.host:
             self.notify_bar.hide()
+        self._sync_vault_current_site(view)
 
     # -- deceptive-site (spoof) protection --------------------------------
 
@@ -5145,6 +5147,17 @@ class BrowserWindow(QMainWindow):
         self._vault_dialog = None
         if self.vault.unlocked:
             self._vault_lock_timer.start()  # fresh countdown after use
+
+    def _sync_vault_current_site(self, view: "WebView | None" = None) -> None:
+        """Tell an open, modeless vault window which site is now current, so its
+        login list re-prioritizes when the active tab or its URL changes."""
+        if self._vault_dialog is None:
+            return
+        view = view or self.current_view()
+        if view is None or view is not self.current_view():
+            return
+        host = view.url().host().removeprefix("www.")
+        self._vault_dialog.set_current_site(host)
 
     def show_blocking_report(self) -> None:
         if self._report_window is not None:
