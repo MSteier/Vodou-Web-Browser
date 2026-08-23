@@ -91,6 +91,56 @@ location /searxng/ {
 Vodou still opens `https://localhost/searxng` and trusts the localhost
 certificate either way.
 
+## LAN viewer password (noVNC gate)
+
+The browser-viewable image (`Dockerfile.vnc`) runs the VNC server with **no VNC
+password** (`x11vnc -nopw`), bound to the container's own localhost. That's on
+purpose: LAN access is gated one layer up, by **HTTP Basic Auth on the reverse
+proxy** that fronts the viewer (nginx `auth_basic` → a `vodou.htpasswd` file).
+That htpasswd entry is the credential that actually protects LAN access.
+
+**Bootstrap credential (fresh install).** When no credential has been configured
+yet, seed the default:
+
+```
+username: vodou
+password: vodou-lan-2026
+```
+
+`manage_viewer_password.py` manages this file. It **never overwrites** an entry
+that already exists, so upgrading or re-running is safe and an installation that
+already set its own password keeps it.
+
+```sh
+# Point it at your proxy's htpasswd (or export VODOU_VIEWER_HTPASSWD):
+export VODOU_VIEWER_HTPASSWD=/etc/nginx/vodou.htpasswd   # e.g. on Windows:
+#   set VODOU_VIEWER_HTPASSWD=C:\nginx-1.27.4\conf\vodou.htpasswd
+
+# Fresh install: install the bootstrap credential (no-op if one exists)
+python manage_viewer_password.py seed
+
+# Change it before normal use (prompts; nothing is echoed or logged)
+python manage_viewer_password.py change
+
+# Report whether the default is still in use (exit != 0 with --fail-if-default,
+# so a setup script can refuse to finish until it's changed)
+python manage_viewer_password.py status --fail-if-default
+```
+
+Passwords are stored only as salted Apache-MD5 (`$apr1$`) hashes — the format
+nginx accepts on every platform, including Windows — never in plaintext, and are
+never logged or echoed. Whether the bootstrap password is still in use is
+derived from the stored hash itself (no separate flag to drift out of sync).
+
+**Limitation (by design).** There is **no "force a password change at first VNC
+login."** The RFB/VNC protocol has no password-change-on-login mechanism, and
+HTTP Basic Auth is stateless (it has no login event to intercept). Enforcement
+is therefore at **provisioning time**: `seed` installs the default, `status
+--fail-if-default` lets your setup step block until it's changed, and `change`
+replaces it. Adding a stateful web login purely to simulate a first-login prompt
+would mean standing up a second authentication system, which this deliberately
+avoids.
+
 ## Notes & gotchas
 
 - **Port 443/80 must be free.** Caddy binds them for `https://localhost`. If
