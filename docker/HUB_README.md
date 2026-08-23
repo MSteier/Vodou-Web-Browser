@@ -22,7 +22,17 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.49.0` — pinned version
+- `1.50.0` — pinned version
+
+## Changelog
+- **1.50.0** — Fixed a crash-loop on Linux hosts with no desktop keyring
+  (Secret Service/KWallet unavailable, e.g. this VNC image): the session
+  autosave and setting-protection snapshot writers only caught `OSError`
+  around at-rest sealing, but a missing keyring raises a different
+  exception — it escaped a Qt timer slot and crashed the app every ~13s,
+  which under `--restart unless-stopped` looked like the container
+  restarting forever. Both writers now fail closed the same way the
+  cookie jar already did: skip the write, keep running.
 
 ## How it works
 
