@@ -308,9 +308,26 @@ import location_profile
 # (appended when Location & region emulation is on) localizes Intl date/number
 # formatting to the chosen region; it can only be read at launch, so changing
 # the region asks for a restart. The WebRTC flag is always preserved.
+#
+# --disable-features=HttpsUpgrades turns off Chromium's own (default-on since
+# ~M117) silent "try HTTPS first, fall back to HTTP" behavior for EVERY
+# navigation, independent of anything Vodou's own HTTPS-first address bar
+# does (that's app-level, typed-input only — see _normalize_url — and is
+# unaffected by this flag). Vodou's home page / default search deliberately
+# points straight at a plain-http local SearXNG (the bundled docker/ stack's
+# SearXNG container has no TLS of its own; see _searxng_base and
+# docker/README.md), and the same applies to any other plain-http local
+# service a user points VODOU_SEARXNG_URL at. Without this flag, Chromium's
+# engine-level upgrade attempt hits that host's real HTTP port with a TLS
+# ClientHello, gets a "wrong version number" handshake failure, and the page
+# fails to load outright — it does not fall back to the original http:// URL
+# the app actually requested. Real HTTPS sites are unaffected: this only
+# changes whether Chromium *guesses* at upgrading a plain http:// navigation
+# that was never asked to be https in the first place.
 os.environ.setdefault(
     "QTWEBENGINE_CHROMIUM_FLAGS",
     "--force-webrtc-ip-handling-policy=default_public_interface_only "
+    "--disable-features=HttpsUpgrades "
     + _gfx_flags() + location_profile.chromium_lang_flag())
 
 import platform
