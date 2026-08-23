@@ -114,10 +114,24 @@ def save_config(cfg: dict) -> None:
         pass
 
 
-def is_search_results(url: QUrl) -> bool:
+def is_search_results(url: QUrl, searxng_host: str = "") -> bool:
     """True for a local SearXNG results page — the only place the summary
-    button does anything."""
-    if url.host() not in ("localhost", "127.0.0.1"):
+    button does anything.
+
+    `searxng_host` should be the host of the *actually configured* SearXNG
+    base URL (main.SEARXNG_BASE) — pass it from every call site. Without it,
+    this only recognizes the two loopback names, which misses the bundled
+    Docker deployment's default `http://host.docker.internal:8081` (or any
+    other host VODOU_SEARXNG_URL/config.json points at): the summary button
+    would silently never activate on the actual results page, even though
+    SearXNG loaded and rendered fine. `searxng_host` is still checked against
+    the URL rather than trusted blindly, so a page that merely matches
+    "/search" on an unrelated host is never treated as a results page.
+    """
+    host = url.host()
+    if not host or host not in (
+            {"localhost", "127.0.0.1", searxng_host} if searxng_host
+            else {"localhost", "127.0.0.1"}):
         return False
     return "/searxng/search" in url.path() or url.path().endswith("/search")
 
