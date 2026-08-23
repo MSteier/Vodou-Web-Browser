@@ -432,6 +432,7 @@ from ai_search import (
 import celebrate
 import content_credentials
 import setting_protection
+from remote_control import ControlServer, control_enabled
 from safebrowsing import SafeBrowsing
 from session import (
     clear_snapshot, consume_restart, load_snapshot, mark_restart,
@@ -1729,6 +1730,24 @@ class BrowserWindow(QMainWindow):
         self._update_recheck_timer.timeout.connect(self._update_checker.start)
         self._update_recheck_timer.start(6 * 3600 * 1000)
 
+        # Optional loopback control surface for local tools (e.g. the Vodou MCP
+        # server). OFF unless VODOU_ENABLE_CONTROL is set — it lets a same-machine
+        # client open/navigate tabs and read blocking stats over 127.0.0.1 with a
+        # per-run token. See remote_control.py.
+        self._control_server = None
+        if control_enabled():
+            self._start_control_server()
+
+    def _start_control_server(self) -> None:
+        def url_ok(u: QUrl) -> bool:
+            return u.isValid() and u.scheme() in ("http", "https")
+        server = ControlServer(self, to_url, url_ok, self)
+        if server.start():
+            self._control_server = server
+            self.statusBar().showMessage(
+                f"Remote control enabled on 127.0.0.1:{server.port}", 4000)
+        # A failure to bind is non-fatal: the browser runs normally without it.
+
     # -- UI ---------------------------------------------------------------
 
     def _build_ui(self) -> None:
@@ -2700,6 +2719,8 @@ class BrowserWindow(QMainWindow):
             win.close_for_shutdown()
         self._detached_windows.clear()
         # Blocking stats are in-memory only; they simply go with the process.
+        if self._control_server is not None:
+            self._control_server.stop()  # close the socket, drop control.json
         super().closeEvent(event)
 
     def manage_cookie_sites(self) -> None:

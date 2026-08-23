@@ -75,5 +75,53 @@ def vodou_vault_status() -> dict:
     return be.vault_status()
 
 
+# -- live control (only when Vodou runs with VODOU_ENABLE_CONTROL=1) ----------
+
+def _control(cmd: str, params: dict | None = None) -> dict:
+    try:
+        return {"ok": True, "result": be.control_request(cmd, params)}
+    except be.ControlUnavailable as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # command rejected by the running browser
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+def vodou_live_tabs() -> dict:
+    """List the tabs open in the RUNNING Vodou browser (url, title, index).
+
+    Requires Vodou started with VODOU_ENABLE_CONTROL=1; otherwise returns
+    {ok: false, error: ...}.
+    """
+    return _control("list_tabs")
+
+
+@mcp.tool()
+def vodou_open_url(url: str) -> dict:
+    """Open an http(s) URL in a new tab in the RUNNING Vodou browser.
+
+    Requires VODOU_ENABLE_CONTROL=1. Non-http(s) URLs are rejected.
+    """
+    return _control("open_tab", {"url": url})
+
+
+@mcp.tool()
+def vodou_navigate(url: str) -> dict:
+    """Navigate the RUNNING Vodou's active tab to an http(s) URL.
+
+    Requires VODOU_ENABLE_CONTROL=1. Non-http(s) URLs are rejected.
+    """
+    return _control("navigate", {"url": url})
+
+
+@mcp.tool()
+def vodou_live_blocking_stats(period: str = "1h") -> dict:
+    """Live ad/tracker blocking stats from the RUNNING Vodou (period '1h'|'24h').
+
+    Requires VODOU_ENABLE_CONTROL=1. Returns totals and top blocked hosts.
+    """
+    return _control("blocking_stats", {"period": period})
+
+
 if __name__ == "__main__":
     mcp.run()
