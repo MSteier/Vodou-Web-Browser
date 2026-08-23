@@ -1,0 +1,8 @@
+# Vodou MCP server — dependencies (kept separate from the app's requirements).
+# Everything else (search, Ollama calls, JSON parsing) uses the standard library
+# and Vodou's own GUI-free modules, so this is the only extra dependency.
+#
+# Pinned to the 1.x line: it provides the stable FastMCP API
+# (mcp.server.fastmcp.FastMCP) this server is written against. The 2.x release
+# removed FastMCP in favour of a different API.
+mcp>=1.9.0,<2
