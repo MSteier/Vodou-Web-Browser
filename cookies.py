@@ -69,6 +69,11 @@ class CookieKeeper(QObject):
         self.sites: list[str] = load_sites()
         # (domain, path, name) -> raw Set-Cookie form of the cookie
         self._kept: dict[tuple[str, str, bytes], bytes] = {}
+        # Whether we know the on-disk jar's state. True once restore() has
+        # read the jar cleanly (or confirmed there is none); False while a jar
+        # we could NOT read may still be sitting on disk. flush() must never
+        # delete a jar it failed to load — see flush().
+        self._restore_ok = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(3000)
@@ -122,7 +127,14 @@ class CookieKeeper(QObject):
         """Write the kept cookies now (debounce target; also exit path)."""
         try:
             if not self._kept:
-                COOKIE_JAR_FILE.unlink(missing_ok=True)
+                # Only delete the jar when we KNOW it holds nothing worth
+                # keeping. If restore() never succeeded, an empty _kept may
+                # instead mean we couldn't read a still-valid jar (a locked
+                # file, or on Linux a keyring that wasn't up yet at startup) —
+                # deleting it then would silently destroy the saved logins.
+                # Leave it untouched so the next start can still load it.
+                if self._restore_ok:
+                    COOKIE_JAR_FILE.unlink(missing_ok=True)
                 return
             try:
                 blob = _seal(b"\n".join(self._kept.values()))
@@ -150,11 +162,25 @@ class CookieKeeper(QObject):
         return _keystore_problem()
 
     def restore(self) -> int:
-        """Load the jar into the live store. Returns cookies restored."""
+        """Load the jar into the live store. Returns cookies restored.
+
+        Sets _restore_ok only when the on-disk state is known for sure: the jar
+        read and unsealed cleanly, or there is no jar at all. A jar that exists
+        but can't be read (locked file, keyring not yet available) leaves the
+        flag False so flush() won't later delete it — that data may still be
+        recoverable on a healthier next start.
+        """
         try:
-            raw = _unseal(COOKIE_JAR_FILE.read_bytes())
-        except OSError:
+            data = COOKIE_JAR_FILE.read_bytes()
+        except FileNotFoundError:
+            self._restore_ok = True   # no jar on disk — nothing to lose
             return 0
+        except OSError:
+            return 0                  # a jar exists but couldn't be read; keep it
+        try:
+            raw = _unseal(data)
+        except OSError:
+            return 0                  # sealed jar we can't open yet; keep it
         now = datetime.now(timezone.utc)
         count = 0
         for line in raw.split(b"\n"):
@@ -168,6 +194,7 @@ class CookieKeeper(QObject):
                     continue
                 self._store.setCookie(cookie)
                 count += 1
+        self._restore_ok = True       # jar read cleanly; safe to rewrite/unlink
         return count
 
     def clear(self) -> None:
@@ -179,3 +206,4 @@ class CookieKeeper(QObject):
             COOKIE_JAR_FILE.unlink(missing_ok=True)
         except OSError:
             pass
+        self._restore_ok = True  # the jar is now known-absent by our own doing
