@@ -38,7 +38,13 @@ mkdir -p "$apps" "$icons"
 # relative to itself, but the updater resolves the repo relative to cwd.
 exec_line="sh -c 'cd \"$repo\" && exec \"$python_bin\" main.py'"
 
-sed "s|@EXEC@|$exec_line|" "$here/vodou.desktop" > "$apps/vodou.desktop"
+# Escape the sed-replacement metacharacters before substituting: in a sed
+# replacement, & means "the matched text" and \ and the | delimiter are also
+# special. exec_line always contains && (and $repo may contain any of them),
+# so an unescaped substitution would turn && into @EXEC@@EXEC@ and produce a
+# launcher that never starts Vodou. Prefix each with a backslash.
+exec_esc=$(printf '%s' "$exec_line" | sed 's/[&\|]/\\&/g')
+sed "s|@EXEC@|$exec_esc|" "$here/vodou.desktop" > "$apps/vodou.desktop"
 cp "$here/vodou.png" "$icons/vodou.png"
 
 # Non-fatal: the entry still works after a re-login without these.

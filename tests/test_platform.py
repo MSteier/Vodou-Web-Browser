@@ -133,7 +133,17 @@ for label, backend, acceptable in [
          False),
         ("bare plaintext backend", _plaintext, False),
         ("keyring.backends.fail", _fake_backend("keyring.backends.fail"),
-         False)]:
+         False),
+        # Boundary check: a module that merely BEGINS with an allowlisted name
+        # is not one of the vetted backends and must be rejected (a bare
+        # startswith would wrongly accept it).
+        ("lookalike SecretServiceEvil",
+         _fake_backend("keyring.backends.SecretServiceEvil"), False),
+        ("lookalike macOSPlaintext",
+         _fake_backend("keyring.backends.macOSPlaintext"), False),
+        # A genuine submodule of an allowlisted backend must still be accepted.
+        ("real macOS submodule",
+         _fake_backend("keyring.backends.macOS.api"), True)]:
     _stub.get_keyring = lambda b=backend: b
     try:
         dpapi._keyring()

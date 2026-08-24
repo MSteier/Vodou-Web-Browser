@@ -76,8 +76,21 @@ jobs:
         run: |
           sh -n packaging/install-linux.sh
           sh -n docker/setup.sh
-          sed 's|@EXEC@|/bin/true|' packaging/vodou.desktop > /tmp/vodou.desktop
-          desktop-file-validate /tmp/vodou.desktop
+          # Actually run the installer into a throwaway XDG_DATA_HOME and
+          # validate the launcher it really writes. A plain template
+          # substitution (the old check) hides bugs in the substitution
+          # itself — e.g. an unescaped & in the sed replacement expanding && to
+          # the @EXEC@ placeholder and producing a launcher that never starts.
+          export XDG_DATA_HOME="$(mktemp -d)"
+          sh packaging/install-linux.sh
+          desk="$XDG_DATA_HOME/applications/vodou.desktop"
+          desktop-file-validate "$desk"
+          # The Exec line must keep its shell && and must not leak @EXEC@.
+          grep -q 'cd .* && exec ' "$desk"
+          if grep -q '@EXEC@' "$desk"; then
+            echo "install-linux.sh left @EXEC@ unsubstituted in $desk" >&2
+            exit 1
+          fi
 
       # The published SearXNG config must never carry a real secret.
       - name: Check no secret was committed

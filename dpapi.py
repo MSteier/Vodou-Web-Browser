@@ -117,7 +117,13 @@ def _keyring():
     # plaintext file — the chain is only as private as its weakest link.
     for backend in leaves:
         module = type(backend).__module__ or ""
-        if not module.startswith(_SECURE_BACKENDS):
+        # Match on a module boundary, not a bare prefix: a plain
+        # startswith(_SECURE_BACKENDS) would also accept a hypothetical
+        # "keyring.backends.macOSPlaintext" or "...SecretServiceEvil" that
+        # merely begins with an allowlisted name. Fail closed on anything
+        # that isn't exactly a vetted backend or a submodule of one.
+        if not any(module == name or module.startswith(name + ".")
+                   for name in _SECURE_BACKENDS):
             raise Unavailable(
                 f"the {module or 'unknown'} keyring backend does not encrypt "
                 "its storage")
