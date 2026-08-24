@@ -479,6 +479,13 @@ from about import (
 )
 from theme import THEMES, apply_theme, build_palette, load_prefs, save_prefs
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
+from vault_autolock import (
+    autolock_interval_ms,
+    autolock_label,
+    is_valid_autolock_minutes,
+    load_vault_autolock_minutes,
+    save_vault_autolock_minutes,
+)
 from vault_ui import (
     EntryDialog,
     PickEntryDialog,
@@ -633,8 +640,8 @@ if _has_overrides:
 # SearXNG instance). Certificate errors anywhere else are still fatal.
 CERT_EXEMPT_HOSTS = {"localhost", "127.0.0.1"}
 
-# Re-lock the password vault after this much inactivity.
-VAULT_AUTOLOCK_MINUTES = 5
+# How long the vault may stay unlocked while idle before it re-locks is now a
+# user setting (see vault_autolock.py — default 5 minutes, up to 1 week).
 
 # Isolated JS world for our own scripts: page scripts can't see or tamper
 # with anything we inject there (the DOM itself is still shared).
@@ -1679,9 +1686,11 @@ class BrowserWindow(QMainWindow):
 
         self.vault = Vault()
         self.bookmarks = Bookmarks()
+        self._vault_autolock_minutes = load_vault_autolock_minutes()
         self._vault_lock_timer = QTimer(self)
         self._vault_lock_timer.setSingleShot(True)
-        self._vault_lock_timer.setInterval(VAULT_AUTOLOCK_MINUTES * 60 * 1000)
+        self._vault_lock_timer.setInterval(
+            autolock_interval_ms(self._vault_autolock_minutes))
         self._vault_lock_timer.timeout.connect(self._autolock_vault)
         # The vault window is modeless, so it outlives the call that opened
         # it; this holds the live one (None when closed).
@@ -5172,6 +5181,24 @@ class BrowserWindow(QMainWindow):
         self._refresh_vault_indicator()
         return True
 
+    def set_vault_autolock_minutes(self, minutes: int) -> None:
+        """Apply a newly chosen auto-lock window: persist it and re-arm the
+        running countdown so it takes effect immediately, not only after the
+        next unlock. Ignores an unchanged or out-of-range value."""
+        if not is_valid_autolock_minutes(minutes) \
+                or minutes == self._vault_autolock_minutes:
+            return
+        self._vault_autolock_minutes = minutes
+        save_vault_autolock_minutes(minutes)
+        self._vault_lock_timer.setInterval(autolock_interval_ms(minutes))
+        if self.vault.unlocked:
+            # Restart so the just-chosen duration governs the current session
+            # rather than the old interval that's already ticking.
+            self._vault_lock_timer.start()
+        self.statusBar().showMessage(
+            f"Vault will auto-lock after {autolock_label(minutes)} of "
+            f"inactivity.", 4000)
+
     def _autolock_vault(self) -> None:
         if QApplication.activeModalWidget() is not None:
             self._vault_lock_timer.start()  # vault UI in use; retry later
@@ -5185,8 +5212,9 @@ class BrowserWindow(QMainWindow):
             self.vault.lock()
             self._refresh_vault_indicator()
             self.statusBar().showMessage(
-                f"Password vault auto-locked after {VAULT_AUTOLOCK_MINUTES} "
-                f"minutes of inactivity.", 6000)
+                f"Password vault auto-locked after "
+                f"{autolock_label(self._vault_autolock_minutes)} of "
+                f"inactivity.", 6000)
 
     def lock_vault_now(self) -> None:
         """Manually lock the vault ("log out"), like auto-lock but on demand."""
@@ -5222,7 +5250,8 @@ class BrowserWindow(QMainWindow):
         # window icon (theme.apply_theme) still applies. Its own child
         # dialogs (add/edit/reveal) stay modal to it, which keeps auto-lock
         # deferred while one is open (see _autolock_vault).
-        dialog = VaultDialog(self.vault, None, current_site=host)
+        dialog = VaultDialog(self.vault, None, current_site=host,
+                             autolock_minutes=self._vault_autolock_minutes)
         dialog.setWindowFlags(Qt.WindowType.Window)
         dialog.setModal(False)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -5232,6 +5261,9 @@ class BrowserWindow(QMainWindow):
         # closes this dialog itself).
         dialog.logout_requested.connect(self.lock_vault_now)
         dialog.open_site_requested.connect(self.open_saved_site)
+        # The browser owns the lock timer, so the vault window asks it to apply
+        # and persist a new auto-lock duration.
+        dialog.autolock_minutes_changed.connect(self.set_vault_autolock_minutes)
         self._vault_dialog = dialog
         dialog.show()
 

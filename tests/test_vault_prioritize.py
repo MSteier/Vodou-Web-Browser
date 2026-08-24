@@ -112,13 +112,18 @@ print("\nVaultDialog integration (offscreen Qt)")
 
 
 class FakeVault:
-    """Just enough of the Vault surface for VaultDialog._refresh()."""
+    """Just enough of the Vault surface for VaultDialog._refresh() and the
+    two-factor switch it syncs on open (real Vault is always unlocked here)."""
 
     def __init__(self, entries):
         self._entries = entries
 
     def entries(self):
         return self._entries
+
+    @property
+    def factor_enrolled(self):
+        return False
 
 
 def table_sites(dialog):
