@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QGuiApplication, QKeySequence, QPalette, QShortcut
+from PyQt6.QtGui import (
+    QActionGroup,
+    QGuiApplication,
+    QKeySequence,
+    QPalette,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -37,6 +43,10 @@ from authenticator import (
 )
 from icons import make_icon
 from importers import parse_password_csv, write_password_csv
+from vault_autolock import (
+    DEFAULT_VAULT_AUTOLOCK_MINUTES,
+    VAULT_AUTOLOCK_OPTIONS,
+)
 from vault import (
     Entry,
     SecondFactorFailed,
@@ -565,6 +575,31 @@ def prioritize_by_site(matches: list[tuple[int, Entry]],
                                                         current_site))
 
 
+def two_factor_state(factor_enrolled: bool, webauthn_available: bool) -> dict:
+    """UI state for the two-factor switch, computed with no Qt or hardware so it
+    can be unit-tested.
+
+    * checked  — the switch reads as ON exactly when a security key is enrolled.
+    * enabled  — you can always turn it OFF; you can only turn it ON where
+                 WebAuthn/security keys are actually usable. So an off switch on
+                 a system that can't run WebAuthn is disabled rather than a dead
+                 control that would go nowhere.
+    * tooltip  — a short explanation of the current state.
+    """
+    checked = bool(factor_enrolled)
+    enabled = bool(factor_enrolled or webauthn_available)
+    if checked:
+        tooltip = ("On — the vault needs your master password AND a registered "
+                   "security key. Click to turn off (removes all keys).")
+    elif webauthn_available:
+        tooltip = ("Off — click to also require a security key alongside your "
+                   "master password.")
+    else:
+        tooltip = ("Off — turning this on needs a FIDO2 security key, and none "
+                   "can be used here.")
+    return {"checked": checked, "enabled": enabled, "tooltip": tooltip}
+
+
 class VaultDialog(QDialog):
     """Table view of all saved logins with add/edit/delete/copy."""
 
@@ -573,12 +608,17 @@ class VaultDialog(QDialog):
     logout_requested = pyqtSignal()
     # Emitted with a saved entry's site so the browser can open it in a tab.
     open_site_requested = pyqtSignal(str)
+    # Emitted when the user picks a different auto-lock duration; the browser
+    # owns the lock timer, so it applies and persists the new value.
+    autolock_minutes_changed = pyqtSignal(int)
 
     def __init__(self, vault: Vault, parent: QWidget | None = None,
-                 current_site: str = ""):
+                 current_site: str = "",
+                 autolock_minutes: int = DEFAULT_VAULT_AUTOLOCK_MINUTES):
         super().__init__(parent)
         self.vault = vault
         self.current_site = current_site
+        self._autolock_minutes = autolock_minutes
         self.setWindowTitle("Password Vault")
         self.resize(660, 440)
 
@@ -637,23 +677,58 @@ class VaultDialog(QDialog):
         footer.setSpacing(8)
 
         manage_btn = QPushButton("Manage")
-        manage_btn.setToolTip("Security keys, master password, and CSV "
+        manage_btn.setToolTip("Vault security, auto-lock, and CSV "
                               "import/export.")
         manage_menu = QMenu(manage_btn)
+        # Grouped into three labelled sections — Security, Auto-lock, Data — so
+        # the occasional vault-wide actions read as an organised settings menu
+        # rather than a flat list.
+
+        # --- Security -----------------------------------------------------
+        security_header = manage_menu.addAction("Security")
+        security_header.setEnabled(False)  # non-clickable section caption
+
+        self._two_factor_action = manage_menu.addAction(
+            "Two-factor (security key)")
+        self._two_factor_action.setCheckable(True)
+        self._two_factor_action.triggered.connect(self._on_two_factor_triggered)
+
         keys_action = manage_menu.addAction(
-            "Security keys…",
-            lambda: SecurityKeysDialog(self.vault, self).exec())
+            "Security keys…", self._manage_security_keys)
         keys_action.setToolTip(
-            "Add or remove a FIDO2 security key as a second factor for "
-            "unlocking the vault.")
+            "Add a backup key or remove an individual key. The two-factor "
+            "switch above is the quick way to turn it all on or off.")
         manage_menu.addAction(
             "Change master password…",
             lambda: ChangeMasterDialog(self.vault, self).exec())
+
+        # --- Auto-lock ----------------------------------------------------
+        manage_menu.addSeparator()
+        autolock_menu = manage_menu.addMenu("Auto-lock vault")
+        autolock_menu.setToolTip(
+            "How long the unlocked vault waits, idle, before it re-locks.")
+        self._autolock_group = QActionGroup(autolock_menu)
+        self._autolock_group.setExclusive(True)
+        for minutes, label in VAULT_AUTOLOCK_OPTIONS:
+            option = autolock_menu.addAction(label)
+            option.setCheckable(True)
+            option.setChecked(minutes == self._autolock_minutes)
+            self._autolock_group.addAction(option)
+            option.triggered.connect(
+                lambda _checked, m=minutes: self._choose_autolock(m))
+        autolock_menu.addSeparator()
+        caution = autolock_menu.addAction(
+            "⚠  Longer windows keep the vault key in memory longer")
+        caution.setEnabled(False)  # inline caution, not an action
+
+        # --- Data ---------------------------------------------------------
         manage_menu.addSeparator()
         manage_menu.addAction("Import from CSV…", self._import_csv)
         manage_menu.addAction("Export to CSV…", self._export_csv)
+
         manage_btn.setMenu(manage_menu)
         footer.addWidget(manage_btn)
+        self._sync_two_factor_action()  # reflect the real 2FA state on open
 
         hint = QLabel(f"Copied passwords clear after "
                       f"{CLIPBOARD_CLEAR_SECONDS}s")
@@ -704,6 +779,70 @@ class VaultDialog(QDialog):
             return
         self.current_site = site
         self._refresh()
+
+    # -- security & auto-lock menu ---------------------------------------
+
+    def _choose_autolock(self, minutes: int) -> None:
+        """User picked an auto-lock duration. The browser owns the timer, so
+        just remember it here and ask the browser to apply and persist it."""
+        if minutes == self._autolock_minutes:
+            return
+        self._autolock_minutes = minutes
+        self.autolock_minutes_changed.emit(minutes)
+
+    def _manage_security_keys(self) -> None:
+        """Open the security-keys manager, then re-sync the two-factor switch:
+        adding the first key or removing the last one flips 2FA on/off."""
+        SecurityKeysDialog(self.vault, self).exec()
+        self._sync_two_factor_action()
+
+    def _on_two_factor_triggered(self, _checked: bool = False) -> None:
+        """The two-factor switch was clicked. Act on the vault's REAL state,
+        not the transient check state: with no key enrolled, turning it on runs
+        the security-key enroll flow; with keys enrolled, turning it off removes
+        every key (after a confirm). The check mark is then re-synced to what
+        actually happened, so the switch never lies."""
+        if not self.vault.factor_enrolled:
+            SecurityKeysDialog(self.vault, self).exec()
+        elif self._confirm_disable_two_factor():
+            self._disable_two_factor()
+        self._sync_two_factor_action()
+
+    def _confirm_disable_two_factor(self) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Turn off two-factor")
+        box.setText(
+            "Remove every enrolled security key and go back to opening the "
+            "vault with just the master password?\n\n"
+            "You can turn two-factor back on later, but you'll need to "
+            "re-enroll your keys.")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        return box.exec() == QMessageBox.StandardButton.Yes
+
+    def _disable_two_factor(self) -> None:
+        """Remove all enrolled keys. Reuses vault.remove_authenticator (removing
+        the last key reverts the vault to password-only) — no new crypto here."""
+        try:
+            for record in self.vault.list_authenticators():
+                self.vault.remove_authenticator(record["cred_id"])
+        except (ValueError, OSError) as error:
+            QMessageBox.warning(self, "Couldn't turn off two-factor",
+                                str(error))
+
+    def _sync_two_factor_action(self) -> None:
+        """Make the switch reflect the vault's real second-factor state (and
+        whether it can be turned on here)."""
+        available, _why = webauthn_supported()
+        state = two_factor_state(self.vault.factor_enrolled, available)
+        action = self._two_factor_action
+        action.blockSignals(True)  # setChecked must not re-fire triggered
+        action.setChecked(state["checked"])
+        action.blockSignals(False)
+        action.setEnabled(state["enabled"])
+        action.setToolTip(state["tooltip"])
 
     def _selected_index(self) -> int | None:
         items = self.table.selectedItems()
