@@ -804,9 +804,11 @@ class VaultDialog(QDialog):
         self._safe_browsing = safe_browsing
         self.setWindowTitle("Password Vault")
         # Wider than the old 4-column layout's default — seven columns need
-        # the room, and only Website stretches (see below), so a narrow
-        # window would otherwise push the later columns past the edge.
-        self.resize(980, 460)
+        # the room, and only Website stretches (see below). 980px (the old
+        # width) left Duplicated and Last Changed past the edge even with no
+        # search filter narrowing anything; ~1300px is the smallest width
+        # that fits all seven at their natural ResizeToContents widths.
+        self.resize(1300, 480)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 12)
@@ -831,10 +833,16 @@ class VaultDialog(QDialog):
         # Username split) fought each other for space once there were seven
         # columns instead of four, pushing Password/Strength/Duplicated/Last
         # Changed past the right edge even in a wide window.
+        # Every column sizes to its own content — no Stretch column at all.
+        # Stretch (tried for Website alone, so the table wouldn't leave dead
+        # space in a wide window) turned out to compute its share
+        # incorrectly against a real window's actual layout despite sizing
+        # correctly in an offscreen test, silently pushing Duplicated/Last
+        # Changed off-screen even at the dialog's own default width. A little
+        # unused space to the right of Last Changed in a wide window is a
+        # far smaller cost than columns disappearing.
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(
-            self.COL_WEBSITE, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
