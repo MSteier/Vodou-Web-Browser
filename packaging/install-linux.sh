@@ -7,7 +7,8 @@
 # that updater does `git pull` against this directory.
 #
 # Undo:  rm ~/.local/share/applications/vodou.desktop \
-#           ~/.local/share/icons/hicolor/128x128/apps/vodou.png
+#           ~/.local/share/icons/hicolor/128x128/apps/vodou.png \
+#           ~/.local/share/vodou/launch.sh
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -32,20 +33,36 @@ fi
 
 apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 icons="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/128x128/apps"
-mkdir -p "$apps" "$icons"
+vodou_dir="${XDG_DATA_HOME:-$HOME/.local/share}/vodou"
+mkdir -p "$apps" "$icons" "$vodou_dir"
 
+# The Desktop Entry spec's Exec grammar has its own (limited) quoting rules —
+# distinct from shell quoting, and stricter: single quotes are a "reserved
+# character" that can't appear at all, so a `sh -c '...'` one-liner embedded
+# directly in Exec= (as this used to be) is invalid regardless of how
+# carefully it's escaped, and desktop-file-validate correctly rejects it. A
+# plain launcher *file* sidesteps the whole problem: Exec just names an
+# executable plus %u, with no shell operators or quoting for the spec to
+# object to.
+#
 # The launcher must cd into the checkout: main.py resolves sibling modules
-# relative to itself, but the updater resolves the repo relative to cwd.
-# The trailing "$@" plus the %u below forward a launched-with-a-link's URL
-# through to main.py (see main._startup_url_from_argv); the "_" placeholder
-# becomes $0 inside the sh -c script so "$@" starts at the real argument.
-exec_line="sh -c 'cd \"$repo\" && exec \"$python_bin\" main.py \"\$@\"' _ %u"
+# relative to itself, but the updater resolves the repo relative to cwd. The
+# trailing "$@" forwards a launched-with-a-link's URL through to main.py (see
+# main._startup_url_from_argv) — %u in the .desktop file supplies that
+# argument when Vodou is opened via a link.
+launcher="$vodou_dir/launch.sh"
+cat > "$launcher" <<LAUNCHER
+#!/bin/sh
+cd "$repo" && exec "$python_bin" main.py "\$@"
+LAUNCHER
+chmod +x "$launcher"
+
+exec_line="\"$launcher\" %u"
 
 # Escape the sed-replacement metacharacters before substituting: in a sed
 # replacement, & means "the matched text" and \ and the | delimiter are also
-# special. exec_line always contains && (and $repo may contain any of them),
-# so an unescaped substitution would turn && into @EXEC@@EXEC@ and produce a
-# launcher that never starts Vodou. Prefix each with a backslash.
+# special, and $launcher could in principle contain either. Prefix each with
+# a backslash so the launcher path always survives substitution literally.
 exec_esc=$(printf '%s' "$exec_line" | sed 's/[&\|]/\\&/g')
 sed "s|@EXEC@|$exec_esc|" "$here/vodou.desktop" > "$apps/vodou.desktop"
 cp "$here/vodou.png" "$icons/vodou.png"

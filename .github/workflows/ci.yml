@@ -84,13 +84,21 @@ jobs:
           export XDG_DATA_HOME="$(mktemp -d)"
           sh packaging/install-linux.sh
           desk="$XDG_DATA_HOME/applications/vodou.desktop"
+          launcher="$XDG_DATA_HOME/vodou/launch.sh"
           desktop-file-validate "$desk"
-          # The Exec line must keep its shell && and must not leak @EXEC@.
-          grep -q 'cd .* && exec ' "$desk"
           if grep -q '@EXEC@' "$desk"; then
             echo "install-linux.sh left @EXEC@ unsubstituted in $desk" >&2
             exit 1
           fi
+          # Exec must point at the launcher script plus %u (no shell
+          # operators or quoting embedded directly in Exec= — the Desktop
+          # Entry spec's own quoting rules reject those regardless of
+          # escaping, which is exactly what used to slip past this check).
+          grep -q '^Exec=.*launch\.sh" %u$' "$desk"
+          # The cd/exec logic itself must actually be in the launcher file,
+          # and that file must be executable.
+          [ -x "$launcher" ]
+          grep -q 'cd .* && exec ' "$launcher"
 
       # The published SearXNG config must never carry a real secret.
       - name: Check no secret was committed
