@@ -367,7 +367,8 @@ from PyQt6.QtCore import (
     QVariantAnimation, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtGui import (
-    QAction, QActionGroup, QCursor, QDrag, QKeySequence, QShortcut,
+    QAction, QActionGroup, QColor, QCursor, QDrag, QKeySequence, QPainter,
+    QShortcut,
 )
 from PyQt6.QtWebEngineCore import (
     QWebEngineContextMenuRequest,
@@ -420,6 +421,7 @@ from autofill import PROBE_JS, build_capture_script, build_fill_script
 from blockstats import BlockStats
 from blockstats_ui import BlockingReportWindow
 from bookmarks import Bookmarks
+import default_browser
 from cookies import CookieKeeper
 from cookies_ui import CookieSitesDialog
 from favicons import FaviconStore
@@ -440,6 +442,7 @@ from privacy import (
 )
 from ai_search import (
     OllamaClient,
+    build_site_safety_prompt,
     is_search_results,
     load_config as load_ai_config,
     query_from_url,
@@ -477,7 +480,10 @@ from about import (
     mark_engine_nagged,
     note_engine_outdated,
 )
-from theme import THEMES, apply_theme, build_palette, load_prefs, save_prefs
+from theme import (
+    THEMES, apply_theme, build_palette, draw_muted_brand_mark, load_prefs,
+    save_prefs,
+)
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
 from vault_autolock import (
     autolock_interval_ms,
@@ -740,6 +746,19 @@ def _as_local_path(text: str) -> str | None:
     return None                           # not file-ish -> host or search
 
 
+def _startup_url_from_argv() -> str | None:
+    """The URL (or path) a launcher put on the command line, if any — the
+    OS handing off a clicked link after Vodou is set as the default browser,
+    or a desktop file's %u. `--gfx` has already been stripped from sys.argv
+    by the time this runs (see _gfx_flags), and QApplication(sys.argv) has
+    already consumed anything Qt itself recognizes; the first remaining bare
+    argument wins, same convention Chrome/Firefox use for "open this"."""
+    for arg in sys.argv[1:]:
+        if not arg.startswith("-"):
+            return arg
+    return None
+
+
 def to_url(text: str) -> QUrl:
     """Address-bar text -> URL (HTTPS-first) or search query."""
     text = text.strip()
@@ -797,7 +816,7 @@ class WebPage(QWebEnginePage):
     handler, so submitted passwords cannot end up on stderr or in logs.
     """
 
-    captured = pyqtSignal(str, str)  # username, password
+    captured = pyqtSignal(str, str, str)  # username, password, host
 
     def __init__(self, browser: "BrowserWindow", view: "WebView"):
         super().__init__(browser.profile, view)
@@ -900,7 +919,21 @@ class WebPage(QWebEnginePage):
             except (ValueError, TypeError, AttributeError):
                 return
             if password:
-                self.captured.emit(username, password)
+                # source_id is the URL of the document that was actually
+                # executing when console.log ran — set by the renderer at
+                # the moment of the call, and carried in the same IPC message
+                # as the capture itself. Prefer it over view.url() (read
+                # later, in _on_captured): a fast post-login redirect can
+                # commit a new URL on this view before the async console
+                # message is delivered, which would otherwise attribute the
+                # password just submitted on site A to site B and make two
+                # completely different passwords look "reused" between
+                # unrelated sites. Falls back to the view's current URL only
+                # if the source couldn't be parsed (e.g. an opaque origin).
+                host = QUrl(source_id).host().removeprefix("www.")
+                if not host:
+                    host = self.url().host().removeprefix("www.")
+                self.captured.emit(username, password, host)
         # Everything else is dropped instead of forwarded: the default
         # handler writes page console output (which routinely includes
         # user data) to stderr/logs. DevTools has its own console feed,
@@ -1472,6 +1505,31 @@ def _build_qnetwork_proxy(conf: dict) -> QNetworkProxy:
     return proxy
 
 
+class EmptyTabsPage(QWidget):
+    """Shown in the page area once every tab has been closed, instead of
+    quitting the window (see BrowserWindow.close_tab / _show_empty_state).
+    Just the window background with a faint grey brand mark centered on it —
+    the same silhouette as the app icon, desaturated so it blends into the
+    surface rather than announcing itself. `get_mode`/`get_bg` are callables
+    so a live theme switch is picked up on the next repaint without this
+    widget needing to know when that happens."""
+
+    def __init__(self, get_mode, get_bg, parent=None):
+        super().__init__(parent)
+        self._get_mode = get_mode
+        self._get_bg = get_bg
+
+    def paintEvent(self, event) -> None:
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(self._get_bg()))
+        size = max(96.0, min(self.width(), self.height()) * 0.32)
+        p.save()
+        p.translate((self.width() - size) / 2, (self.height() - size) / 2)
+        draw_muted_brand_mark(p, self._get_mode(), size)
+        p.restore()
+        p.end()
+
+
 class BrowserWindow(QMainWindow):
     # A link dragged in from another browser (its address-bar site icon, or a
     # link on a page) or a file from the file manager opens in a new tab. The
@@ -1734,10 +1792,18 @@ class BrowserWindow(QMainWindow):
         self._restarting = False   # set true only for an intentional restart
         self._build_ui()
         self._build_shortcuts()
+        # A launcher on the command line (the OS handing off a clicked link
+        # once Vodou is the default browser, or a desktop file's %u) means
+        # the user wants exactly that page right now — it wins over any
+        # leftover session state, and skips the crash-restore prompt so a
+        # link click never gets stuck behind a dialog about the last run.
+        cli_url = _startup_url_from_argv()
+        if cli_url:
+            self.add_tab(to_url(cli_url))
         # An intentional restart (e.g. applying a graphics change) silently
         # reopens the tabs; otherwise a leftover snapshot means a crash and we
         # offer them back. Either falls through to a fresh home tab.
-        if consume_restart() and self._resume_after_restart():
+        elif consume_restart() and self._resume_after_restart():
             pass
         elif not self._offer_crash_restore():
             self.add_tab(QUrl(STARTUP_URL))   # launch page (may differ from HOME_URL)
@@ -1851,6 +1917,12 @@ class BrowserWindow(QMainWindow):
         # panels docking to the right of whichever is showing, unchanged.
         self.page_area = QStackedWidget()
         self.page_area.addWidget(self.tab_stack)      # index 0: normal
+        # Shown instead of quitting once the last tab closes (see close_tab /
+        # _show_empty_state) — a background with the brand mark, not a page.
+        self.empty_tabs_page = EmptyTabsPage(
+            lambda: self._mode,
+            lambda: build_palette(self._theme_name, self._mode).bg)
+        self.page_area.addWidget(self.empty_tabs_page)
 
         # DevTools / AI panels dock to the right of the page area in this
         # splitter when enabled.
@@ -1893,12 +1965,11 @@ class BrowserWindow(QMainWindow):
             self._icon_targets.append((act, icon_name))
             return act
 
-        action("back", "Back (Alt+Left)", lambda: self.current_view().back())
-        action("forward", "Forward (Alt+Right)",
-               lambda: self.current_view().forward())
+        action("back", "Back (Alt+Left)", self._go_back)
+        action("forward", "Forward (Alt+Right)", self._go_forward)
         action("reload", "Reload (Ctrl+R)", self.reload_page)
         action("home", "Home",
-               lambda: self.current_view().setUrl(QUrl(HOME_URL)))
+               lambda: self._open_in_current_or_new(QUrl(HOME_URL)))
 
         self.url_bar = QLineEdit()
         self.url_bar.setObjectName("urlBar")
@@ -1972,6 +2043,11 @@ class BrowserWindow(QMainWindow):
             lambda: self._populate_bookmarks_menu(hamburger_bookmarks))
         menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
         menu.addAction("Ask local AI…\tCtrl+Shift+A", self.ask_ai)
+        check_site_action = menu.addAction(
+            "Check this site's safety…", self.check_site_safety)
+        check_site_action.setToolTip(
+            "Ask local AI to explain Vodou's own deceptive-address, "
+            "malicious-site, and certificate checks for the current page.")
 
         # --- Passwords ---
         menu.addSeparator()
@@ -1992,6 +2068,15 @@ class BrowserWindow(QMainWindow):
         zoom_menu.addAction("Reset zoom\tCtrl+0", self.zoom_reset)
 
         settings_menu = menu.addMenu("Settings")
+
+        # --- General ---------------------------------------------------
+        default_browser_action = settings_menu.addAction(
+            "Set as default browser…", self.set_default_browser)
+        default_browser_action.setToolTip(
+            "Register Vodou with Windows/Linux so links from other apps "
+            "open here, then hand off to the system's own default-apps "
+            "picker — neither OS lets an app flip this switch silently.")
+        settings_menu.addSeparator()
 
         # --- Privacy & security -------------------------------------------
         # The browser's headline concern, so it leads. Internally grouped by
@@ -2233,7 +2318,7 @@ class BrowserWindow(QMainWindow):
         view.loadFinished.connect(
             lambda ok, v=view: self._maybe_offer_fill(v, ok))
         view.page().captured.connect(
-            lambda user, pw, v=view: self._on_captured(v, user, pw))
+            lambda user, pw, host, v=view: self._on_captured(v, user, pw, host))
 
         if not background:
             self.tab_bar.setCurrentIndex(index)
@@ -2245,9 +2330,9 @@ class BrowserWindow(QMainWindow):
     def close_tab(self, index: int) -> None:
         if not (0 <= index < len(self._views)):
             return
-        if len(self._views) == 1:
-            self.close()
-            return
+        # Closing the last tab leaves an empty window (see _show_empty_state)
+        # rather than quitting — the window's own close button/Alt+F4 still
+        # quits, same as always.
         view = self._views[index]
         # A tab shown in Split View is dismantled from the split first (the
         # other pane's tab returns to the strip) so nothing is left dangling.
@@ -2684,6 +2769,26 @@ class BrowserWindow(QMainWindow):
         self.favicons.prune(self._bmk_hosts)
         self.bookmark_bar.refresh()
 
+    def _go_back(self) -> None:
+        view = self.current_view()
+        if view is not None:
+            view.back()
+
+    def _go_forward(self) -> None:
+        view = self.current_view()
+        if view is not None:
+            view.forward()
+
+    def _open_in_current_or_new(self, url: QUrl) -> None:
+        """Navigate the active tab to `url`, or open a new tab there if no
+        tab is open — so Home, a bookmark click, etc. still work from the
+        empty-tabs state (see _show_empty_state) instead of doing nothing."""
+        view = self.current_view()
+        if view is not None:
+            view.setUrl(url)
+        else:
+            self.add_tab(url)
+
     def reload_page(self) -> None:
         """Reload the current tab, bypassing the HTTP cache.
 
@@ -2709,13 +2814,19 @@ class BrowserWindow(QMainWindow):
         self._set_zoom(view, ZOOM_LEVELS[stepped])
 
     def zoom_in(self) -> None:
-        self.zoom_view(self.current_view(), +1)
+        view = self.current_view()
+        if view is not None:
+            self.zoom_view(view, +1)
 
     def zoom_out(self) -> None:
-        self.zoom_view(self.current_view(), -1)
+        view = self.current_view()
+        if view is not None:
+            self.zoom_view(view, -1)
 
     def zoom_reset(self) -> None:
-        self._set_zoom(self.current_view(), 1.0)
+        view = self.current_view()
+        if view is not None:
+            self._set_zoom(view, 1.0)
 
     def _set_zoom(self, view: WebView, factor: float) -> None:
         view.setZoomFactor(factor)
@@ -2858,6 +2969,21 @@ class BrowserWindow(QMainWindow):
                 permission.deny()
         except RuntimeError:
             pass  # page navigated away while the prompt was open
+
+    # -- Default browser -----------------------------------------------------
+
+    def set_default_browser(self) -> None:
+        """Register Vodou as a default-browser candidate with the OS, then
+        report what happened — including handing off to the system's own
+        picker on Windows, where nothing can finish the job silently."""
+        ok, message = default_browser.register()
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information if ok
+                    else QMessageBox.Icon.Warning)
+        box.setWindowTitle("Set as default browser")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(message)
+        box.exec()
 
     # -- Start page & search engine -----------------------------------------
 
@@ -3131,6 +3257,7 @@ class BrowserWindow(QMainWindow):
         self._clear_login_cues()
         self._schedule_session_save()
         if not (0 <= index < len(self._views)):
+            self._show_empty_state()
             return
         view = self._views[index]
         # Selecting one of the two split tabs focuses that pane rather than
@@ -3147,6 +3274,23 @@ class BrowserWindow(QMainWindow):
         self._thaw(view)
         self._load_pending(view)
         self._sync_chrome_to(view)
+
+    def _show_empty_state(self) -> None:
+        """No tabs left: leave the window up, showing the grey watermark
+        page instead of quitting (see close_tab). Every button and field
+        stays active — typing a URL and pressing Enter, or clicking Home /
+        a bookmark, opens a new tab (see _navigate / _open_in_current_or_new)
+        — this just resets the chrome that would otherwise still reflect the
+        last-closed tab, and focuses the address bar so typing works at once."""
+        self._active_view = None
+        self.page_area.setCurrentWidget(self.empty_tabs_page)
+        self.url_bar.clear()
+        self.setWindowTitle("Vodou (private)")
+        self.lock_action.setIcon(self._lock_icons["neutral"])
+        self.lock_action.setToolTip("No page open")
+        self.star_button.setIcon(self._star_off)
+        self.star_button.setToolTip("Bookmark this page (Ctrl+D)")
+        self.url_bar.setFocus()
 
     def _sync_chrome_to(self, view: WebView | None) -> None:
         """Point the address bar, security indicator, star, window title, and
@@ -3817,7 +3961,13 @@ class BrowserWindow(QMainWindow):
         plain_message(self, icon, "Content Credentials", "\n".join(lines))
 
     def show_certificate(self) -> None:
-        url = self.current_view().url()
+        view = self.current_view()
+        if view is None:
+            QMessageBox.information(
+                self, "Internal page",
+                "No page is open, so there's no connection to show.")
+            return
+        url = view.url()
         host = url.host()
         if url.scheme() != "https" or not host:
             if url.scheme() == "http":
@@ -4183,8 +4333,13 @@ class BrowserWindow(QMainWindow):
             f"{host}:{port_spin.value()}.", 5000)
 
     def _navigate(self) -> None:
-        self.current_view().setUrl(to_url(self.url_bar.text()))
-        self.current_view().setFocus()
+        url = to_url(self.url_bar.text())
+        view = self.current_view()
+        if view is not None:
+            view.setUrl(url)
+            view.setFocus()
+        else:   # no tab open: what was typed opens as a new one
+            self.add_tab(url)
 
     # -- bookmarks --------------------------------------------------------
 
@@ -4239,6 +4394,9 @@ class BrowserWindow(QMainWindow):
 
     def toggle_bookmark(self) -> None:
         view = self.current_view()
+        if view is None:   # Ctrl+D with no tab open
+            self.statusBar().showMessage("No page open to bookmark.", 3000)
+            return
         url = view.url().toString()
         if not url or view.url().scheme() not in ("http", "https"):
             self.statusBar().showMessage(
@@ -4269,16 +4427,19 @@ class BrowserWindow(QMainWindow):
             for b in items:
                 label = b.title if len(b.title) <= 48 else b.title[:47] + "…"
                 menu.addAction(label, lambda _=False, u=b.url:
-                               self.current_view().setUrl(QUrl(u)))
+                               self._open_in_current_or_new(QUrl(u)))
         menu.addSeparator()
         menu.addAction("Import bookmarks (.html)…", self.import_bookmarks)
 
     def open_bookmarks_manager(self) -> None:
-        def open_url(url: str) -> None:
-            self.current_view().setUrl(QUrl(url))
-        BookmarksManagerDialog(self.bookmarks, self, open_url=open_url).exec()
+        BookmarksManagerDialog(
+            self.bookmarks, self,
+            open_url=lambda url: self._open_in_current_or_new(QUrl(url))
+        ).exec()
         # A rename/delete/add may change whether the current page is marked.
-        self._update_star(self.current_view().url())
+        view = self.current_view()
+        if view is not None:
+            self._update_star(view.url())
         self._bookmarks_changed()
 
     # -- import -----------------------------------------------------------
@@ -4298,7 +4459,9 @@ class BrowserWindow(QMainWindow):
                           f"Could not read the file:\n{error}")
             return
         added = self.bookmarks.add_many(found)
-        self._update_star(self.current_view().url())
+        view = self.current_view()
+        if view is not None:
+            self._update_star(view.url())
         self._bookmarks_changed()
         QMessageBox.information(
             self, "Bookmarks imported",
@@ -4673,9 +4836,16 @@ class BrowserWindow(QMainWindow):
         self._ai_clear = QPushButton("New chat")
         self._ai_clear.setToolTip("Forget this conversation and start over")
         self._ai_clear.clicked.connect(self._clear_ai_chat)
+        self._ai_check_site = QPushButton("Check this site")
+        self._ai_check_site.setToolTip(
+            "Run Vodou's local deceptive-address, malicious-site, and "
+            "certificate checks on the current page and ask the model to "
+            "explain them — starts a new conversation.")
+        self._ai_check_site.clicked.connect(self.check_site_safety)
         bar.addWidget(self._ai_regen)
         bar.addWidget(self._ai_stop)
         bar.addWidget(self._ai_clear)
+        bar.addWidget(self._ai_check_site)
         bar.addStretch()
 
         self._ai_panel = QWidget()
@@ -4830,6 +5000,77 @@ class BrowserWindow(QMainWindow):
             f"Summarizing {len(results)} results with {model} — on your "
             f"device…")
         self.ai_client.summarize(query, results, self.ai_cfg)
+
+    # -- site safety check ---------------------------------------------------
+
+    def _site_safety_facts(self, view: WebView) -> dict:
+        """Local-only safety signals for the page `view` is showing, from
+        the exact same checks Vodou's own navigation blocking and download
+        warnings already use: spoofcheck's deceptive-address heuristics,
+        Safe Browsing's local malicious-host list, the certificate probe
+        behind the padlock (see show_certificate), and this session's
+        downloads from the same host. Nothing here is fetched from or sent
+        to anywhere but the site's own server (the certificate handshake)
+        — see ai_search.build_site_safety_prompt for what's built from it."""
+        url = view.url()
+        host = url.host()
+        facts: dict = {
+            "url": url.toString(),
+            "host": host or "(internal page)",
+            "connection": {
+                "secure": "HTTPS (encrypted)",
+                "insecure": "HTTP — NOT encrypted",
+                "neutral": "internal Vodou page, no network connection",
+            }.get(self._lock_state, self._lock_state),
+        }
+        if host and url.scheme() == "https":
+            try:
+                from cert_viewer import fetch_certificate
+                probe = fetch_certificate(host, url.port(443), timeout=3.0)
+                facts["cert_trusted"] = probe.trusted
+                facts["cert_trust_error"] = probe.trust_error
+            except Exception:
+                pass  # best-effort: the check still works without this one
+        if host:
+            facts["spoof"] = spoof_inspect(host)
+            facts["malicious"] = self.safe_browsing.is_dangerous(host) is not None
+            facts["bypassed_warning"] = self.spoof_allowed(host)
+            downloads_dialog = getattr(self, "_downloads", None)
+            facts["downloads"] = (downloads_dialog.for_host(host)
+                                  if downloads_dialog is not None else [])
+        return facts
+
+    def check_site_safety(self) -> None:
+        """Ask AI's "Check this site": run Vodou's own local safety checks
+        against the current page and ask the model to explain the result —
+        grounded in what was actually verified, not the model guessing from
+        nothing. Always starts a fresh conversation, so a stale assessment
+        from a previous page can never be mistaken for this one's."""
+        if not self._ai_enabled():
+            return
+        view = self.current_view()
+        if view is None:
+            self.statusBar().showMessage("No page open to check.", 4000)
+            return
+        if not view.url().host():
+            self.statusBar().showMessage(
+                "This is an internal page — nothing to check.", 4000)
+            return
+        self._show_ai_panel()
+        self.ai_client.cancel()
+        self._ai_chat = []
+        self._ai_stream = ""
+        self._set_ai_mode("ask")
+        self._set_ai_status("Running local safety checks on this page…")
+        prompt = build_site_safety_prompt(self._site_safety_facts(view))
+        self._ai_chat.append({"role": "user", "content": prompt})
+        self._render_ai_chat()
+        self._set_ai_status(
+            f"Asking {self.ai_cfg.get('model', '')} about this site — on "
+            f"your device…")
+        self._ai_stop.setEnabled(True)
+        self._ai_send.setEnabled(False)
+        self.ai_client.chat(self._ai_chat, self.ai_cfg)
 
     # -- ask mode ----------------------------------------------------------
 
@@ -5241,7 +5482,8 @@ class BrowserWindow(QMainWindow):
             return
         if not self._unlock_vault():
             return
-        host = self.current_view().url().host().removeprefix("www.")
+        view = self.current_view()
+        host = view.url().host().removeprefix("www.") if view is not None else ""
         # Deliberately unparented: on Windows an *owned* window is always
         # z-ordered above its owner, so parenting this to the browser would
         # pin it on top even though it's modeless. With no owner it behaves
@@ -5251,7 +5493,8 @@ class BrowserWindow(QMainWindow):
         # dialogs (add/edit/reveal) stay modal to it, which keeps auto-lock
         # deferred while one is open (see _autolock_vault).
         dialog = VaultDialog(self.vault, None, current_site=host,
-                             autolock_minutes=self._vault_autolock_minutes)
+                             autolock_minutes=self._vault_autolock_minutes,
+                             safe_browsing=self.safe_browsing)
         dialog.setWindowFlags(Qt.WindowType.Window)
         dialog.setModal(False)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -5320,7 +5563,8 @@ class BrowserWindow(QMainWindow):
     def save_login_for_site(self) -> None:
         if not self._unlock_vault():
             return
-        host = self.current_view().url().host().removeprefix("www.")
+        view = self.current_view()
+        host = view.url().host().removeprefix("www.") if view is not None else ""
         dialog = EntryDialog(self, site=host)
         if dialog.exec():
             self.vault.add(dialog.result_entry())
@@ -5420,11 +5664,16 @@ class BrowserWindow(QMainWindow):
         view.page().runJavaScript(PROBE_JS, APP_WORLD, probed)
 
     def _on_captured(self, view: WebView, username: str,
-                     password: str) -> None:
-        """A login was submitted: offer to save it or update a changed one."""
+                     password: str, host: str) -> None:
+        """A login was submitted: offer to save it or update a changed one.
+
+        `host` is the domain that was actually loaded when the credential
+        was captured (see WebPage.javaScriptConsoleMessage) — NOT
+        view.url().host(), which by now may already reflect a post-login
+        redirect to a different site.
+        """
         if view is not self.current_view():
             return
-        host = view.url().host().removeprefix("www.")
         if not host:
             return
 
@@ -5512,6 +5761,10 @@ class BrowserWindow(QMainWindow):
 
     def fill_login(self) -> None:
         view = self.current_view()
+        if view is None:   # Ctrl+Shift+F with no tab open
+            self.statusBar().showMessage(
+                "No page open to fill a login on.", 3000)
+            return
         url = view.url()
         if url.scheme() != "https":
             answer = QMessageBox.warning(

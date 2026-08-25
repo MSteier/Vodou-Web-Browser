@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QActionGroup,
+    QColor,
     QGuiApplication,
     QKeySequence,
     QPalette,
@@ -36,6 +38,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+import password_strength
 from authenticator import (
     AuthenticatorError,
     WindowsWebAuthnAuthenticator,
@@ -43,6 +46,8 @@ from authenticator import (
 )
 from icons import make_icon
 from importers import parse_password_csv, write_password_csv
+from safebrowsing import SafeBrowsing
+from spoofcheck import inspect as spoof_inspect
 from vault_autolock import (
     DEFAULT_VAULT_AUTOLOCK_MINUTES,
     VAULT_AUTOLOCK_OPTIONS,
@@ -57,6 +62,16 @@ from vault import (
     generate_password,
     normalize_site,
 )
+
+# Fixed, theme-independent colors for the strength verdict — deliberately
+# not drawn from the live theme palette (like the WebAuthn warning below),
+# since red/amber/green need to read as the same risk signal in every
+# theme, the same way the address bar's security-pill lock icon does.
+_STRENGTH_COLORS = {
+    "Weak": "#e0384a",
+    "Moderate": "#d9962b",
+    "Strong": "#2fae72",
+}
 
 CLIPBOARD_CLEAR_SECONDS = 30
 
@@ -104,6 +119,30 @@ def _copy_with_auto_clear(text: str, parent: QWidget) -> None:
     QTimer.singleShot(CLIPBOARD_CLEAR_SECONDS * 1000, clear_if_unchanged)
 
 
+def add_reveal_toggle(edit: QLineEdit) -> None:
+    """Put an eye icon inside the field's right edge that toggles the
+    password between hidden (default) and visible. Each field toggles
+    independently, the icon reflects the current state, and clicking it
+    keeps typing focus. Shared by every dialog with a password field
+    (UnlockDialog, EntryDialog, GeneratePasswordDialog) rather than each
+    rolling its own show/hide control."""
+    color = edit.palette().color(QPalette.ColorRole.Text).name()
+    eye = make_icon("eye", color)          # open eye  -> currently visible
+    eye_off = make_icon("eye-off", color)  # slashed   -> currently hidden
+    action = edit.addAction(eye_off, QLineEdit.ActionPosition.TrailingPosition)
+    action.setToolTip("Show password")
+    action.setCheckable(True)
+
+    def toggle(shown: bool) -> None:
+        edit.setEchoMode(QLineEdit.EchoMode.Normal if shown
+                         else QLineEdit.EchoMode.Password)
+        action.setIcon(eye if shown else eye_off)
+        action.setToolTip("Hide password" if shown else "Show password")
+        edit.setFocus()  # a click on the icon must not steal typing focus
+
+    action.toggled.connect(toggle)
+
+
 class UnlockDialog(QDialog):
     """Prompts for the master password; creates the vault on first run."""
 
@@ -133,14 +172,14 @@ class UnlockDialog(QDialog):
         form = QFormLayout()
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._add_reveal_toggle(self.password_edit)
+        add_reveal_toggle(self.password_edit)
         form.addRow("Master password:", self.password_edit)
 
         self.confirm_edit = None
         if self.creating:
             self.confirm_edit = QLineEdit()
             self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
-            self._add_reveal_toggle(self.confirm_edit)
+            add_reveal_toggle(self.confirm_edit)
             form.addRow("Confirm:", self.confirm_edit)
         layout.addLayout(form)
 
@@ -179,28 +218,6 @@ class UnlockDialog(QDialog):
             return
         self.reset_requested = True
         self.reject()
-
-    def _add_reveal_toggle(self, edit: QLineEdit) -> None:
-        """Put an eye icon inside the field's right edge that toggles the
-        password between hidden (default) and visible. Replaces the old
-        'Show password' checkbox; each field toggles independently, the icon
-        reflects the current state, and clicking it keeps typing focus."""
-        color = edit.palette().color(QPalette.ColorRole.Text).name()
-        eye = make_icon("eye", color)          # open eye  -> currently visible
-        eye_off = make_icon("eye-off", color)  # slashed   -> currently hidden
-        action = edit.addAction(
-            eye_off, QLineEdit.ActionPosition.TrailingPosition)
-        action.setToolTip("Show password")
-        action.setCheckable(True)
-
-        def toggle(shown: bool) -> None:
-            edit.setEchoMode(QLineEdit.EchoMode.Normal if shown
-                             else QLineEdit.EchoMode.Password)
-            action.setIcon(eye if shown else eye_off)
-            action.setToolTip("Hide password" if shown else "Show password")
-            edit.setFocus()  # a click on the icon must not steal typing focus
-
-        action.toggled.connect(toggle)
 
     def _submit(self) -> None:
         master = self.password_edit.text()
@@ -471,40 +488,158 @@ def ensure_unlocked(vault: Vault, parent: QWidget | None = None) -> bool:
             return False
 
 
+class GeneratePasswordDialog(QDialog):
+    """Standalone password generator, modeled on the reference generator at
+    Password_Generator.html: a length control and three independently
+    toggleable character types (at least one must stay on — matching the
+    reference's own constraint), a live strength readout, and a copy
+    button. Opened from EntryDialog's "Generate Strong Password" action;
+    the caller reads the result back via password() once Accepted.
+
+    Nothing here is saved anywhere — the candidate password exists only in
+    this dialog and, if accepted, in the caller's password field, until the
+    user explicitly saves the entry through the normal vault flow."""
+
+    def __init__(self, parent: QWidget | None = None, length: int = 16):
+        super().__init__(parent)
+        self.setWindowTitle("Generate Password")
+        self.setMinimumWidth(420)
+        self._password = ""
+
+        layout = QVBoxLayout(self)
+
+        length_row = QHBoxLayout()
+        length_label = QLabel("Length:")
+        self.length_spin = QSpinBox()
+        self.length_spin.setRange(4, 64)
+        self.length_spin.setValue(length)
+        self.length_spin.setAccessibleName("Password length")
+        length_label.setBuddy(self.length_spin)
+        length_row.addWidget(length_label)
+        length_row.addWidget(self.length_spin)
+        length_row.addStretch()
+        layout.addLayout(length_row)
+
+        # Matches the reference generator's three character-type toggles
+        # exactly (mixed-case letters / numbers / punctuation).
+        self.letters_check = QCheckBox("Letters (a–z, A–Z)")
+        self.numbers_check = QCheckBox("Numbers (0–9)")
+        self.symbols_check = QCheckBox("Punctuation (symbols)")
+        for box in (self.letters_check, self.numbers_check,
+                    self.symbols_check):
+            box.setChecked(True)
+            box.toggled.connect(self._on_type_toggled)
+            layout.addWidget(box)
+
+        out_row = QHBoxLayout()
+        self.pass_edit = QLineEdit()
+        self.pass_edit.setReadOnly(True)
+        self.pass_edit.setAccessibleName("Generated password")
+        add_reveal_toggle(self.pass_edit)
+        out_row.addWidget(self.pass_edit)
+        self.copy_btn = QPushButton("Copy")
+        self.copy_btn.clicked.connect(self._copy)
+        out_row.addWidget(self.copy_btn)
+        layout.addLayout(out_row)
+
+        self.strength_label = QLabel()
+        self.strength_label.setWordWrap(True)
+        self.strength_label.setAccessibleName("Generated password strength")
+        layout.addWidget(self.strength_label)
+
+        gen_btn = QPushButton("Generate password")
+        gen_btn.clicked.connect(self._generate)
+        layout.addWidget(gen_btn)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.ok_button.setText("Use this password")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.length_spin.valueChanged.connect(self._generate)
+        self._generate()  # a candidate is ready the moment the dialog opens
+
+    def _on_type_toggled(self, _checked: bool = False) -> None:
+        """At least one character type must stay on, exactly like the
+        reference generator — refuse to leave every type off."""
+        boxes = (self.letters_check, self.numbers_check, self.symbols_check)
+        if not any(box.isChecked() for box in boxes):
+            self.sender().setChecked(True)
+            return
+        self._generate()
+
+    def _generate(self) -> None:
+        pw = generate_password(
+            self.length_spin.value(),
+            letters=self.letters_check.isChecked(),
+            numbers=self.numbers_check.isChecked(),
+            symbols=self.symbols_check.isChecked())
+        self._password = pw
+        self.pass_edit.setText(pw)
+        result = password_strength.analyze(pw)
+        color = _STRENGTH_COLORS[result.label]
+        self.strength_label.setText(
+            f'<b style="color:{color}">{result.label}</b> '
+            f'— about {result.bits:.0f} bits')
+
+    def _copy(self) -> None:
+        if self._password:
+            _copy_with_auto_clear(self._password, self)
+
+    def password(self) -> str:
+        return self._password
+
+
 class EntryDialog(QDialog):
-    """Add or edit a single vault entry."""
+    """Add or edit a single vault entry, with a live password-strength
+    readout — including a same-password-as-another-saved-login check — and
+    a one-click path to replacing a weak password: Generate Strong Password
+    opens GeneratePasswordDialog and, if accepted, drops the result
+    straight into the password field below — nothing is saved to the vault
+    until Save is pressed."""
 
     def __init__(self, parent: QWidget | None = None,
-                 entry: Entry | None = None, site: str = ""):
+                 entry: Entry | None = None, site: str = "",
+                 other_entries: list[Entry] | None = None):
         super().__init__(parent)
         self.setWindowTitle("Edit Entry" if entry else "Add Entry")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
+        # Every OTHER saved entry, password already revealed by the caller
+        # (VaultDialog._reveal_all) — used only to check this field against
+        # them live; never displayed itself, never written anywhere.
+        self._other_entries = other_entries or []
 
         form = QFormLayout()
         self.site_edit = QLineEdit(entry.site if entry else site)
         self.user_edit = QLineEdit(entry.username if entry else "")
         self.pass_edit = QLineEdit(entry.password if entry else "")
         self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pass_edit.setAccessibleName("Password")
+        add_reveal_toggle(self.pass_edit)
+        self.pass_edit.textChanged.connect(self._update_strength)
         self.notes_edit = QLineEdit(entry.notes if entry else "")
-
-        show = QCheckBox("Show")
-        show.toggled.connect(lambda on: self.pass_edit.setEchoMode(
-            QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password))
-
-        gen_row = QHBoxLayout()
-        gen_row.addWidget(self.pass_edit)
-        gen_row.addWidget(show)
-        self.length_spin = QSpinBox()
-        self.length_spin.setRange(8, 64)
-        self.length_spin.setValue(20)
-        gen_btn = QPushButton("Generate")
-        gen_btn.clicked.connect(self._generate)
-        gen_row.addWidget(self.length_spin)
-        gen_row.addWidget(gen_btn)
 
         form.addRow("Site (domain):", self.site_edit)
         form.addRow("Username:", self.user_edit)
-        form.addRow("Password:", gen_row)
+        form.addRow("Password:", self.pass_edit)
+
+        self.strength_label = QLabel()
+        self.strength_label.setWordWrap(True)
+        self.strength_label.setAccessibleName("Password strength")
+        form.addRow(self.strength_label)
+
+        gen_btn = QPushButton("Generate Strong Password…")
+        gen_btn.setToolTip(
+            "Open the password generator and replace this password with a "
+            "freshly generated one — it only fills the field below; Save "
+            "still has to be pressed to keep it.")
+        gen_btn.clicked.connect(self._open_generator)
+        form.addRow(gen_btn)
+
         form.addRow("Notes:", self.notes_edit)
 
         layout = QVBoxLayout(self)
@@ -516,9 +651,42 @@ class EntryDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _generate(self) -> None:
-        self.pass_edit.setText(generate_password(self.length_spin.value()))
-        self.pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+        self._update_strength()
+
+    def _reused_sites(self) -> list[str]:
+        """Other saved entries' sites whose password matches this field's
+        current text exactly. Empty text never counts as a match."""
+        pw = self.pass_edit.text()
+        if not pw:
+            return []
+        return [e.site for e in self._other_entries if e.password == pw]
+
+    def _update_strength(self) -> None:
+        result = password_strength.analyze(self.pass_edit.text())
+        reused_sites = self._reused_sites()
+        # A reused password is flagged in the same red as Weak regardless of
+        # its own entropy — reuse is a real risk (one breach exposes every
+        # site sharing it) that a high bit-count doesn't cancel out.
+        color = _STRENGTH_COLORS["Weak"] if reused_sites \
+            else _STRENGTH_COLORS[result.label]
+        text = f'<b style="color:{color}">{result.label}</b>'
+        if result.bits:
+            text += f" — about {result.bits:.0f} bits"
+        reasons = list(result.reasons)
+        if reused_sites:
+            shown = ", ".join(html.escape(s) for s in reused_sites[:5])
+            if len(reused_sites) > 5:
+                shown += f", and {len(reused_sites) - 5} more"
+            reasons.append(f"Also the password for: {shown}.")
+        if reasons:
+            text += "<br>" + "<br>".join(reasons)
+        self.strength_label.setText(text)
+
+    def _open_generator(self) -> None:
+        dialog = GeneratePasswordDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.pass_edit.setText(dialog.password())
 
     def _submit(self) -> None:
         if not self.site_edit.text().strip() or not self.pass_edit.text():
@@ -612,15 +780,33 @@ class VaultDialog(QDialog):
     # owns the lock timer, so it applies and persists the new value.
     autolock_minutes_changed = pyqtSignal(int)
 
+    # Column indices, named so the row-building loop and the click handler
+    # below don't scatter magic numbers.
+    COL_WEBSITE, COL_SAFETY, COL_USERNAME, COL_PASSWORD, \
+        COL_STRENGTH, COL_DUPLICATE, COL_LAST_CHANGED = range(7)
+
+    # Fixed-width placeholder — deliberately NOT sized to the real password's
+    # length, so glancing at a masked row leaks nothing about it.
+    _MASKED_PASSWORD = "•" * 12
+
     def __init__(self, vault: Vault, parent: QWidget | None = None,
                  current_site: str = "",
-                 autolock_minutes: int = DEFAULT_VAULT_AUTOLOCK_MINUTES):
+                 autolock_minutes: int = DEFAULT_VAULT_AUTOLOCK_MINUTES,
+                 safe_browsing: "SafeBrowsing | None" = None):
         super().__init__(parent)
         self.vault = vault
         self.current_site = current_site
         self._autolock_minutes = autolock_minutes
+        # Optional: lets the Website Safety column also check Vodou's local
+        # malicious-site list, not just the always-available spoof heuristic.
+        # None (e.g. in a caller that hasn't wired it up) just means that
+        # column falls back to the spoof-only verdict.
+        self._safe_browsing = safe_browsing
         self.setWindowTitle("Password Vault")
-        self.resize(660, 440)
+        # Wider than the old 4-column layout's default — seven columns need
+        # the room, and only Website stretches (see below), so a narrow
+        # window would otherwise push the later columns past the edge.
+        self.resize(980, 460)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 12)
@@ -636,14 +822,24 @@ class VaultDialog(QDialog):
                                      self.search_edit.selectAll()))
         layout.addWidget(self.search_edit)
 
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Site", "Username", "Notes"])
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels([
+            "Website", "Website Safety", "Username/Email", "Password",
+            "Strength", "Duplicated", "Last Changed"])
+        # Only Website stretches to fill leftover space; every other column
+        # sizes to its own content. Two stretch columns (the old Site +
+        # Username split) fought each other for space once there were seven
+        # columns instead of four, pushing Password/Strength/Duplicated/Last
+        # Changed past the right edge even in a wide window.
         self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch)
+            QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(
+            self.COL_WEBSITE, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(lambda _: self._edit())
+        self.table.cellClicked.connect(self._on_cell_clicked)
         layout.addWidget(self.table)
 
         # Entry actions: modify the selection on the left, copy it on the
@@ -725,6 +921,11 @@ class VaultDialog(QDialog):
         manage_menu.addSeparator()
         manage_menu.addAction("Import from CSV…", self._import_csv)
         manage_menu.addAction("Export to CSV…", self._export_csv)
+        dedup_action = manage_menu.addAction(
+            "Remove duplicate logins…", self._remove_duplicates)
+        dedup_action.setToolTip(
+            "Find logins saved more than once (same site, username, and "
+            "password) and remove the extra copies, keeping the oldest.")
 
         manage_btn.setMenu(manage_menu)
         footer.addWidget(manage_btn)
@@ -747,7 +948,48 @@ class VaultDialog(QDialog):
 
         self._refresh()
 
+    def _reveal_all(self) -> list[tuple[int, Entry]]:
+        """(index, Entry-with-real-password) for every saved entry, each
+        decrypted only for the instant needed to build it — the same
+        on-demand reveal() the rest of the vault already uses for fill/copy/
+        edit, just looped over everything once per refresh. Backs the
+        Strength/reuse column below and the editor's own reuse check;
+        skips (rather than raising for) any index reveal() can't handle, so
+        a vault stand-in without it, or a genuinely locked vault, can't
+        break the list."""
+        revealed = []
+        for i, meta in enumerate(self.vault.entries()):
+            try:
+                password = self.vault.reveal(i)
+            except Exception:
+                continue
+            revealed.append((i, Entry(site=meta.site, username=meta.username,
+                                      password=password, notes=meta.notes)))
+        return revealed
+
     def _refresh(self) -> None:
+        # Strength + cross-entry reuse both need every password decrypted
+        # once; computed here, up front, so the loop below just looks them
+        # up per row instead of re-decrypting on every keystroke of a search.
+        revealed = self._reveal_all()
+        strength_by_index = {i: password_strength.analyze(e.password)
+                             for i, e in revealed}
+        reused_counts = password_strength.group_reused(
+            [(i, e.password) for i, e in revealed])
+        # For each reused index, name the OTHER sites it's reused with (not
+        # just a bare count) so the tooltip can be verified against what's
+        # actually saved, rather than asking the user to take the count on
+        # faith. Cheap here: at most the vault's own entry count squared,
+        # and only for entries group_reused already flagged.
+        reused_sites_by_index = {
+            i: [e2.site for j, e2 in revealed if j != i and e2.password == e.password]
+            for i, e in revealed if i in reused_counts}
+        # Exact-duplicate groups (site + username + password all match) --
+        # a separate, stricter concern from reuse: see vault.py's
+        # find_duplicate_groups docstring.
+        dup_indices = {i for group in self.vault.find_duplicate_groups()
+                       for i in group}
+
         # Rows carry the entry's true vault index in UserRole, so edit /
         # delete / copy keep working on a filtered view.
         query = self.search_edit.text().strip().lower()
@@ -763,10 +1005,133 @@ class VaultDialog(QDialog):
         matches = prioritize_by_site(matches, self.current_site)
         self.table.setRowCount(len(matches))
         for row, (i, e) in enumerate(matches):
-            for col, text in enumerate((e.site, e.username, e.notes)):
-                item = QTableWidgetItem(text)
-                item.setData(Qt.ItemDataRole.UserRole, i)
-                self.table.setItem(row, col, item)
+            website_item = QTableWidgetItem(e.site)
+            self.table.setItem(row, self.COL_WEBSITE, website_item)
+
+            self.table.setItem(row, self.COL_SAFETY, self._safety_item(e.site))
+
+            self.table.setItem(
+                row, self.COL_USERNAME, QTableWidgetItem(e.username))
+
+            password_item = QTableWidgetItem(self._MASKED_PASSWORD)
+            password_item.setToolTip("Click to show or hide this password.")
+            password_item.setData(Qt.ItemDataRole.UserRole + 1, False)
+            self.table.setItem(row, self.COL_PASSWORD, password_item)
+
+            self.table.setItem(row, self.COL_STRENGTH, self._strength_item(
+                strength_by_index.get(i), reused_counts.get(i),
+                reused_sites_by_index.get(i)))
+
+            self.table.setItem(
+                row, self.COL_DUPLICATE, self._duplicate_item(i in dup_indices))
+
+            self.table.setItem(row, self.COL_LAST_CHANGED,
+                               QTableWidgetItem(e.updated or "—"))
+
+            # Every cell in the row carries the true vault index, regardless
+            # of column, so selection/edit/delete/copy and the password-
+            # reveal click handler all key off the same value.
+            for col in range(self.table.columnCount()):
+                self.table.item(row, col).setData(Qt.ItemDataRole.UserRole, i)
+
+    def _strength_item(self, result: "password_strength.StrengthResult | None",
+                       reused_count: int | None,
+                       reused_sites: list[str] | None = None) -> QTableWidgetItem:
+        """The Strength column's cell for one entry, from an already-computed
+        result (see _refresh/_reveal_all) — never decrypts anything itself.
+        `result` is None only when that entry's reveal() failed."""
+        if result is None:
+            return QTableWidgetItem("—")
+        text = result.label
+        tooltip_lines = list(result.reasons)
+        color = _STRENGTH_COLORS[result.label]
+        if reused_count:
+            text += f" · Reused ({reused_count}×)"
+            color = _STRENGTH_COLORS["Weak"]
+            # Name the actual other logins sharing this password, not just a
+            # count — lets the user verify the flag against what's really
+            # saved instead of taking it on faith.
+            shown = ", ".join(html.escape(s) for s in (reused_sites or [])[:5])
+            if reused_sites and len(reused_sites) > 5:
+                shown += f", and {len(reused_sites) - 5} more"
+            tooltip_lines.append(
+                (f"Same password also saved for: {shown}." if shown else
+                 f"The same password is used for {reused_count} saved "
+                 f"logins") + " — give each site its own password.")
+        item = QTableWidgetItem(text)
+        item.setForeground(QColor(color))
+        if tooltip_lines:
+            item.setToolTip("\n".join(tooltip_lines))
+        return item
+
+    def _safety_item(self, site: str) -> QTableWidgetItem:
+        """The Website Safety column's cell: Vodou's own local, no-network
+        checks (spoofcheck's homograph/typosquat heuristic, plus the
+        malicious-site list when a SafeBrowsing instance was supplied) run
+        against the saved site — the same signals the address bar and
+        "Check this site" AI feature already use, not a live scan or
+        antivirus check. Honest about that limit in the tooltip rather than
+        implying more certainty than a local heuristic can offer."""
+        host = normalize_site(site)
+        if not host:
+            return QTableWidgetItem("—")
+        if self._safe_browsing is not None \
+                and self._safe_browsing.is_dangerous(host) is not None:
+            item = QTableWidgetItem("🛑 Malicious")
+            item.setForeground(QColor(_STRENGTH_COLORS["Weak"]))
+            item.setToolTip(
+                "This address matches Vodou's local list of known "
+                "malicious/phishing sites.")
+            return item
+        verdict = spoof_inspect(host)
+        if verdict is not None:
+            item = QTableWidgetItem("⚠ Possible spoof")
+            item.setForeground(QColor(_STRENGTH_COLORS["Moderate"]))
+            item.setToolTip(verdict.detail)
+            return item
+        item = QTableWidgetItem("OK")
+        item.setForeground(QColor(_STRENGTH_COLORS["Strong"]))
+        item.setToolTip(
+            "No look-alike-address or malicious-list match found. This is a "
+            "local heuristic check, not a live scan or antivirus lookup.")
+        return item
+
+    def _duplicate_item(self, is_duplicate: bool) -> QTableWidgetItem:
+        """The Duplicated column's cell: whether this entry is part of an
+        exact-match group (same site + username + password) from
+        Vault.find_duplicate_groups() — distinct from the Strength column's
+        cross-site reuse badge. See "Remove duplicate logins…" in Manage."""
+        if not is_duplicate:
+            return QTableWidgetItem("—")
+        item = QTableWidgetItem("Duplicate")
+        item.setForeground(QColor(_STRENGTH_COLORS["Weak"]))
+        item.setToolTip(
+            "Another saved login has the exact same site, username, and "
+            "password. Manage → Remove duplicate logins… cleans these up.")
+        return item
+
+    def _on_cell_clicked(self, row: int, column: int) -> None:
+        """Toggle one row's Password cell between masked and revealed.
+        Independent per row; a fresh _refresh() (search, edit, add, delete)
+        always re-masks everything rather than carrying reveal state
+        forward, so a shown password doesn't linger past the moment that
+        made it relevant."""
+        if column != self.COL_PASSWORD:
+            return
+        item = self.table.item(row, column)
+        if item is None:
+            return
+        index = item.data(Qt.ItemDataRole.UserRole)
+        shown = bool(item.data(Qt.ItemDataRole.UserRole + 1))
+        if shown:
+            item.setText(self._MASKED_PASSWORD)
+            item.setData(Qt.ItemDataRole.UserRole + 1, False)
+            return
+        try:
+            item.setText(self.vault.reveal(index))
+        except Exception:
+            return
+        item.setData(Qt.ItemDataRole.UserRole + 1, True)
 
     def set_current_site(self, site: str) -> None:
         """Update which site counts as "current" and re-prioritize the list.
@@ -851,7 +1216,9 @@ class VaultDialog(QDialog):
         return items[0].data(Qt.ItemDataRole.UserRole)
 
     def _add(self) -> None:
-        dialog = EntryDialog(self, site=self.current_site)
+        others = [e for _, e in self._reveal_all()]
+        dialog = EntryDialog(self, site=self.current_site,
+                             other_entries=others)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.vault.add(dialog.result_entry())
             self._refresh()
@@ -862,7 +1229,8 @@ class VaultDialog(QDialog):
             return
         entry = self.vault.entries()[index]
         entry.password = self.vault.reveal(index)  # decrypt only for editing
-        dialog = EntryDialog(self, entry=entry)
+        others = [e for i, e in self._reveal_all() if i != index]
+        dialog = EntryDialog(self, entry=entry, other_entries=others)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.vault.update(index, dialog.result_entry())
             self._refresh()
@@ -903,6 +1271,36 @@ class VaultDialog(QDialog):
         index = self._selected_index()
         if index is not None:
             _copy_with_auto_clear(self.vault.entries()[index].username, self)
+
+    def _remove_duplicates(self) -> None:
+        groups = self.vault.find_duplicate_groups()
+        if not groups:
+            QMessageBox.information(
+                self, "No duplicates found",
+                "Every saved login is unique — there's nothing to remove.")
+            return
+        extra = sum(len(group) - 1 for group in groups)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Remove duplicate logins")
+        box.setText(
+            f"Found {len(groups)} login{'s' if len(groups) != 1 else ''} "
+            f"saved more than once (same site, username, and password) — "
+            f"{extra} extra cop{'y' if extra == 1 else 'ies'} in total.\n\n"
+            f"Keep one copy of each and remove the rest? Notes on a "
+            f"removed copy are kept by merging them into the copy that "
+            f"stays.")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        removed = self.vault.remove_duplicates()
+        self._refresh()
+        QMessageBox.information(
+            self, "Duplicates removed",
+            f"Removed {removed} duplicate login{'s' if removed != 1 else ''}.")
 
     def _import_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

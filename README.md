@@ -117,9 +117,17 @@ sh packaging/install-linux.sh
 
 It writes only a launcher and an icon under `~/.local/share` (no root, no
 package manager) and leaves the code running from this checkout, which is what
-the in-app updater expects. Vodou does not register as your default browser:
-it ignores command-line arguments, so a link handed to it would open the home
-page instead of the link.
+the in-app updater expects.
+
+**Set as default browser:** ☰ → Settings → Set as default browser registers
+Vodou with the OS (a link handed to it opens that link, not the home page —
+see `main._startup_url_from_argv`). On Windows this writes to
+`HKEY_CURRENT_USER` and opens Settings → Apps → Default apps for you to
+confirm — Windows has refused to let any app flip that switch silently since
+Windows 8. On Linux it runs `xdg-settings set default-web-browser
+vodou.desktop`, which requires `packaging/install-linux.sh` to have been run
+first. See `default_browser.py` for details; macOS isn't packaged yet, so
+it's not supported there.
 
 ## Privacy features
 

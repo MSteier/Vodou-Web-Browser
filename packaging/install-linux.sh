@@ -36,7 +36,10 @@ mkdir -p "$apps" "$icons"
 
 # The launcher must cd into the checkout: main.py resolves sibling modules
 # relative to itself, but the updater resolves the repo relative to cwd.
-exec_line="sh -c 'cd \"$repo\" && exec \"$python_bin\" main.py'"
+# The trailing "$@" plus the %u below forward a launched-with-a-link's URL
+# through to main.py (see main._startup_url_from_argv); the "_" placeholder
+# becomes $0 inside the sh -c script so "$@" starts at the real argument.
+exec_line="sh -c 'cd \"$repo\" && exec \"$python_bin\" main.py \"\$@\"' _ %u"
 
 # Escape the sed-replacement metacharacters before substituting: in a sed
 # replacement, & means "the matched text" and \ and the | delimiter are also

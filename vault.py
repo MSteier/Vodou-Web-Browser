@@ -92,6 +92,11 @@ class Entry:
     username: str
     password: str
     notes: str = ""
+    # ISO date the entry was last added/updated (add()/update()/add_many()
+    # stamp this themselves — it's system-managed, not user-editable, the
+    # same way a security key's "added" date is). Blank for entries saved
+    # before this field existed; never treated as an error.
+    updated: str = ""
 
 
 def _scrypt_raw(master: str, salt: bytes, n: int, r: int, p: int) -> bytes:
@@ -127,6 +132,10 @@ def _unwrap(secret_key: bytes, blob: bytes) -> bytes:
     """Reverse _wrap; raises on the wrong key or a tampered blob."""
     aes = AESGCM(secret_key)
     return aes.decrypt(blob[:12], blob[12:], _WRAP_AAD)
+
+
+def _today_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def normalize_site(site: str) -> str:
@@ -227,12 +236,12 @@ class Vault:
             self._secrets.append(self._seal(e.password))
             self._entries.append(
                 Entry(site=e.site, username=e.username, password="",
-                      notes=e.notes))
+                      notes=e.notes, updated=e.updated))
 
     @staticmethod
     def _meta_copy(entry: Entry) -> Entry:
         return Entry(site=entry.site, username=entry.username,
-                     password="", notes=entry.notes)
+                     password="", notes=entry.notes, updated=entry.updated)
 
     # -- create / unlock -------------------------------------------------
 
@@ -522,6 +531,7 @@ class Vault:
     def add(self, entry: Entry) -> None:
         self._require_unlocked()
         entry.site = normalize_site(entry.site)
+        entry.updated = _today_stamp()
         self._secrets.append(self._seal(entry.password))
         self._entries.append(self._meta_copy(entry))
         self._save()
@@ -530,8 +540,10 @@ class Vault:
         """Bulk add (imports): seal everything, then ONE re-encrypt + disk
         write — per-entry add() would rewrite the whole vault n times."""
         self._require_unlocked()
+        stamp = _today_stamp()
         for entry in new_entries:
             entry.site = normalize_site(entry.site)
+            entry.updated = stamp
             self._secrets.append(self._seal(entry.password))
             self._entries.append(self._meta_copy(entry))
         if new_entries:
@@ -541,6 +553,7 @@ class Vault:
     def update(self, index: int, entry: Entry) -> None:
         self._require_unlocked()
         entry.site = normalize_site(entry.site)
+        entry.updated = _today_stamp()
         self._secrets[index] = self._seal(entry.password)
         self._entries[index] = self._meta_copy(entry)
         self._save()
@@ -550,6 +563,51 @@ class Vault:
         del self._entries[index]
         del self._secrets[index]
         self._save()
+
+    def find_duplicate_groups(self) -> list[list[int]]:
+        """Indices of entries that are exact duplicates of one another --
+        same site, username, AND password. This is a stricter, distinct
+        concern from reused passwords (password_strength.group_reused):
+        two different logins sharing a password are still two real,
+        separate accounts; a duplicate is the same login saved more than
+        once, with nothing to distinguish the copies. Returns one list of
+        indices per duplicate group (2+ members) in vault order -- the
+        first index in each is the copy remove_duplicates() would keep.
+        Read-only; takes no action."""
+        self._require_unlocked()
+        groups: dict[tuple[str, str, str], list[int]] = {}
+        for i, entry in enumerate(self._entries):
+            key = (entry.site, entry.username, self._open(self._secrets[i]))
+            groups.setdefault(key, []).append(i)
+        return [indices for indices in groups.values() if len(indices) > 1]
+
+    def remove_duplicates(self) -> int:
+        """Delete every duplicate entry found by find_duplicate_groups(),
+        keeping the first (oldest) copy of each group. Any notes on a
+        removed copy are folded into the kept entry's (only if they add
+        text not already there), so a duplicate that picked up its own
+        notes doesn't silently lose them. One re-encrypt + disk write for
+        the whole cleanup, not one per removed entry -- same reasoning as
+        add_many(). Returns how many entries were removed."""
+        self._require_unlocked()
+        groups = self.find_duplicate_groups()
+        if not groups:
+            return 0
+        to_remove: set[int] = set()
+        for keep, *rest in groups:
+            notes = [self._entries[keep].notes] if self._entries[keep].notes \
+                else []
+            for i in rest:
+                note = self._entries[i].notes
+                if note and note not in notes:
+                    notes.append(note)
+                to_remove.add(i)
+            self._entries[keep].notes = "\n".join(notes)
+        for i in sorted(to_remove, reverse=True):
+            del self._entries[i]
+            del self._secrets[i]
+        self._save()
+        return len(to_remove)
 
     # -- internals -------------------------------------------------------
 
@@ -564,7 +622,7 @@ class Vault:
         full = [
             asdict(Entry(site=e.site, username=e.username,
                          password=self._open(self._secrets[i]),
-                         notes=e.notes))
+                         notes=e.notes, updated=e.updated))
             for i, e in enumerate(self._entries)]
         raw = json.dumps(full).encode("utf-8")
         n, r, p = self._kdf
@@ -613,15 +671,35 @@ class Vault:
         tmp.replace(self.path)
 
 
-def generate_password(length: int = 20, symbols: bool = True) -> str:
-    alphabet = string.ascii_letters + string.digits
+# Matches the character-type toggles and punctuation set of the reference
+# generator (Password_Generator.html) that this vault's "Generate Strong
+# Password" dialog is modeled on.
+GENERATOR_PUNCTUATION = "!@#$%^&*()-_=+[]{}|;:,.<>?/~`"
+
+
+def generate_password(length: int = 20, *, letters: bool = True,
+                      numbers: bool = True, symbols: bool = True) -> str:
+    """A random password from `secrets` (CSPRNG), with the same three
+    independently-toggleable character types as the reference generator:
+    letters (mixed-case a-z/A-Z), numbers, and punctuation. At least one
+    type must stay enabled. Strengthens the reference's plain uniform draw
+    slightly: the result is guaranteed to contain at least one character
+    from each ENABLED type, so a short password can't land all in one
+    class by chance."""
+    if not (letters or numbers or symbols):
+        raise ValueError("at least one character type must be enabled")
+    alphabet = ""
+    if letters:
+        alphabet += string.ascii_letters
+    if numbers:
+        alphabet += string.digits
     if symbols:
-        alphabet += "!@#$%^&*()-_=+[]{};:,.?"
+        alphabet += GENERATOR_PUNCTUATION
     while True:
         pw = "".join(secrets.choice(alphabet) for _ in range(length))
-        # require at least one of each character class present in the alphabet
-        if (any(c.islower() for c in pw)
-                and any(c.isupper() for c in pw)
-                and any(c.isdigit() for c in pw)
-                and (not symbols or any(not c.isalnum() for c in pw))):
+        if ((not letters or (any(c.islower() for c in pw)
+                             and any(c.isupper() for c in pw)))
+                and (not numbers or any(c.isdigit() for c in pw))
+                and (not symbols
+                     or any(c in GENERATOR_PUNCTUATION for c in pw))):
             return pw

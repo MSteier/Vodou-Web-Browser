@@ -472,19 +472,23 @@ QPushButton#aiSend:disabled {{ color: {p.muted}; background: {p.surface}; border
 """
 
 
-def _draw_brand_mark(p: QPainter) -> None:
-    """Paint the Vodou brand mark on a 128×128 painter: the same flame/leaf
-    glyph used as the wordmark on vodou-website (a purple-to-teal gradient
-    drop with a small accent dot), reproduced here as vector primitives —
-    drawn in the mark's native 48-unit grid, then scaled up — so it stays
-    crisp at every icon size down to a 16px favicon. No backdrop: the shape
-    reads on its own against light or dark taskbars, matching the site mark."""
+def _draw_brand_mark(p: QPainter, grid_px: float = 128.0,
+                      top: QColor | None = None,
+                      bottom: QColor | None = None) -> None:
+    """Paint the Vodou brand mark on a grid_px×grid_px painter: the same
+    flame/leaf glyph used as the wordmark on vodou-website (by default a
+    purple-to-teal gradient drop with a small accent dot), reproduced here as
+    vector primitives — drawn in the mark's native 48-unit grid, then scaled
+    up — so it stays crisp at every size down to a 16px favicon. No backdrop:
+    the shape reads on its own against light or dark taskbars, matching the
+    site mark. `top`/`bottom` swap the gradient stops (see
+    draw_muted_brand_mark for the grey watermark variant)."""
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.scale(128 / 48.0, 128 / 48.0)
+    p.scale(grid_px / 48.0, grid_px / 48.0)
 
     gradient = QLinearGradient(4, 6, 44, 42)
-    gradient.setColorAt(0, QColor("#8f6bff"))
-    gradient.setColorAt(1, QColor("#1fb6a8"))
+    gradient.setColorAt(0, top or QColor("#8f6bff"))
+    gradient.setColorAt(1, bottom or QColor("#1fb6a8"))
 
     # The drop silhouette, reproduced from the site's logo-mark.svg path.
     drop = QPainterPath(QPointF(6, 7))
@@ -508,6 +512,21 @@ def _draw_brand_mark(p: QPainter) -> None:
     p.setBrush(dot_brush)
     p.drawEllipse(QPointF(24, 10.5), 3.4, 3.4)
     p.setOpacity(1.0)
+
+
+def draw_muted_brand_mark(p: QPainter, mode: str, size_px: float) -> None:
+    """Paint the brand mark as a faint grey watermark at an arbitrary pixel
+    size, in place of the usual purple-to-teal gradient — for the empty
+    window shown once every tab is closed (see BrowserWindow._show_empty_state
+    in main.py). Colours are drawn from the same neutral base as the rest of
+    the chrome for the given mode, at reduced alpha, so the mark sits close
+    to the surrounding background and reads as texture rather than an icon."""
+    base = _LIGHT_BASE if mode == "light" else _DARK_BASE
+    top = QColor(base["border"])
+    top.setAlpha(150)
+    bottom = QColor(base["muted"])
+    bottom.setAlpha(150)
+    _draw_brand_mark(p, grid_px=size_px, top=top, bottom=bottom)
 
 
 def make_app_icon() -> QIcon:

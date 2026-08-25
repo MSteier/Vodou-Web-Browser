@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PyQt6.QtCore import QUrl  # noqa: E402
 
 import ai_search as ai  # noqa: E402
+from spoofcheck import SpoofVerdict  # noqa: E402
 
 _failures = []
 
@@ -90,6 +91,69 @@ check("unclosed <think> block -> still_thinking True",
       ai.split_reasoning("<think>still going")[1] is True)
 check("no think block -> passthrough",
       ai.split_reasoning("plain answer") == ("plain answer", False))
+
+# --- build_site_safety_prompt: "Check this site" -----------------------------
+print("\nbuild_site_safety_prompt")
+
+clean_facts = {
+    "url": "https://example.com/", "host": "example.com",
+    "connection": "HTTPS (encrypted)", "cert_trusted": True,
+    "spoof": None, "malicious": False, "bypassed_warning": False,
+    "downloads": [],
+}
+clean = ai.build_site_safety_prompt(clean_facts)
+check("clean site names the real host", "example.com" in clean)
+check("clean site: no look-alike pattern detected, said plainly",
+      "no look-alike/typosquat pattern" in clean)
+check("clean site: not on the malicious list, said plainly",
+      "is not on Vodou's local" in clean)
+check("clean site: certificate trust is reported",
+      "verified against the system trust store" in clean)
+check("clean site: no downloads noted",
+      "No downloads from this site" in clean)
+check("the model is told its information is limited to what's listed",
+      "no live web/reputation lookup" in clean)
+check("the model is never told Vodou ran an antivirus scan",
+      "antivirus scan" not in clean
+      or "no antivirus scan" in clean)
+
+spoofed_facts = {
+    "url": "https://paypa1.com/login", "host": "paypa1.com",
+    "connection": "HTTPS (encrypted)", "cert_trusted": False,
+    "cert_trust_error": "self-signed certificate",
+    "spoof": SpoofVerdict("typosquat", "paypa1.com", "paypal.com",
+                          "Possible misspelled address",
+                          "This address is one character away from "
+                          "“paypal.com” and may be impersonating it."),
+    "malicious": True, "bypassed_warning": True,
+    "downloads": [("invoice.exe", ".exe"), ("readme.txt", None)],
+}
+spoofed = ai.build_site_safety_prompt(spoofed_facts)
+check("spoofed site: the deceptive-address flag is included",
+      "FLAGGED" in spoofed and "paypal.com" in spoofed)
+check("spoofed site: the malicious-list hit is included",
+      "IS on a locally-cached list" in spoofed)
+check("spoofed site: untrusted certificate is reported with its reason",
+      "NOT verified/trusted (self-signed certificate)" in spoofed)
+check("spoofed site: a previously-bypassed warning is disclosed",
+      "Continue anyway" in spoofed)
+check("spoofed site: the risky download is called out",
+      "DANGEROUS" in spoofed and "invoice.exe" in spoofed)
+check("spoofed site: the harmless download is listed without alarm",
+      "readme.txt" in spoofed
+      and "not an executable/installer type" in spoofed)
+
+no_cert_facts = {
+    "url": "http://plain.example/", "host": "plain.example",
+    "connection": "HTTP — NOT encrypted",
+    "spoof": None, "malicious": False, "bypassed_warning": False,
+    "downloads": [],
+}
+no_cert = ai.build_site_safety_prompt(no_cert_facts)
+check("missing cert_trusted key is handled without raising",
+      "example" in no_cert)
+check("plain HTTP connection state is reported",
+      "NOT encrypted" in no_cert)
 
 print()
 if _failures:

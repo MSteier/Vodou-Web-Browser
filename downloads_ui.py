@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from spoofcheck import download_risk
+
 _STATE = QWebEngineDownloadRequest.DownloadState
 
 
@@ -196,6 +198,17 @@ class DownloadsDialog(QDialog):
     def _rows(self) -> list[DownloadRow]:
         return [w for w in self.findChildren(DownloadRow)
                 if w.parent() is not None]
+
+    def for_host(self, host: str) -> list[tuple[str, str | None]]:
+        """(filename, risky-extension-or-None) for this session's downloads
+        whose source page was `host` — used by Ask AI's "Check this site"
+        (see main.py's _site_safety_facts). Purely a read of what's already
+        tracked in memory; triggers no new download or network activity."""
+        host = (host or "").lower()
+        return [(row.item.downloadFileName(),
+                download_risk(row.item.downloadFileName()))
+               for row in self._rows()
+               if row.item.url().host().lower() == host]
 
     def clear_finished(self) -> None:
         remaining = 0

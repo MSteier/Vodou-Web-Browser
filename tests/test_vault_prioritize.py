@@ -3,8 +3,9 @@
 Two layers:
   * pure ordering logic (prioritize_by_site / _is_current_site) — no Qt needed;
   * a VaultDialog integration pass under the offscreen Qt platform, with a fake
-    vault, checking that search + the existing (vault-index) order still hold and
-    that the current-site logins are floated to the top of the rendered table.
+    vault, checking that search + the existing (vault-index) order still hold,
+    that the current-site logins are floated to the top of the rendered table,
+    and that the Strength column reflects each row's real (revealed) password.
 
 Run:  python tests/test_vault_prioritize.py
 """
@@ -34,8 +35,8 @@ def check(label, cond):
         _failures.append(label)
 
 
-def e(site, username="user", notes=""):
-    return Entry(site=site, username=username, password="", notes=notes)
+def e(site, username="user", notes="", password="Xk9#mQ2p!wRt4Lv7"):
+    return Entry(site=site, username=username, password=password, notes=notes)
 
 
 def sites(pairs):
@@ -112,7 +113,8 @@ print("\nVaultDialog integration (offscreen Qt)")
 
 
 class FakeVault:
-    """Just enough of the Vault surface for VaultDialog._refresh() and the
+    """Just enough of the Vault surface for VaultDialog._refresh() (including
+    the per-row strength column, which reveal()s each password) and the
     two-factor switch it syncs on open (real Vault is always unlocked here)."""
 
     def __init__(self, entries):
@@ -121,13 +123,24 @@ class FakeVault:
     def entries(self):
         return self._entries
 
+    def reveal(self, index):
+        return self._entries[index].password
+
+    def find_duplicate_groups(self):
+        return []
+
     @property
     def factor_enrolled(self):
         return False
 
 
 def table_sites(dialog):
-    return [dialog.table.item(r, 0).text()
+    return [dialog.table.item(r, VaultDialog.COL_WEBSITE).text()
+            for r in range(dialog.table.rowCount())]
+
+
+def table_strengths(dialog):
+    return [dialog.table.item(r, VaultDialog.COL_STRENGTH).text()
             for r in range(dialog.table.rowCount())]
 
 
@@ -176,6 +189,35 @@ try:
           table_sites(dlg2)
           == ["example.com", "replica.com", "other.com",
               "app.replica.com", "zebra.com"])
+
+    # Strength column: reveal()s each row's real password and shows the
+    # password_strength.analyze() verdict, independent of site/username.
+    mixed = FakeVault([
+        e("weak.com", password="123456"),
+        e("moderate.com", password="Xk9#mQ2p"),
+        e("strong.com", password="qX7#mZ2$vL9@wRk4!"),
+    ])
+    dlg3 = VaultDialog(mixed, None, current_site="")
+    check("dialog: strength column matches each entry's real password",
+          table_strengths(dlg3) == ["Weak", "Moderate", "Strong"])
+    dlg3.deleteLater()
+
+    # Reuse: two entries sharing one strong password are both flagged, a
+    # third with its own unique (also strong) password is not.
+    reused = FakeVault([
+        e("siteA.com", password="qX7#mZ2$vL9@wRk4!"),
+        e("siteB.com", password="different#Pw9$xR2!"),
+        e("siteC.com", password="qX7#mZ2$vL9@wRk4!"),
+    ])
+    dlg4 = VaultDialog(reused, None, current_site="")
+    strengths = table_strengths(dlg4)
+    check("dialog: a password shared by two entries is marked Reused",
+          "Reused" in strengths[0] and "Reused" in strengths[2])
+    check("dialog: an entry with a unique password is not marked Reused",
+          "Reused" not in strengths[1])
+    check("dialog: reused entries still show their base strength",
+          strengths[0].startswith("Strong") and strengths[2].startswith("Strong"))
+    dlg4.deleteLater()
 
     dlg.deleteLater()
     dlg2.deleteLater()

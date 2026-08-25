@@ -11,10 +11,10 @@ Categories=Network;WebBrowser;
 Keywords=browser;web;internet;privacy;
 StartupNotify=true
 StartupWMClass=vodou
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
 
-# Deliberately no MimeType= and no %u in Exec. Declaring
-# x-scheme-handler/http would offer Vodou as the system default browser, but
-# main() ignores argv entirely — every link click would open the SearXNG home
-# page instead of the link. Better not to be listed than to be listed and
-# swallow the URL. Restore both lines together if URL arguments are ever
-# handled.
+# main() now reads the first bare command-line argument as a URL to open
+# (see main._startup_url_from_argv), so it's safe to offer Vodou as a
+# default-browser candidate here — a link click opens the link, not the
+# SearXNG home page. Set via ☰ → Settings → Set as default browser…, which
+# shells out to `xdg-settings set default-web-browser vodou.desktop`.
