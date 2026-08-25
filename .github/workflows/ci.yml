@@ -1,0 +1,106 @@
+# Vodou is developed on Windows. This workflow is the Linux machine the
+# author doesn't have: it runs the platform assertions on ubuntu-latest so the
+# POSIX branches (keyring sealing, 0700/0600 modes, non-D3D graphics flags)
+# are exercised on every push instead of first meeting a user.
+#
+# It cannot test rendering. GPU, Wayland vs X11, and the Chromium sandbox need
+# real hardware and a real session; those remain manual checks.
+name: CI
+
+on:
+  push:
+    branches: [master, linux-support]
+  pull_request:
+
+# A workflow is the one place a merged change runs with repository
+# credentials. Read-only by default, and the trigger above is `pull_request`
+# (which checks out the PR without secrets) — never `pull_request_target`.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.11", "3.13"]
+
+    steps:
+      # Actions are pinned to commit SHAs, not tags: a tag can be moved to
+      # point at different code, and this job can read the repo.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Qt WebEngine links these even under the offscreen platform plugin;
+      # without them `import main` fails before any assertion runs.
+      - name: Install Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xinerama0 libnss3 libxdamage1 libxrandr2 \
+            libxcomposite1 libxtst6 libasound2t64 libdbus-1-3 \
+            desktop-file-utils
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      # Audit the just-installed dependency tree (direct and transitive)
+      # against the PyPI/OSV advisory database; pip-audit exits non-zero on a
+      # known CVE, failing the job. Run once — one matrix cell is enough for a
+      # dependency check, and it avoids hammering the advisory API four times.
+      - name: Audit dependencies for known CVEs
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit
+          python -m pip_audit --progress-spinner off
+
+      - name: Compile every module
+        run: python -m py_compile $(python -c "import glob;print(' '.join(glob.glob('*.py')))")
+        shell: bash
+
+      - name: Platform assertions
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/test_platform.py
+
+      # Catches a CRLF shebang or a typo before a Linux user does.
+      - name: Check the launcher and installer
+        if: runner.os == 'Linux'
+        run: |
+          sh -n packaging/install-linux.sh
+          sh -n docker/setup.sh
+          # Actually run the installer into a throwaway XDG_DATA_HOME and
+          # validate the launcher it really writes. A plain template
+          # substitution (the old check) hides bugs in the substitution
+          # itself — e.g. an unescaped & in the sed replacement expanding && to
+          # the @EXEC@ placeholder and producing a launcher that never starts.
+          export XDG_DATA_HOME="$(mktemp -d)"
+          sh packaging/install-linux.sh
+          desk="$XDG_DATA_HOME/applications/vodou.desktop"
+          launcher="$XDG_DATA_HOME/vodou/launch.sh"
+          desktop-file-validate "$desk"
+          if grep -q '@EXEC@' "$desk"; then
+            echo "install-linux.sh left @EXEC@ unsubstituted in $desk" >&2
+            exit 1
+          fi
+          # Exec must point at the launcher script plus %u (no shell
+          # operators or quoting embedded directly in Exec= — the Desktop
+          # Entry spec's own quoting rules reject those regardless of
+          # escaping, which is exactly what used to slip past this check).
+          grep -q '^Exec=.*launch\.sh" %u$' "$desk"
+          # The cd/exec logic itself must actually be in the launcher file,
+          # and that file must be executable.
+          [ -x "$launcher" ]
+          grep -q 'cd .* && exec ' "$launcher"
+
+      # The published SearXNG config must never carry a real secret.
+      - name: Check no secret was committed
+        run: grep -q "__REPLACE_WITH_RANDOM_SECRET__" docker/searxng/settings.yml
+        shell: bash

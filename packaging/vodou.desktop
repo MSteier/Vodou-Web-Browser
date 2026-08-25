@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Vodou
+GenericName=Web Browser
+Comment=Privacy-centric browser with a built-in password manager
+Exec=@EXEC@
+Icon=vodou
+Terminal=false
+Categories=Network;WebBrowser;
+Keywords=browser;web;internet;privacy;
+StartupNotify=true
+StartupWMClass=vodou
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+
+# main() now reads the first bare command-line argument as a URL to open
+# (see main._startup_url_from_argv), so it's safe to offer Vodou as a
+# default-browser candidate here — a link click opens the link, not the
+# SearXNG home page. Set via ☰ → Settings → Set as default browser…, which
+# shells out to `xdg-settings set default-web-browser vodou.desktop`.

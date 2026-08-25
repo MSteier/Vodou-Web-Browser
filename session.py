@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from dpapi import seal as _seal, unseal as _unseal
+from dpapi import Unavailable, seal as _seal, unseal as _unseal
 
 SESSION_FILE = Path.home() / ".vodou" / "session.json"
 # Set just before an *intentional* self-restart (e.g. applying a graphics
@@ -48,12 +48,13 @@ def save_snapshot(urls: list[str], current: int) -> None:
     try:
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = SESSION_FILE.with_suffix(".tmp")
-        # Sealed at rest. If sealing fails (DPAPI error), write nothing rather
-        # than fall back to a plaintext tab list — fail closed.
+        # Sealed at rest. If sealing fails (DPAPI error, or no usable POSIX
+        # keystore — e.g. a headless box), write nothing rather than fall
+        # back to a plaintext tab list — fail closed.
         tmp.write_bytes(_seal(payload.encode("utf-8")))
         tmp.replace(SESSION_FILE)
         _last_written = payload
-    except OSError:
+    except (OSError, Unavailable):
         pass  # a failed snapshot must never disturb browsing
 
 

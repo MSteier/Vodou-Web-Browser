@@ -1,17 +1,26 @@
-"""On-device AI, via a local Ollama instance: search summaries, and chat.
+"""On-device AI, via a local Ollama instance: search summaries, chat, and a
+site-safety check.
 
 Vodou's search already stays on your machine (a local SearXNG instance). This
-adds two optional, on-demand features, both produced **entirely locally** by
+adds three optional, on-demand features, all produced **entirely locally** by
 talking to Ollama over HTTP on 127.0.0.1:
 
   * **Summarize** the results on a SearXNG page.
   * **Ask** the model anything, as a normal multi-turn conversation.
+  * **Check this site** — hands the model the current page's already-computed
+    local safety signals (deceptive-address check, malicious-site list,
+    certificate trust, this session's downloads from the same host) and lets
+    it answer questions like "is this spoofed", "is it a scam", "will a
+    download from here have malware" — see build_site_safety_prompt.
 
 Nothing leaves the device: SearXNG is local, Ollama is local, and Vodou is only
 a client of Ollama's HTTP API — it never changes Ollama's models, config, or
 environment, so any other tools you run against Ollama keep working unchanged.
-Ask mode sends *only what you type* — no page content, URL, or history is ever
-attached to a question.
+Plain Ask mode sends *only what you type* — no page content, URL, or history is
+attached to an ordinary question. "Check this site" is the one deliberate,
+user-triggered exception: it attaches the current page's locally-computed
+safety facts (never the page's actual content) to that one chat turn, and only
+when the user explicitly asks for the check.
 
 How it fits together:
   * Vodou reads the top results straight from the rendered SearXNG page (no
@@ -207,6 +216,79 @@ def build_prompt(query: str, results: list[dict]) -> str:
         "Cite claims with the result number in brackets, like [2]. If the "
         "snippets don't actually answer the query, say so plainly. Do not "
         "invent facts or URLs.",
+    ]
+    return "\n".join(lines)
+
+
+def build_site_safety_prompt(facts: dict) -> str:
+    """A first-person message, as if the user relayed Vodou's own local
+    security checks to the model and then asked about them. This is what
+    actually gets sent — and shown as the user's own chat turn — when
+    "Check this site" (the AI panel / ☰ menu action) starts or continues a
+    conversation (see main.BrowserWindow.check_site_safety, which builds
+    `facts` from spoofcheck.py, safebrowsing.py, cert_viewer.py, and the
+    session's download list — the exact same checks the browser's own
+    navigation blocking and download warnings already use).
+
+    Every fact named here is something Vodou verified locally moments ago;
+    nothing is invented for the model, and the model is never told Vodou
+    checked something it didn't (no antivirus scan, no live reputation
+    lookup, no browsing beyond this one page)."""
+    lines = [
+        "Here is what Vodou's own local security checks just found for the "
+        f"page I have open right now ({facts['url']}):",
+        "",
+        f"- Host: {facts['host']}",
+        f"- Connection: {facts['connection']}",
+    ]
+    if facts.get("cert_trusted") is not None:
+        if facts["cert_trusted"]:
+            lines.append(
+                "- Certificate: verified against the system trust store.")
+        else:
+            reason = facts.get("cert_trust_error") or "not specified"
+            lines.append(
+                f"- Certificate: NOT verified/trusted ({reason}).")
+    spoof = facts.get("spoof")
+    if spoof is not None:
+        lines.append(
+            f"- Deceptive-address check: FLAGGED — {spoof.detail}")
+    else:
+        lines.append(
+            "- Deceptive-address check: no look-alike/typosquat pattern "
+            "detected against Vodou's known-brands list.")
+    if facts.get("malicious"):
+        lines.append(
+            "- Malicious-site list: this host IS on a locally-cached list "
+            "of reported phishing/malware sites.")
+    else:
+        lines.append(
+            "- Malicious-site list: this host is not on Vodou's local "
+            "reported-phishing/malware list.")
+    if facts.get("bypassed_warning"):
+        lines.append(
+            "- Note: I previously clicked \"Continue anyway\" past a "
+            "warning Vodou showed for this exact site.")
+    downloads = facts.get("downloads") or []
+    if downloads:
+        lines.append("- Downloads from this site this session:")
+        for name, risky in downloads:
+            tag = (f' — DANGEROUS: a "{risky}" file, which can run programs'
+                  if risky else " — not an executable/installer type")
+            lines.append(f'    - "{name}"{tag}')
+    else:
+        lines.append("- No downloads from this site this session.")
+    lines += [
+        "",
+        "Based ONLY on the facts above, is this site safe? Could it be a "
+        "scam or a spoofed/fake version of a real site? Should I be "
+        "cautious about downloading anything from it? Be direct — say "
+        "plainly if something here looks dangerous, and say plainly when "
+        "nothing suspicious was found rather than hedging with generic "
+        "\"always be careful online\" advice. You have no information "
+        "beyond what's listed above: no antivirus scan of file contents, "
+        "no live web/reputation lookup, and no way to browse further "
+        "yourself.",
     ]
     return "\n".join(lines)
 

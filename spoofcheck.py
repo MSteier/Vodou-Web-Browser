@@ -298,7 +298,7 @@ def interstitial_html(verdict: SpoofVerdict, colors: dict) -> str:
 <style>
   html,body{{margin:0;height:100%;}}
   body{{background:{c['bg']};color:{c['text']};
-    font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    font-family:"Segoe UI Variable Text","Segoe UI","Cantarell","Ubuntu","Noto Sans","DejaVu Sans",system-ui,sans-serif;
     display:flex;align-items:center;justify-content:center;}}
   .card{{max-width:560px;margin:24px;padding:36px 40px;
     background:{c['surface']};border:1px solid {c['border']};
@@ -314,14 +314,14 @@ def interstitial_html(verdict: SpoofVerdict, colors: dict) -> str:
     padding:11px 14px;border-radius:10px;background:{c['bg']};
     margin-bottom:8px;align-items:center;}}
   .k{{color:{c['muted']};font-size:13px;}}
-  .v{{font-weight:600;font-family:"Cascadia Mono",Consolas,monospace;
+  .v{{font-weight:600;font-family:"Cascadia Mono",Consolas,"JetBrains Mono","Ubuntu Mono","DejaVu Sans Mono",monospace;
     word-break:break-all;text-align:right;}}
   .good{{color:{c['ok']};}} .bad{{color:{c['danger']};}}
   .single{{padding:12px 14px;border-radius:10px;background:{c['bg']};
-    font-weight:600;font-family:"Cascadia Mono",Consolas,monospace;
+    font-weight:600;font-family:"Cascadia Mono",Consolas,"JetBrains Mono","Ubuntu Mono","DejaVu Sans Mono",monospace;
     word-break:break-all;margin:0 0 10px;}}
   .puny{{font-size:12.5px;color:{c['muted']};margin:2px 2px 26px;
-    font-family:"Cascadia Mono",Consolas,monospace;word-break:break-all;}}
+    font-family:"Cascadia Mono",Consolas,"JetBrains Mono","Ubuntu Mono","DejaVu Sans Mono",monospace;word-break:break-all;}}
   .actions{{display:flex;gap:12px;}}
   a.btn{{flex:1;text-align:center;text-decoration:none;padding:12px 16px;
     border-radius:10px;font-size:15px;font-weight:600;}}

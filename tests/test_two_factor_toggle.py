@@ -67,6 +67,9 @@ class FakeVault:
     def entries(self):
         return self._entries
 
+    def find_duplicate_groups(self):
+        return []
+
     @property
     def factor_enrolled(self):
         return bool(self._keys)

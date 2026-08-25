@@ -21,6 +21,7 @@ from PyQt6.QtGui import (
     QBrush,
     QColor,
     QIcon,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPalette,
@@ -140,7 +141,8 @@ def save_prefs(theme_name: str, mode: str) -> None:
 def build_qss(p: Palette) -> str:
     return f"""
 * {{
-    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    font-family: "Segoe UI Variable Text", "Segoe UI", "Cantarell",
+                 "Ubuntu", "Noto Sans", "DejaVu Sans", sans-serif;
     font-size: 10pt;
 }}
 
@@ -410,7 +412,8 @@ QComboBox#aiModelCombo {{
     border-radius: 6px;
     padding: 1px 6px;
     font-size: 8.5pt;
-    font-family: 'Consolas', monospace;
+    font-family: Consolas, "JetBrains Mono", "Ubuntu Mono",
+                 "DejaVu Sans Mono", monospace;
     min-width: 120px;
 }}
 QComboBox#aiModelCombo:hover {{ border-color: {p.accent}; }}
@@ -469,89 +472,68 @@ QPushButton#aiSend:disabled {{ color: {p.muted}; background: {p.surface}; border
 """
 
 
-def _draw_voodoo_doll(p: QPainter) -> None:
-    """Paint the Vodou mark on a 128×128 painter: a white line-art voodoo doll
-    — a stitched gingerbread-style figure with X-button eyes and a sewn mouth —
-    on a black rounded backdrop. Vector primitives so it stays crisp when
-    scaled down to a 16px favicon."""
+def _draw_brand_mark(p: QPainter, grid_px: float = 128.0,
+                      top: QColor | None = None,
+                      bottom: QColor | None = None) -> None:
+    """Paint the Vodou brand mark on a grid_px×grid_px painter: the same
+    flame/leaf glyph used as the wordmark on vodou-website (by default a
+    purple-to-teal gradient drop with a small accent dot), reproduced here as
+    vector primitives — drawn in the mark's native 48-unit grid, then scaled
+    up — so it stays crisp at every size down to a 16px favicon. No backdrop:
+    the shape reads on its own against light or dark taskbars, matching the
+    site mark. `top`/`bottom` swap the gradient stops (see
+    draw_muted_brand_mark for the grey watermark variant)."""
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.scale(grid_px / 48.0, grid_px / 48.0)
 
-    # Black rounded backdrop, with a hair of dark edge so the icon still reads
-    # as a distinct shape on a pure-black taskbar.
-    p.setBrush(QBrush(QColor("#000000")))
-    p.setPen(QPen(QColor("#2a2a2a"), 2))
-    p.drawRoundedRect(QRectF(6, 6, 116, 116), 30, 30)
+    gradient = QLinearGradient(4, 6, 44, 42)
+    gradient.setColorAt(0, top or QColor("#8f6bff"))
+    gradient.setColorAt(1, bottom or QColor("#1fb6a8"))
 
-    white = QColor("#ffffff")
+    # The drop silhouette, reproduced from the site's logo-mark.svg path.
+    drop = QPainterPath(QPointF(6, 7))
+    drop.cubicTo(QPointF(10.5, 8), QPointF(13.6, 11.4), QPointF(15.3, 17.2))
+    drop.cubicTo(QPointF(17.4, 24.4), QPointF(19.8, 30), QPointF(24, 30))
+    drop.cubicTo(QPointF(28.2, 30), QPointF(30.6, 24.4), QPointF(32.7, 17.2))
+    drop.cubicTo(QPointF(34.4, 11.4), QPointF(37.5, 8), QPointF(42, 7))
+    drop.cubicTo(QPointF(40.3, 16.8), QPointF(37.8, 26), QPointF(34.4, 32.9))
+    drop.cubicTo(QPointF(31.3, 39.1), QPointF(27.8, 42), QPointF(24, 42))
+    drop.cubicTo(QPointF(20.2, 42), QPointF(16.7, 39.1), QPointF(13.6, 32.9))
+    drop.cubicTo(QPointF(10.2, 26), QPointF(7.7, 16.8), QPointF(6, 7))
+    drop.closeSubpath()
 
-    # The doll silhouette, built as one united path (head + torso + arms +
-    # legs) so it strokes as a single clean outline with no internal seams.
-    def rounded(x, y, w, h, r):
-        sub = QPainterPath()
-        sub.addRoundedRect(QRectF(x, y, w, h), r, r)
-        return sub
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(gradient))
+    p.drawPath(drop)
 
-    body = QPainterPath()
-    body.addEllipse(QPointF(64, 32), 16, 16)     # head
-    body = body.united(rounded(48, 44, 32, 46, 14))   # torso
-    body = body.united(rounded(18, 54, 92, 15, 7.5))  # outstretched arms
-    body = body.united(rounded(49, 84, 12, 28, 6))    # left leg
-    body = body.united(rounded(67, 84, 12, 28, 6))    # right leg
+    # Small accent dot echoing the site mark's highlight above the drop.
+    dot_brush = QBrush(gradient)
+    p.setOpacity(0.55)
+    p.setBrush(dot_brush)
+    p.drawEllipse(QPointF(24, 10.5), 3.4, 3.4)
+    p.setOpacity(1.0)
 
-    outline = QPen(white, 5.5)
-    outline.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    outline.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(outline)
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    p.drawPath(body)
 
-    # Seam stitches running down the centre.
-    seam = QPen(white, 2)
-    seam.setStyle(Qt.PenStyle.DashLine)
-    seam.setDashPattern([2, 3])
-    p.setPen(seam)
-    p.drawLine(64, 46, 64, 88)
-
-    # X-button eyes.
-    eye = QPen(white, 3)
-    eye.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(eye)
-    for cx in (57, 71):
-        p.drawLine(cx - 4, 27, cx + 4, 36)
-        p.drawLine(cx - 4, 36, cx + 4, 27)
-
-    # Sewn cross-stitch mouth: a base line crossed by short stitches.
-    mouth = QPen(white, 2)
-    mouth.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(mouth)
-    p.drawLine(57, 40, 71, 40)
-    for mx in range(59, 72, 4):
-        p.drawLine(mx, 38, mx - 2, 43)
-
-    # A stitch cross on the chest, the classic "stick the pin here" mark.
-    cross = QPen(white, 3)
-    cross.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(cross)
-    p.drawLine(58, 64, 70, 76)
-    p.drawLine(58, 76, 70, 64)
-
-    # Short cross-stitch ticks on the arms and legs.
-    tick = QPen(white, 2)
-    tick.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(tick)
-    for x in (28, 96):        # arms
-        p.drawLine(x - 3, 58, x + 3, 65)
-        p.drawLine(x - 3, 65, x + 3, 58)
-    for x in (55, 73):        # legs
-        p.drawLine(x - 3, 98, x + 3, 103)
-        p.drawLine(x - 3, 103, x + 3, 98)
+def draw_muted_brand_mark(p: QPainter, mode: str, size_px: float) -> None:
+    """Paint the brand mark as a faint grey watermark at an arbitrary pixel
+    size, in place of the usual purple-to-teal gradient — for the empty
+    window shown once every tab is closed (see BrowserWindow._show_empty_state
+    in main.py). Colours are drawn from the same neutral base as the rest of
+    the chrome for the given mode, at reduced alpha, so the mark sits close
+    to the surrounding background and reads as texture rather than an icon."""
+    base = _LIGHT_BASE if mode == "light" else _DARK_BASE
+    top = QColor(base["border"])
+    top.setAlpha(150)
+    bottom = QColor(base["muted"])
+    bottom.setAlpha(150)
+    _draw_brand_mark(p, grid_px=size_px, top=top, bottom=bottom)
 
 
 def make_app_icon() -> QIcon:
     pixmap = QPixmap(128, 128)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
-    _draw_voodoo_doll(painter)
+    _draw_brand_mark(painter)
     painter.end()
     return QIcon(pixmap)
 

@@ -68,7 +68,7 @@ def save_snapshot(values: dict) -> None:
         tmp = SNAPSHOT_FILE.with_suffix(".tmp")
         tmp.write_bytes(dpapi.seal(payload))
         tmp.replace(SNAPSHOT_FILE)
-    except OSError:
+    except (OSError, dpapi.Unavailable):
         pass
 
 
@@ -100,7 +100,7 @@ def record_events(events: "list[ProtectionEvent]") -> None:
         tmp = LOG_FILE.with_suffix(".tmp")
         tmp.write_bytes(dpapi.seal(json.dumps(combined).encode("utf-8")))
         tmp.replace(LOG_FILE)
-    except OSError:
+    except (OSError, dpapi.Unavailable):
         pass
 
 

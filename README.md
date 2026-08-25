@@ -52,6 +52,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+**Linux — one extra thing.** `requirements.txt` also pulls `keyring` there.
+Windows seals the saved-cookie jar with DPAPI; Linux has no equivalent, so
+Vodou keeps that jar's key in your desktop keyring instead. GNOME and KDE
+ship one already (GNOME Keyring / KWallet). On a minimal window manager,
+install one:
+
+```bash
+sudo apt install gnome-keyring     # Debian/Ubuntu
+sudo dnf install gnome-keyring     # Fedora
+```
+
+Without a keyring, everything works except **cookie exceptions**, which turn
+themselves off — Vodou will not write your saved logins to disk unencrypted,
+and the cookie dialog says so plainly. If your session runs Wayland and Vodou
+fails to start, try `QT_QPA_PLATFORM=xcb python main.py`.
+
 **Run**
 
 ```bash
@@ -91,8 +107,27 @@ See [`docker/README.md`](docker/README.md) for details (GPU, custom models,
 port conflicts). To point Vodou at a search instance elsewhere, set
 `VODOU_SEARXNG_URL` or `~/.vodou/config.json` `{"searxng_url": "…"}`.
 
-**Optional — desktop shortcut / icon:** the repo ships `vodou.ico` for creating a
-desktop or Start-menu shortcut that points at `python main.py`.
+**Optional — desktop shortcut / icon:** on Windows the repo ships `vodou.ico`
+for creating a desktop or Start-menu shortcut that points at `python main.py`.
+On Linux, `packaging/install-linux.sh` adds Vodou to your application menu:
+
+```bash
+sh packaging/install-linux.sh
+```
+
+It writes only a launcher and an icon under `~/.local/share` (no root, no
+package manager) and leaves the code running from this checkout, which is what
+the in-app updater expects.
+
+**Set as default browser:** ☰ → Settings → Set as default browser registers
+Vodou with the OS (a link handed to it opens that link, not the home page —
+see `main._startup_url_from_argv`). On Windows this writes to
+`HKEY_CURRENT_USER` and opens Settings → Apps → Default apps for you to
+confirm — Windows has refused to let any app flip that switch silently since
+Windows 8. On Linux it runs `xdg-settings set default-web-browser
+vodou.desktop`, which requires `packaging/install-linux.sh` to have been run
+first. See `default_browser.py` for details; macOS isn't packaged yet, so
+it's not supported there.
 
 ## Privacy features
 
@@ -111,8 +146,8 @@ desktop or Start-menu shortcut that points at `python main.py`.
 | Content Credentials (C2PA) | Right-click any image → **Check content credentials** to verify its provenance **on your device** (nothing leaves the machine): who signed it, when, whether the credential declares it **AI/algorithmically generated**, and whether it's **untampered**. Signer trust is checked against the bundled official **C2PA trust list**, so "Verified — trusted signer" means the issuer is vetted, while a valid-but-unlisted signer is flagged as caution. This is honest provenance, **not a deepfake detector**: it can only check media that *carries* a credential, and "no credential" means **unknown, never authentic**. Powered by the official Content Authenticity Initiative library |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) is the default start page and search engine — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
 | Start page, startup page & search engine | All yours to change (☰ menu → Settings → Start page & search). **Set start page…** picks the page new tabs and the Home button open (blank restores the private SearXNG page). **Set startup page…** picks the page a fresh *launch* opens, independently of new tabs (blank = open your start page on launch too). **Search engine** chooses where address-bar searches go — SearXNG (local, keeps queries on your machine) or an external service (DuckDuckGo, Startpage, Brave, Google), plus a **Custom…** template. Choosing an external engine sends your searches to that service; the SearXNG default keeps them local. Start page, startup page, and search engine are all integrity-signed, so adware can't silently hijack them |
-| Browser Setting Protection | ☰ menu → Settings → Privacy & security → **Browser Setting Protection…**. The three settings above are signed with a per-install, owner-only key and **verified on every launch**. If any of them is changed on disk by something other than Vodou's own Settings UI — adware, an installer, a hand edit — the tampered file fails verification and Vodou **restores your real last-authorized value** (kept in a DPAPI-sealed snapshot), not just a blank default. Every blocked change is recorded in a sealed **history** (timestamp, setting, your value → attempted value, action) you can review and clear from the panel. **Honest scope:** Vodou is a QtWebEngine browser, so web pages have no path to these settings and there are no extensions, sync, or enterprise policy to guard against — the protection targets the one real threat, another program rewriting the settings file on disk. Values are shown as plain text since an attempted value is attacker-controlled |
-| Start-page hijack protection | Only *you* can change the start page or search engine, and only through the Settings dialog. A start page can only ever be a normal `http`/`https` web page — `file:`, `chrome:`, `about:`, `data:`, `javascript:` and the like are refused. Vodou **signs** the saved settings with a per-install key (`~/.vodou/prefs.key`); if adware, a synced edit, or a script changes `~/.vodou/prefs.json` behind your back, the signature no longer matches, so on the next launch Vodou **restores your real last-authorized value** from a DPAPI-sealed snapshot (or the private defaults if it holds none) and tells you — see *Browser Setting Protection* above, which also logs every blocked attempt. (Edit these through Settings, not by hand — a hand-edited file trips the same guard.) |
+| Browser Setting Protection | ☰ menu → Settings → Privacy & security → **Browser Setting Protection…**. The three settings above are signed with a per-install, owner-only key and **verified on every launch**. If any of them is changed on disk by something other than Vodou's own Settings UI — adware, an installer, a hand edit — the tampered file fails verification and Vodou **restores your real last-authorized value** (kept in an OS-keystore-sealed snapshot — Windows DPAPI, or a desktop-keyring key on Linux), not just a blank default. Every blocked change is recorded in a sealed **history** (timestamp, setting, your value → attempted value, action) you can review and clear from the panel. **Honest scope:** Vodou is a QtWebEngine browser, so web pages have no path to these settings and there are no extensions, sync, or enterprise policy to guard against — the protection targets the one real threat, another program rewriting the settings file on disk. Values are shown as plain text since an attempted value is attacker-controlled |
+| Start-page hijack protection | Only *you* can change the start page or search engine, and only through the Settings dialog. A start page can only ever be a normal `http`/`https` web page — `file:`, `chrome:`, `about:`, `data:`, `javascript:` and the like are refused. Vodou **signs** the saved settings with a per-install key (`~/.vodou/prefs.key`); if adware, a synced edit, or a script changes `~/.vodou/prefs.json` behind your back, the signature no longer matches, so on the next launch Vodou **restores your real last-authorized value** from an OS-keystore-sealed snapshot (or the private defaults if it holds none) and tells you — see *Browser Setting Protection* above, which also logs every blocked attempt. (Edit these through Settings, not by hand — a hand-edited file trips the same guard.) |
 | Light on memory | Background tabs don't hold RAM forever. A tab left idle for a minute is **frozen** (its scripts and timers pause); left past the discard timeout, it is **discarded** — its render process is freed and the page reloads the moment you return to it. The discard timeout is yours to set under ☰ → Settings → **Idle tab memory** (5 minutes, 10 minutes — the default, 30 minutes, 1 hour, or **Never** to keep every tab in memory and only ever freeze). Tabs playing audio, downloading, or otherwise busy are left running (Vodou defers to the engine's own judgement), and **pinned tabs are never touched**. Switching to a tab always wakes it instantly |
 | Proxy support | Route all of Vodou's traffic through a proxy under ☰ → Settings → **Network → Proxy…** — an **HTTP** proxy or a **SOCKS5** proxy (host and port). SOCKS5 can **resolve DNS at the proxy** rather than locally, so your lookups don't leak to the system resolver. If the proxy needs a username and password, they're stored in your **encrypted vault** (never in plain text) and supplied automatically when the vault is unlocked; while it's locked, Vodou asks you once and remembers the answer for the session. Choose "No proxy" to go direct again |
 | Open local files | Type a local path in the address bar and Vodou opens it. It accepts what you'd naturally type on Windows — `C:\Users\you\file.html`, a `file://` URL, forward or back slashes — and normalises it to the form the engine needs. A local page is sandboxed: it **can't reach the network or read other local files**, and web pages can't link into your filesystem |
@@ -339,11 +374,15 @@ and site settings you *want* kept. **☰ menu → Settings → Privacy & securit
   at the next start. QtWebEngine's cookie persistence is profile-wide
   (all-or-nothing), so Vodou does the selection itself: it watches the live
   cookie store and keeps only the allowlisted subset.
-- **Encrypted at rest with Windows DPAPI** — the same per-user OS
-  encryption Chrome uses for its own cookie database, so no password prompt
-  and no other Windows account can read it. *Honest limit:* as with
-  Chrome's jar, software running as **you** could decrypt it. On
-  non-Windows platforms the jar is written unencrypted.
+- **Encrypted at rest with the OS keystore** — Windows DPAPI (the same
+  per-user encryption Chrome uses for its own cookie database) or, on Linux,
+  a key held in your desktop keyring. Either way there's no password prompt
+  and no other local account can read it. *Honest limit:* as with Chrome's
+  jar, software running as **you** could decrypt it.
+- **No plaintext fallback.** Where no keystore is available (a headless box,
+  or Linux with no keyring service), cookie keeping switches itself off and
+  the dialog says so. These are live login credentials; forgetting them is
+  the better failure.
 - Only real persistent cookies are kept: session cookies (which the site
   itself marks as "die with the browser") are never saved, and expired ones
   are dropped on restore.
@@ -364,9 +403,10 @@ everything; **Start fresh** discards it and opens the usual home tab.
 
 - While running, the open-tab URLs are snapshotted to
   `~/.vodou/session.json` — just the tabs, no history, titles, or form data.
-  The file is **sealed at rest with Windows DPAPI** (the same per-user OS
-  encryption as the cookie jar), so the list of your open pages can't be read
-  by another Windows account or lifted off the disk; a legacy plaintext or
+  The file is **sealed at rest with the OS keystore** (Windows DPAPI, or on
+  Linux a key held in your desktop keyring — the same per-user OS encryption as
+  the cookie jar), so the list of your open pages can't be read
+  by another local account or lifted off the disk; a legacy plaintext or
   foreign blob fails to unseal and is simply treated as no snapshot. Writes are
   debounced (at most one per second, skipped when nothing changed), so heavy
   browsing never queues up disk churn.
@@ -592,6 +632,12 @@ returns it to the main strip; closing the main window closes it too.
 
 ## Graphics
 
+The three profiles below exist on every platform, but the flags behind them
+differ, because ANGLE's backends do: Direct3D on Windows, and on Linux
+whatever Chromium's own GPU detection picks (Vodou adds nothing to the Linux
+default — Chromium's driver blocklist knows more about Mesa than a Windows
+developer could).
+
 Some Windows GPU drivers make Qt WebEngine's hardware compositor flicker on
 pages that combine "frosted glass" (`backdrop-filter`) styling, WebGL, and a
 blinking text caret — chat UIs like my.replika.ai are the classic case (the
@@ -754,6 +800,11 @@ Reliability details (each cost real debugging time):
   authenticator: yes; conditional/autofill passkey UI: no — which steers
   sites onto the modal Windows Hello flow that works. The same engine bug
   also breaks e.g. ChatGPT's login modal, so the shim is site-agnostic.
+  *On Linux* the shim answers **no** to the platform-authenticator questions,
+  because there is no Windows Hello equivalent behind Qt WebEngine there;
+  claiming one would push sites onto a modal flow that can't complete and
+  hide the security-key path that does. Passkeys on Linux therefore mean a
+  hardware key rather than a built-in authenticator.
 
 ## License
 

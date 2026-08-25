@@ -1,4 +1,4 @@
-"""Regenerate vodou.ico from the app icon in theme._draw_voodoo_doll().
+"""Regenerate vodou.ico from the app icon in theme._draw_brand_mark().
 
 Renders the vector mark crisply at each icon size (exact pixels, no display-DPI
 scaling), PNG-encodes each, and assembles a multi-resolution .ico (PNG-embedded
@@ -31,7 +31,7 @@ def render(size: int) -> QPixmap:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.scale(size / 128.0, size / 128.0)
-    theme._draw_voodoo_doll(painter)
+    theme._draw_brand_mark(painter)
     painter.end()
     return pixmap
 

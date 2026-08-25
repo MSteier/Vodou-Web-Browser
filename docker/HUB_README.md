@@ -22,9 +22,18 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.50.0` — pinned version
+- `1.52.0` — pinned version
 
 ## Changelog
+- **1.52.0** — Password vault overhaul: local strength analysis, a strong-
+  password generator, cross-site password-reuse detection, automatic exact-
+  duplicate cleanup, and a redesigned dashboard (Website / Website Safety /
+  Username-Email / Password / Strength / Duplicated / Last Changed columns).
+  Ask AI gained "Check this site," which grounds answers about a page's
+  safety in Vodou's own local spoofcheck/Safe Browsing/certificate checks
+  instead of the model guessing. Fixed a credential-capture race where a
+  fast post-login redirect could occasionally attribute a submitted
+  password to the wrong site.
 - **1.50.0** — Fixed a crash-loop on Linux hosts with no desktop keyring
   (Secret Service/KWallet unavailable, e.g. this VNC image): the session
   autosave and setting-protection snapshot writers only caught `OSError`

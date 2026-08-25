@@ -45,7 +45,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.51.1"
+APP_VERSION = "1.52.0"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -314,7 +314,8 @@ class AboutDialog(QDialog):
         rows.setTextFormat(Qt.TextFormat.PlainText)
         rows.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
-        rows.setStyleSheet("font-family: 'Consolas', monospace; "
+        rows.setStyleSheet("font-family: Consolas, 'JetBrains Mono', "
+                           "'Ubuntu Mono', 'DejaVu Sans Mono', monospace; "
                            "padding: 12px 4px;")
         outer.addWidget(rows)
 

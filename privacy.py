@@ -10,6 +10,7 @@ domain per line, comments with #).
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 
@@ -286,6 +287,16 @@ def google_auth_host(host: str) -> bool:
 # Hello) and NO conditional/autofill passkey UI — steering sites onto the
 # modal flow that actually works. Injected on all sites; the bug isn't
 # Google-specific (it also breaks e.g. ChatGPT's login modal).
+#
+# What the shim may claim is platform-dependent, and getting this wrong is
+# worse than not shimming at all. Windows Hello is a real user-verifying
+# platform authenticator that QtWebEngine drives correctly. On Linux there is
+# none behind QtWebEngine, so claiming one would steer sites onto the modal
+# platform flow that cannot complete — hiding the security-key path that does
+# work. The engine bug being worked around is platform-independent; only the
+# answer is not.
+_PLATFORM_AUTHENTICATOR = "true" if sys.platform == "win32" else "false"
+
 WEBAUTHN_SHIM_JS = """\
 (function () {
     "use strict";
@@ -297,8 +308,8 @@ WEBAUTHN_SHIM_JS = """\
         conditionalGet: false,
         conditionalMediation: false,
         hybridTransport: false,
-        passkeyPlatformAuthenticator: true,
-        userVerifyingPlatformAuthenticator: true,
+        passkeyPlatformAuthenticator: %PLATFORM_AUTH%,
+        userVerifyingPlatformAuthenticator: %PLATFORM_AUTH%,
         relatedOrigins: false,
         signalAllAcceptedCredentials: false,
         signalCurrentUserDetails: false,
@@ -320,7 +331,7 @@ WEBAUTHN_SHIM_JS = """\
         });
     } catch (e) {}
 })();
-"""
+""".replace("%PLATFORM_AUTH%", _PLATFORM_AUTHENTICATOR)
 
 
 # Location Guard: block the W3C Geolocation API so a page can never read your
