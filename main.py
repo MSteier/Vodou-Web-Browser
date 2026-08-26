@@ -367,8 +367,8 @@ from PyQt6.QtCore import (
     QVariantAnimation, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtGui import (
-    QAction, QActionGroup, QColor, QCursor, QDrag, QKeySequence, QPainter,
-    QShortcut,
+    QAction, QActionGroup, QColor, QCursor, QDrag, QIcon, QKeySequence,
+    QPainter, QShortcut,
 )
 from PyQt6.QtWebEngineCore import (
     QWebEngineContextMenuRequest,
@@ -5936,6 +5936,20 @@ def main() -> None:
     # A leftover profile folder means the last run ended before its exit
     # wipe (crash/kill) — shred it before the engine starts and recreates it.
     shred_dir(PROFILE_DIR)
+    if sys.platform == "win32":
+        # Running as `python`/`pythonw` (not a built .exe) means Windows has
+        # no app identity to hang a taskbar icon on, so it falls back to
+        # showing the interpreter's own icon for the grouped taskbar button
+        # — regardless of what app.setWindowIcon() below sets on the window
+        # itself. Giving the process an explicit AppUserModelID before any
+        # window exists is what makes Windows use *our* icon/identity for
+        # that taskbar button instead. Must run before QApplication().
+        import ctypes
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "Mist.Vodou.Browser.1")
+        except OSError:
+            pass
     app = QApplication(sys.argv)
     app.setApplicationName("Vodou Browser")
     # Ties the window to packaging/vodou.desktop so Linux desktops show the
@@ -5943,6 +5957,14 @@ def main() -> None:
     # WM_CLASS from argv[0] and labelling everything "main.py". Ignored on
     # Windows, where the icon comes from the executable.
     app.setDesktopFileName("vodou")
+    # Give the running app the same icon as the "Vodou Browser" shortcut
+    # (launch_vodou.vbs's .lnk points its own IconLocation at vodou.ico,
+    # but that's cosmetic for the shortcut only — the live window/taskbar
+    # icon is whatever this process sets, which defaults to Qt's icon
+    # otherwise since we run under pythonw.exe rather than a built exe).
+    ico = Path(__file__).resolve().parent / "vodou.ico"
+    if ico.exists():
+        app.setWindowIcon(QIcon(str(ico)))
     apply_theme(app)
     window = BrowserWindow()
     window.show()
