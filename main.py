@@ -974,11 +974,13 @@ class WebPage(QWebEnginePage):
 
 
 class BookmarkBar(QToolBar):
-    """A strip of the user's bookmarks under the address bar, kept in
-    alphabetical order. Being a QToolBar, it grows a '»' overflow menu on its
-    own when there are more bookmarks than fit the width."""
+    """A strip of the user's bookmarks under the address bar, in the order
+    the user has arranged them (drag a link left/right to reorder). Being a
+    QToolBar, it grows a '»' overflow menu on its own when there are more
+    bookmarks than fit the width."""
 
-    def __init__(self, bookmarks, open_url, favicon, fallback, parent=None):
+    def __init__(self, bookmarks, open_url, favicon, fallback, on_change=None,
+                 parent=None):
         super().__init__(parent)
         self.setObjectName("bookmarkBar")
         self.setMovable(False)
@@ -989,13 +991,24 @@ class BookmarkBar(QToolBar):
         self._open_url = open_url
         self._favicon = favicon        # host -> QIcon | None (captured icons)
         self._fallback = fallback      # () -> QIcon (generic globe)
+        # Called after a right-click delete / drag reorder so the owner can
+        # also refresh the bookmarked-host set / favicon cache / star button;
+        # falls back to a plain bar refresh when the caller doesn't need that.
+        self._on_change = on_change or self.refresh
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+        # Drag-to-reorder state (see eventFilter). A QToolButton for an
+        # action handles its own mouse press/release to fire the action, so
+        # a plain mousePressEvent override on the bar never sees clicks that
+        # land on a bookmark — watching each button via an event filter does.
+        self._drag_url: str | None = None
+        self._drag_start: QPoint | None = None
+        self._dragging = False
         self.refresh()
 
     def refresh(self) -> None:
         self.clear()
-        items = sorted(
-            self._bookmarks.all(),
-            key=lambda b: ((b.title or b.url).strip().lower(), b.url.lower()))
+        items = self._bookmarks.all()
         for b in items:
             host = QUrl(b.url).host().lower()
             icon = self._favicon(host) if host else None
@@ -1007,8 +1020,91 @@ class BookmarkBar(QToolBar):
             # title carrying markup can't render as rich text here.
             act = self.addAction(icon, label)
             act.setToolTip(f"{title}\n{b.url}")
+            act.setData(b.url)
             act.triggered.connect(lambda _=False, u=b.url: self._open_url(u))
+            widget = self.widgetForAction(act)
+            if widget is not None:
+                widget.installEventFilter(self)
         self.setVisible(bool(items))
+
+    def _show_context_menu(self, pos) -> None:
+        act = self.actionAt(pos)
+        url = act.data() if act is not None else None
+        if not url:
+            return
+        menu = QMenu(self)
+        menu.addAction("Delete", lambda: self._delete(url))
+        menu.exec(self.mapToGlobal(pos))
+
+    def _delete(self, url: str) -> None:
+        if self._bookmarks.remove(url):
+            self._on_change()
+
+    def _action_for_widget(self, widget) -> QAction | None:
+        for act in self.actions():
+            if self.widgetForAction(act) is widget:
+                return act
+        return None
+
+    def eventFilter(self, obj, event) -> bool:
+        et = event.type()
+        if (et == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton):
+            act = self._action_for_widget(obj)
+            if act is not None:
+                self._drag_url = act.data()
+                self._drag_start = event.globalPosition().toPoint()
+                self._dragging = False
+            return False
+        if et == QEvent.Type.MouseMove and self._drag_url is not None:
+            if not (event.buttons() & Qt.MouseButton.LeftButton):
+                return False
+            gpos = event.globalPosition().toPoint()
+            if not self._dragging:
+                if ((gpos - self._drag_start).manhattanLength()
+                        < QApplication.startDragDistance()):
+                    return False
+                self._dragging = True
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return True  # swallow so the button doesn't hover/react while dragging
+        if (et == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and self._drag_url is not None):
+            drag_url, dragging = self._drag_url, self._dragging
+            self._drag_url, self._dragging = None, False
+            self.unsetCursor()
+            if dragging:
+                self._reorder(drag_url, event.globalPosition().toPoint())
+                return True  # swallow: this was a drag, not a click
+            return False   # a plain click on the button -> opens the bookmark
+        return super().eventFilter(obj, event)
+
+    def _reorder(self, drag_url: str, global_pos: QPoint) -> None:
+        target_act = self.actionAt(self.mapFromGlobal(global_pos))
+        target_url = target_act.data() if target_act is not None else None
+        if target_url == drag_url:
+            return  # dropped back onto itself: no change
+        urls = [act.data() for act in self.actions()]
+        if drag_url not in urls:
+            return
+        urls.remove(drag_url)
+        if target_url is None or target_url not in urls:
+            urls.append(drag_url)  # dropped past the last bookmark (or empty space)
+        else:
+            idx = urls.index(target_url)
+            widget = self.widgetForAction(target_act)
+            # Drop on the left half of the target -> before it, right half -> after.
+            local_x = self.mapFromGlobal(global_pos).x()
+            before = (widget is None
+                      or local_x < widget.geometry().center().x())
+            urls.insert(idx if before else idx + 1, drag_url)
+        self._bookmarks.reorder(urls)
+        # Deferred: _on_change() rebuilds the bar (clear() destroys every
+        # QToolButton), but we're still inside the eventFilter processing
+        # this very button's mouse-release — destroying it synchronously
+        # here corrupts Qt's event dispatch mid-flight. Run it once that
+        # unwinds instead.
+        QTimer.singleShot(0, self._on_change)
 
 
 class NotifyBar(QFrame):
@@ -1937,7 +2033,8 @@ class BrowserWindow(QMainWindow):
         self._bmk_hosts: set[str] = set()
         self.bookmark_bar = BookmarkBar(
             self.bookmarks, self._open_bookmark, self.favicons.get,
-            lambda: self._bookmark_fallback)
+            lambda: self._bookmark_fallback,
+            on_change=self._bookmark_bar_edited)
 
         toolbar = QToolBar("Navigation")
         toolbar.setMovable(False)
@@ -2768,6 +2865,13 @@ class BrowserWindow(QMainWindow):
         self._bmk_hosts = self._bookmarked_hosts()
         self.favicons.prune(self._bmk_hosts)
         self.bookmark_bar.refresh()
+
+    def _bookmark_bar_edited(self) -> None:
+        """A bookmark was removed or dragged to a new position in the bar."""
+        self._bookmarks_changed()
+        view = self.current_view()
+        if view is not None:
+            self._update_star(view.url())
 
     def _go_back(self) -> None:
         view = self.current_view()

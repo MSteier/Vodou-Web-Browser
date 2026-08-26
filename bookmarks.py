@@ -118,6 +118,15 @@ class Bookmarks:
         self.add(title, url)
         return True
 
+    def reorder(self, urls: list[str]) -> None:
+        """Apply a new display order (from dragging a link in the bookmarks
+        bar). Unknown URLs in `urls` are ignored; any stored bookmark missing
+        from `urls` keeps its relative position, sorted after the known
+        ones."""
+        rank = {u: i for i, u in enumerate(urls)}
+        self._items.sort(key=lambda b: rank.get(b.url, len(rank)))
+        self._save()
+
     def add_many(self, items: list[Bookmark]) -> int:
         """Bulk-add (for import); skips duplicates & unsafe URLs."""
         added = 0
