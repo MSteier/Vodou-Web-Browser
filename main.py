@@ -975,9 +975,9 @@ class WebPage(QWebEnginePage):
 
 class BookmarkBar(QToolBar):
     """A strip of the user's bookmarks under the address bar, in the order
-    the user has arranged them (drag a link left/right to reorder). Being a
-    QToolBar, it grows a '»' overflow menu on its own when there are more
-    bookmarks than fit the width."""
+    the user has arranged them (drag a link left/right to reorder). Bookmarks
+    that don't fit the current width are tucked behind a "»" button on the
+    far right instead of just running off the edge (see _layout_overflow)."""
 
     def __init__(self, bookmarks, open_url, favicon, fallback, on_change=None,
                  parent=None):
@@ -1009,6 +1009,7 @@ class BookmarkBar(QToolBar):
     def refresh(self) -> None:
         self.clear()
         items = self._bookmarks.all()
+        self._bmk_actions: list[QAction] = []
         for b in items:
             host = QUrl(b.url).host().lower()
             icon = self._favicon(host) if host else None
@@ -1025,7 +1026,67 @@ class BookmarkBar(QToolBar):
             widget = self.widgetForAction(act)
             if widget is not None:
                 widget.installEventFilter(self)
+            self._bmk_actions.append(act)
+        # A standalone QToolBar (this one lives in a plain QVBoxLayout, not
+        # a QMainWindow toolbar area) doesn't get Qt's automatic "»" overflow
+        # button, so bookmarks that don't fit the width would otherwise just
+        # vanish off the edge. Add our own overflow button + menu and size it
+        # in _layout_overflow() once the bar has a real width.
+        self._overflow_button = QToolButton(self)
+        self._overflow_button.setText("»")
+        self._overflow_button.setToolTip("More bookmarks")
+        self._overflow_button.setAutoRaise(True)
+        self._overflow_button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._overflow_menu = QMenu(self._overflow_button)
+        self._overflow_button.setMenu(self._overflow_menu)
+        self._overflow_action = self.addWidget(self._overflow_button)
+        self._overflow_action.setVisible(False)
         self.setVisible(bool(items))
+        QTimer.singleShot(0, self._layout_overflow)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._layout_overflow()
+
+    def _layout_overflow(self) -> None:
+        """Hide trailing bookmarks that don't fit the bar's current width
+        into the "»" menu instead, so a narrow window loses access to none
+        of them."""
+        if not self._bmk_actions:
+            return
+        for act in self._bmk_actions:
+            act.setVisible(True)
+        self._overflow_action.setVisible(False)
+        self._overflow_menu.clear()
+        available = self.width()
+        if available <= 0:
+            return  # not laid out yet; refresh()'s deferred call retries
+        margins = self.contentsMargins()
+        spacing = self.layout().spacing() if self.layout() else 2
+        widths = [self.widgetForAction(act).sizeHint().width()
+                  for act in self._bmk_actions]
+        fixed = margins.left() + margins.right()
+        total = fixed + sum(widths) + spacing * (len(widths) - 1)
+        if total <= available:
+            return  # everything fits, no overflow needed
+        overflow_width = self._overflow_button.sizeHint().width() + spacing
+        budget = available - fixed - overflow_width
+        running = 0
+        fit = 0
+        for i, w in enumerate(widths):
+            step = w + (spacing if i else 0)
+            if running + step > budget:
+                break
+            running += step
+            fit += 1
+        for act in self._bmk_actions[fit:]:
+            act.setVisible(False)
+            url = act.data()
+            self._overflow_menu.addAction(
+                act.icon(), act.text(),
+                lambda _=False, u=url: self._open_url(u))
+        self._overflow_action.setVisible(fit < len(self._bmk_actions))
 
     def _show_context_menu(self, pos) -> None:
         act = self.actionAt(pos)
