@@ -90,19 +90,21 @@ check("effective: falls back to global",
 check("effective: no global, no site -> None",
       lp.effective_profile("z.com", None, sites) is None)
 
-# --- Match VPN location (ipapi.co response -> custom profile) -----------------
+# --- Match VPN location (ipwho.is response -> custom profile) -----------------
 print("\nip-geo / custom profile")
 prof = lp.from_ipgeo({
     "city": "Tokyo", "region": "Tokyo", "country_code": "JP",
-    "country_name": "Japan", "latitude": 35.68, "longitude": 139.76,
-    "timezone": "Asia/Tokyo", "currency": "JPY"})
+    "country": "Japan", "latitude": 35.68, "longitude": 139.76,
+    "timezone": {"id": "Asia/Tokyo"}, "currency": "JPY"})
 check("from_ipgeo builds custom profile",
       prof is not None and prof.key == "custom" and prof.label == "Tokyo, Japan")
 check("from_ipgeo guesses locale from country", prof.locale == "ja-JP")
 check("from_ipgeo keeps timezone/coords",
       prof.timezone == "Asia/Tokyo" and abs(prof.latitude - 35.68) < 1e-6)
-check("from_ipgeo error response -> None", lp.from_ipgeo({"error": True}) is None)
-check("from_ipgeo missing country -> None", lp.from_ipgeo({"timezone": "UTC"}) is None)
+check("from_ipgeo error response -> None",
+      lp.from_ipgeo({"success": False, "message": "reserved range"}) is None)
+check("from_ipgeo missing country -> None",
+      lp.from_ipgeo({"timezone": {"id": "UTC"}}) is None)
 # custom profile persists through save/load
 lp.CONFIG_FILE = Path(tempfile.mkdtemp()) / "location.json"
 lp.save(True, True, prof)
@@ -114,21 +116,21 @@ check("custom profile round-trips",
 # --- ipgeo_ip_info: IPv4 / IPv6 ----------------------------------------------
 print("\nip version handling")
 check("IPv4 response -> (ip, 'IPv4')",
-      lp.ipgeo_ip_info({"ip": "203.0.113.7", "version": "IPv4"})
+      lp.ipgeo_ip_info({"ip": "203.0.113.7", "type": "IPv4"})
       == ("203.0.113.7", "IPv4"))
 check("IPv6 response -> (ip, 'IPv6')",
-      lp.ipgeo_ip_info({"ip": "2001:db8::1", "version": "IPv6"})
+      lp.ipgeo_ip_info({"ip": "2001:db8::1", "type": "IPv6"})
       == ("2001:db8::1", "IPv6"))
-check("missing 'version' field -> guessed from ':' in the address",
+check("missing 'type' field -> guessed from ':' in the address",
       lp.ipgeo_ip_info({"ip": "2001:db8::2"}) == ("2001:db8::2", "IPv6"))
-check("missing 'version' field, IPv4 shape -> guessed IPv4",
+check("missing 'type' field, IPv4 shape -> guessed IPv4",
       lp.ipgeo_ip_info({"ip": "198.51.100.9"}) == ("198.51.100.9", "IPv4"))
 check("no ip field -> None", lp.ipgeo_ip_info({}) is None)
 check("from_ipgeo builds the same profile regardless of IP family", (
-    lp.from_ipgeo({"country_code": "GB", "timezone": "Europe/London",
-                    "ip": "198.51.100.9", "version": "IPv4"})
-    == lp.from_ipgeo({"country_code": "GB", "timezone": "Europe/London",
-                       "ip": "2001:db8::9", "version": "IPv6"})))
+    lp.from_ipgeo({"country_code": "GB", "timezone": {"id": "Europe/London"},
+                    "ip": "198.51.100.9", "type": "IPv4"})
+    == lp.from_ipgeo({"country_code": "GB", "timezone": {"id": "Europe/London"},
+                       "ip": "2001:db8::9", "type": "IPv6"})))
 
 # --- IP-geolocation failure classification -----------------------------------
 print("\nip-geo failure classification")
