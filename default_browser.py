@@ -97,6 +97,13 @@ def _register_windows() -> tuple[bool, str]:
         _set(winreg.HKEY_CURRENT_USER, rf"{client_key}\Capabilities",
              "Privacy-centric browser with a built-in password manager",
              "ApplicationDescription")
+        # Settings -> Apps -> Default apps reads its icon for the app list
+        # from here, NOT from the DefaultIcon key below (that one governs
+        # icons Explorer/shell resolve elsewhere). Omitting it is why Vodou
+        # used to show up in Default apps with a generic/wrong icon.
+        if icon:
+            _set(winreg.HKEY_CURRENT_USER, rf"{client_key}\Capabilities",
+                 f"{icon},0", "ApplicationIcon")
         _set(winreg.HKEY_CURRENT_USER,
              rf"{client_key}\Capabilities\URLAssociations", PROG_ID, "http")
         _set(winreg.HKEY_CURRENT_USER,
