@@ -332,27 +332,35 @@ COUNTRY_LOCALE = {
 }
 
 
-IPGEO_URL = "https://ipapi.co/json/"
+IPGEO_URL = "https://ipwho.is/"
 
 
 def from_ipgeo(data: dict) -> LocationProfile | None:
-    """Build a custom profile from an ipapi.co response, guessing the locale
-    from the country. Returns None on an error / malformed response."""
+    """Build a custom profile from an ipwho.is response, guessing the locale
+    from the country. Returns None on an error / malformed response.
+
+    ipwho.is was picked over the previous provider (ipapi.co) because
+    ipapi.co's Cloudflare bot-management challenges QtNetwork's TLS
+    handshake (a distinct fingerprint from a real browser's) and returns a
+    403 "Just a moment…" page instead of JSON — confirmed by testing the
+    exact same request through curl (Schannel, succeeds) vs QNetworkAccessManager
+    (OpenSSL or Schannel backend, both blocked) against ipapi.co. ipwho.is
+    isn't behind that kind of bot-management and answers QtNetwork directly."""
     try:
-        if data.get("error"):
+        if data.get("success") is False:
             return None
         cc = str(data.get("country_code", "")).upper()
         if not cc:
             return None
         locale, lang_name, langs, currency, meas = COUNTRY_LOCALE.get(
             cc, ("en-US", "English (United States)", ["en-US", "en"], "USD", "metric"))
-        tz = str(data.get("timezone", "") or "")
+        tz = str((data.get("timezone") or {}).get("id", "") or "")
         if not tz:
             return None
         return LocationProfile(
             key="custom",
             city=str(data.get("city", "") or "Unknown"),
-            country=str(data.get("country_name", "") or cc),
+            country=str(data.get("country", "") or cc),
             country_code=cc,
             region=str(data.get("region", "") or ""),
             latitude=float(data.get("latitude", 0.0)),
@@ -360,27 +368,27 @@ def from_ipgeo(data: dict) -> LocationProfile | None:
             accuracy=1000,
             timezone=tz,
             locale=locale, language_name=lang_name, languages=list(langs),
-            currency=str(data.get("currency", "") or currency),
+            currency=currency,
             measurement=meas)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, AttributeError):
         return None
 
 
 def ipgeo_ip_info(data: dict) -> tuple[str, str] | None:
-    """(ip, version) — "IPv4" or "IPv6" — from an ipapi.co response, or None.
+    """(ip, version) — "IPv4" or "IPv6" — from an ipwho.is response, or None.
 
     Deliberately NOT a LocationProfile field: LocationProfile is what
     save()/asdict() persist to disk, and the whole point of this function is
     a value that must never end up there — the raw public IP is used
     transiently (cache de-duplication, the confirmation dialog, diagnostics)
-    and is never written to CONFIG_FILE. ipapi.co reports whichever protocol
-    the request actually used, so IPv4 and IPv6 need no separate handling
-    here beyond reading the field it already sends.
+    and is never written to CONFIG_FILE. ipwho.is reports whichever protocol
+    the request actually used (as "type"), so IPv4 and IPv6 need no separate
+    handling here beyond reading the field it already sends.
     """
     ip = str(data.get("ip", "") or "").strip()
     if not ip:
         return None
-    version = str(data.get("version", "") or "").strip()
+    version = str(data.get("type", "") or "").strip()
     if version not in ("IPv4", "IPv6"):
         version = "IPv6" if ":" in ip else "IPv4"
     return ip, version

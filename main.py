@@ -3790,10 +3790,10 @@ class BrowserWindow(QMainWindow):
         box.setWindowTitle("Match VPN / IP location")
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(
-            "This sends one HTTPS request to ipapi.co to look up the location of "
+            "This sends one HTTPS request to ipwho.is to look up the location of "
             "your CURRENT public IP address, then emulates that region "
             "(language, geolocation & timezone).\n\n"
-            "ipapi.co will see the IP you are browsing from — so connect your "
+            "ipwho.is will see the IP you are browsing from — so connect your "
             "VPN/proxy first. This does NOT change your IP; it only makes the "
             "browser's reported region match where your IP already appears. "
             "Works the same over IPv4 or IPv6 — whichever your connection "
