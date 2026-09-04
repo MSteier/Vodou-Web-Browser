@@ -45,12 +45,19 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.52.2"
+APP_VERSION = "1.53.0"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
-_RAW_ABOUT_URL = ("https://raw.githubusercontent.com/MSteier/"
-                  "Vodou-Web-Browser/master/about.py")
+# {branch} is filled in per-checkout (see _git_branch) so the version check
+# reads the same ref that "git pull" will actually fetch. Hardcoding "master"
+# here would silently check a different branch than the one being pulled --
+# it stayed unnoticed while this checkout tracked master, but a "master"-only
+# check is wrong on a checkout that tracks any other branch (e.g. this one
+# once tracked linux-support): it can miss real updates on that branch, or
+# flag one that a --ff-only pull from the tracked branch would never bring in.
+_RAW_ABOUT_URL_TEMPLATE = ("https://raw.githubusercontent.com/MSteier/"
+                           "Vodou-Web-Browser/{branch}/about.py")
 _PYPI_JSON_URL = "https://pypi.org/pypi/PyQt6-WebEngine/json"
 
 
@@ -77,6 +84,20 @@ def _git_head() -> str:
         return ""
     head = head[:7]
     return head if all(c in "0123456789abcdef" for c in head) else ""
+
+
+def _git_branch() -> str:
+    """Name of the currently checked-out branch, read the same way as
+    _git_head (no git subprocess). Empty string for a detached HEAD or when
+    unavailable -- callers fall back to "master" in that case."""
+    git = _REPO_DIR / ".git"
+    try:
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if head.startswith("ref: refs/heads/"):
+        return head[len("ref: refs/heads/"):]
+    return ""
 
 
 GIT_COMMIT = _git_head()
@@ -199,7 +220,9 @@ class UpdateChecker(QObject):
             return  # a check is already in flight; don't stack another
         self._vodou = None
         self._engine = None
-        for url, handler in ((_RAW_ABOUT_URL, self._parse_vodou),
+        raw_about_url = _RAW_ABOUT_URL_TEMPLATE.format(
+            branch=_git_branch() or "master")
+        for url, handler in ((raw_about_url, self._parse_vodou),
                              (_PYPI_JSON_URL, self._parse_engine)):
             reply = self._nam.get(QNetworkRequest(QUrl(url)))
             self._pending += 1
@@ -334,12 +357,38 @@ class AboutDialog(QDialog):
             "pip, then re-downloads the malicious-site definitions")
         self.update_btn.clicked.connect(self._update_all)
         buttons.addWidget(self.update_btn)
+
+        # The coordinated Qt/PyQt6/WebEngine updater: resolves a compatible
+        # set, backs the current one up, stages + verifies the download, and
+        # finishes on restart with automatic rollback. Kept as its own dialog
+        # (updater_ui.py) -- see updater/ for the guarantees.
+        self.qt_update_btn = QPushButton("Qt & WebEngine…")
+        self.qt_update_btn.setToolTip(
+            "Check for a compatible Qt / PyQt6 / Qt WebEngine update, with "
+            "backup and rollback. Shows current vs. available versions and a "
+            "full diagnostics report.")
+        self.qt_update_btn.clicked.connect(self._open_qt_updater)
+        buttons.addWidget(self.qt_update_btn)
+
         buttons.addStretch()
         self.close_btn = QPushButton("Close")
         self.close_btn.setDefault(True)
         self.close_btn.clicked.connect(self.accept)
         buttons.addWidget(self.close_btn)
         outer.addLayout(buttons)
+
+    def _open_qt_updater(self) -> None:
+        """Open the coordinated Qt/PyQt6/WebEngine updater dialog. Imported
+        lazily so About stays cheap to open and a problem in the updater UI
+        can never stop the About box itself from showing."""
+        try:
+            from updater_ui import UpdatesDialog
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self, "Updater unavailable",
+                f"The Qt/WebEngine updater could not be loaded: {exc}")
+            return
+        UpdatesDialog(self).exec()
 
     # -- one-click update: Vodou (git pull), then engine (pip upgrade) ------
 

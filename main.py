@@ -1826,6 +1826,11 @@ class BrowserWindow(QMainWindow):
         self._update_recheck_timer.timeout.connect(self._update_checker.start)
         self._update_recheck_timer.start(6 * 3600 * 1000)
 
+        # Report on / recover from a coordinated Qt-stack update run by the
+        # separate helper (updater/apply.py). Deferred so it never races the
+        # first page; entirely best-effort.
+        QTimer.singleShot(1500, self._check_qt_update_state)
+
         # Optional loopback control surface for local tools (e.g. the Vodou MCP
         # server). OFF unless VODOU_ENABLE_CONTROL is set — it lets a same-machine
         # client open/navigate tabs and read blocking stats over 127.0.0.1 with a
@@ -4658,6 +4663,88 @@ class BrowserWindow(QMainWindow):
         box.exec()
         if box.clickedButton() is update:
             self.show_about()
+
+    def _check_qt_update_state(self) -> None:
+        """After a coordinated Qt/PyQt6/WebEngine update: show how it went, or
+        offer to finish a staged one / repair an interrupted one. All
+        best-effort — any problem here is swallowed."""
+        try:
+            from updater import UpdateManager
+            mgr = UpdateManager()
+            outcome = mgr.take_result()
+            pending = mgr.pending()
+        except Exception:
+            return
+
+        if outcome is not None:
+            if outcome.succeeded:
+                icon, title = (QMessageBox.Icon.Information,
+                               "Qt update applied")
+                new = outcome.new or {}
+                detail = "\n".join(f"  {k}: {v}" for k, v in new.items() if v)
+                text = (outcome.message + ("\n\n" + detail if detail else "")
+                        + "\n\nOpen ☰ → About Vodou to see the live versions.")
+            elif outcome.status == "rolled_back":
+                icon, title = (QMessageBox.Icon.Warning,
+                               "Qt update rolled back")
+                text = outcome.message
+            else:
+                icon, title = (QMessageBox.Icon.Critical,
+                               "Qt update problem")
+                text = (outcome.message + f"\n\nLog: {outcome.log_path}")
+            box = QMessageBox(self)
+            box.setIcon(icon)
+            box.setWindowTitle(title)
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            box.setText(text)
+            box.exec()
+            return
+
+        if not pending:
+            return
+        if pending.get("interrupted"):
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("Unfinished Qt update")
+            box.setText(
+                "A previous Qt/WebEngine update did not finish cleanly. "
+                "Vodou can restore the backed-up version now — it will close, "
+                "repair, and reopen.\n\nRepair now?")
+            box.setStandardButtons(QMessageBox.StandardButton.Yes
+                                   | QMessageBox.StandardButton.No)
+            box.setDefaultButton(QMessageBox.StandardButton.Yes)
+            if box.exec() == QMessageBox.StandardButton.Yes:
+                try:
+                    from updater.manager import default_relaunch
+                    mgr.spawn_apply(relaunch=default_relaunch(), resume=True)
+                    QApplication.instance().quit()
+                except Exception:
+                    pass
+        elif pending.get("phase") == "staged":
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setWindowTitle("Qt update ready")
+            box.setText(
+                "A verified Qt/WebEngine update is downloaded and ready to "
+                "install. Vodou needs to restart to finish it (with automatic "
+                "rollback if it fails).\n\nRestart and finish now?")
+            finish = box.addButton("Restart && finish",
+                                   QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+            discard = box.addButton("Discard download",
+                                    QMessageBox.ButtonRole.DestructiveRole)
+            box.setDefaultButton(finish)
+            box.exec()
+            clicked = box.clickedButton()
+            try:
+                if clicked is finish:
+                    from updater.manager import default_relaunch
+                    mgr.spawn_apply(relaunch=default_relaunch())
+                    QApplication.instance().quit()
+                elif clicked is discard:
+                    mgr.discard()
+            except Exception:
+                pass
 
     # -- plugins ----------------------------------------------------------
 

@@ -70,6 +70,14 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python tests/test_platform.py
 
+      # The coordinated Qt/PyQt6/WebEngine updater. Fully offline: PyPI, pip
+      # and the process hand-off are all stubbed; the only real work is the
+      # "does the Qt stack still import" probe.
+      - name: Updater assertions
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/test_updater.py
+
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer
         if: runner.os == 'Linux'

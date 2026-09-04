@@ -710,6 +710,44 @@ files — `raw.githubusercontent.com` (Vodou's version number) and `pypi.org`
 (the engine package index). No identifiers, telemetry, or browsing data are
 sent, and a failed check does nothing.
 
+### Coordinated Qt / PyQt6 / WebEngine updates
+
+**Help → About Vodou… → Qt & WebEngine…** opens a dedicated updater for the
+tightly-coupled toolkit stack (`updater/` package, UI in `updater_ui.py`). It
+treats PyQt6, PyQt6-WebEngine and their bundled Qt/Chromium runtime wheels as
+one dependency group and never moves a single Qt binary on its own:
+
+- **Version discovery** reads the *running* stack — `PYQT_VERSION_STR`,
+  `QT_VERSION_STR`, `qWebEngineVersion()`, `qWebEngineChromiumVersion()` and
+  the installed wheel versions — so it can tell the PyQt6 binding version from
+  the Qt version from the Qt WebEngine version from the Chromium version
+  (they are not the same number).
+- **Resolution** asks PyPI's JSON API for the stable releases whose
+  `requires_python` fits your Python, then picks the highest `PyQt6` /
+  `PyQt6-WebEngine` pair that share a version series. No version numbers are
+  hard-coded — new Qt releases are picked up automatically. Pre-releases are
+  ignored unless you tick *Include pre-release (developer) versions*.
+- **Python is a hard constraint, never changed.** If the newest release needs
+  a newer Python than you run, the updater says so and installs nothing.
+- **Backup & rollback.** Before anything is downloaded, the current wheels are
+  cached and checksum-verified so a rollback never needs the network. The new
+  set is downloaded, SHA-256-checked against PyPI, and only *staged* — the
+  live install is untouched until you restart.
+- **Restart to finish.** A detached helper (`python -m updater.apply`) waits
+  for Vodou to exit (the Qt DLLs are locked while it runs), installs the
+  verified set, imports the whole stack to confirm it works, **rolls back
+  automatically** if it doesn't, and relaunches Vodou. An interrupted run is
+  detected on the next start and offered a one-click repair.
+- **Diagnostics.** The same dialog's *Copy diagnostics* button (and
+  `python -m updater.diagnostics`) dumps Vodou / Python / PyQt6 / Qt / Qt
+  WebEngine / Chromium versions, OS, architecture, packaging method, install
+  directory and whether site-packages is writable — everything a bug report
+  needs.
+
+This updater only works from a source checkout (how Vodou is meant to run). A
+frozen/PyInstaller build is detected and refused with an explanation —
+a new Qt runtime there needs a full rebuild.
+
 ## Shortcuts
 
 | Keys | Action |
