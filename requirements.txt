@@ -1,7 +1,9 @@
 # Vodou's Python dependencies — everything else it uses is stdlib.
 # Install:  python -m pip install -r requirements.txt
 # PyQt6 / PyQt6-WebEngine pull the matching Qt6 + Chromium binaries
-# automatically. Vodou's in-app updater (About -> Update) keeps them current.
+# automatically. Vodou's in-app updater keeps them current as a compatible set
+# -- About -> "Qt & WebEngine..." (see updater/) -- resolving versions from
+# PyPI, backing up the current set, and rolling back if an update fails.
 PyQt6>=6.6
 PyQt6-WebEngine>=6.6
 cryptography>=42.0

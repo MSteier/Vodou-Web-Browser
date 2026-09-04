@@ -6,7 +6,14 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('trackers.txt', '.')],
-    hiddenimports=[],
+    # The updater is imported lazily (About -> Qt & WebEngine…); name its
+    # modules so a frozen build still bundles them -- it can at least show the
+    # diagnostics report and the "rebuild required" refusal.
+    hiddenimports=[
+        'updater', 'updater.models', 'updater.versions', 'updater.pypi',
+        'updater.compatibility', 'updater.backup', 'updater.manager',
+        'updater.apply', 'updater.diagnostics', 'updater_ui',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
