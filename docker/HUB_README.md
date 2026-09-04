@@ -22,9 +22,21 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.52.0` — pinned version
+- `1.53.0` — pinned version
 
 ## Changelog
+- **1.53.0** — New coordinated updater for the Qt stack (**About → "Qt &
+  WebEngine…"**). It treats PyQt6, PyQt6-WebEngine and their bundled Qt +
+  Chromium runtime as one dependency group: resolves a mutually compatible
+  set from PyPI, never upgrades Python or mixes incompatible versions, backs
+  up the current packages before touching anything, verifies every download
+  against PyPI's published SHA-256, and finishes on restart via a separate
+  helper that rolls back automatically and relaunches Vodou if anything
+  fails. Adds a copy-paste diagnostics report (versions, OS, packaging,
+  install directory). This image ships the updated **Qt WebEngine 6.11.2**
+  runtime. *In the container you update by pulling a newer image tag — the
+  in-app Qt updater is for source installs and reports itself unavailable
+  here.*
 - **1.52.0** — Password vault overhaul: local strength analysis, a strong-
   password generator, cross-site password-reuse detection, automatic exact-
   duplicate cleanup, and a redesigned dashboard (Website / Website Safety /
