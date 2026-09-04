@@ -107,6 +107,39 @@ check("order of the input pairs doesn't matter",
 check("empty input -> empty result", ps.group_reused([]) == {})
 
 # ---------------------------------------------------------------------------
+print("\ngroup_reused — registrable-domain suppression")
+
+# Same password, but every entry is the same site reached by different
+# hostnames -> not reuse.
+same_site = ps.group_reused(
+    [(0, "shared"), (1, "shared"), (2, "shared")],
+    {0: "apple.com", 1: "apple.com", 2: "apple.com"})
+check("shared password within one registrable domain is not flagged",
+      same_site == {})
+
+# Shared across two registrable domains -> genuine reuse, every member flagged.
+cross = ps.group_reused(
+    [(0, "shared"), (1, "shared"), (2, "shared")],
+    {0: "fisglobal.com", 1: "fisglobal.com", 2: "ebtedge.us"})
+check("shared password spanning two registrable domains flags all members",
+      cross == {0: 3, 1: 3, 2: 3})
+
+# A second, unrelated pair on distinct domains is unaffected.
+mixed = ps.group_reused(
+    [(0, "p"), (1, "p"), (2, "q"), (3, "q")],
+    {0: "a.com", 1: "a.com", 2: "b.com", 3: "c.com"})
+check("only the cross-domain group survives",
+      mixed == {2: 2, 3: 2})
+
+# Unknown/blank domain for a member doesn't manufacture a second domain.
+unknown = ps.group_reused(
+    [(0, "shared"), (1, "shared")], {0: "apple.com", 1: ""})
+check("a blank domain isn't counted as a distinct domain", unknown == {})
+
+check("no domains map -> original behavior (exact-match reuse)",
+      ps.group_reused([(0, "s"), (1, "s")]) == {0: 2, 1: 2})
+
+# ---------------------------------------------------------------------------
 print()
 if _failures:
     print(f"{len(_failures)} FAILURE(S): " + "; ".join(_failures))

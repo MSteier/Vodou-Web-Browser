@@ -126,6 +126,15 @@ def _registrable(host: str) -> tuple[str, str]:
     return host, host
 
 
+def registrable_domain(host: str) -> str:
+    """The registrable ("eTLD+1") domain of `host`, e.g. "apple.com" for
+    "idmsa.apple.com". Heuristic (see _registrable): a small built-in
+    two-level-suffix list, not a full Public Suffix List parse. A bare
+    label or empty string is returned unchanged. Used to tell "same site,
+    different hostname" apart from genuine cross-site sharing."""
+    return _registrable(host.strip().lower())[1] if host else ""
+
+
 def _script_flags(label: str) -> tuple[bool, bool, bool]:
     has_latin = has_cyr = has_grk = False
     for ch in label:

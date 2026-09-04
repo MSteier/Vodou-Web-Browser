@@ -138,18 +138,37 @@ def analyze(password: str) -> StrengthResult:
     return StrengthResult(label, bits, reasons)
 
 
-def group_reused(entries: list[tuple[int, str]]) -> dict[int, int]:
+def group_reused(entries: list[tuple[int, str]],
+                 domains: dict[int, str] | None = None) -> dict[int, int]:
     """Given (index, password) pairs -- one per saved vault entry, however
     many share the same password -- return {index: count} for every index
     whose password matches at least one other entry's. `count` is how many
     entries in total (including this one) share that exact password.
     Indices with a unique password are omitted from the result entirely,
     and a blank password is never treated as "reused" -- an absent
-    password on two different entries isn't a meaningful match."""
+    password on two different entries isn't a meaningful match.
+
+    If `domains` is given ({index: registrable domain}), a shared password
+    only counts as reuse when it spans at least two *distinct* registrable
+    domains: the same login reached through several hostnames of one site
+    (`apple.com` / `idmsa.apple.com`, a bank's bare and `online.` domains)
+    is one account, not password reuse. A group where every member maps to
+    the same domain -- or to no known domain -- is dropped entirely."""
     by_password: dict[str, list[int]] = {}
     for index, pw in entries:
         if pw:
             by_password.setdefault(pw, []).append(index)
-    return {i: len(indices)
-            for indices in by_password.values() if len(indices) > 1
-            for i in indices}
+
+    result: dict[int, int] = {}
+    for indices in by_password.values():
+        if len(indices) < 2:
+            continue
+        if domains is not None:
+            spanned = {domains.get(i) for i in indices}
+            spanned.discard(None)
+            spanned.discard("")
+            if len(spanned) < 2:
+                continue
+        for i in indices:
+            result[i] = len(indices)
+    return result

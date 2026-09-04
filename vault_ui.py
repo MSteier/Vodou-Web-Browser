@@ -47,7 +47,7 @@ from authenticator import (
 from icons import make_icon
 from importers import parse_password_csv, write_password_csv
 from safebrowsing import SafeBrowsing
-from spoofcheck import inspect as spoof_inspect
+from spoofcheck import inspect as spoof_inspect, registrable_domain
 from vault_autolock import (
     DEFAULT_VAULT_AUTOLOCK_MINUTES,
     VAULT_AUTOLOCK_OPTIONS,
@@ -655,11 +655,17 @@ class EntryDialog(QDialog):
 
     def _reused_sites(self) -> list[str]:
         """Other saved entries' sites whose password matches this field's
-        current text exactly. Empty text never counts as a match."""
+        current text exactly. Empty text never counts as a match, and
+        entries on the same registrable domain as this one are excluded —
+        the same login on another hostname of the same site isn't reuse
+        (matches the dashboard's Strength column; see _refresh)."""
         pw = self.pass_edit.text()
         if not pw:
             return []
-        return [e.site for e in self._other_entries if e.password == pw]
+        mine = registrable_domain(normalize_site(self.site_edit.text()))
+        return [e.site for e in self._other_entries
+                if e.password == pw
+                and registrable_domain(normalize_site(e.site)) != mine]
 
     def _update_strength(self) -> None:
         result = password_strength.analyze(self.pass_edit.text())
@@ -982,16 +988,28 @@ class VaultDialog(QDialog):
         revealed = self._reveal_all()
         strength_by_index = {i: password_strength.analyze(e.password)
                              for i, e in revealed}
+        # Reuse is only flagged across DIFFERENT registrable domains: one
+        # account reached through several hostnames of the same site
+        # (idmsa.apple.com / account.apple.com, a bank's bare and "online."
+        # domains) shares a password by design, not by carelessness. The
+        # {index: registrable domain} map lets group_reused drop those.
+        reg_domain_by_index = {i: registrable_domain(normalize_site(e.site))
+                               for i, e in revealed}
         reused_counts = password_strength.group_reused(
-            [(i, e.password) for i, e in revealed])
+            [(i, e.password) for i, e in revealed], reg_domain_by_index)
         # For each reused index, name the OTHER sites it's reused with (not
         # just a bare count) so the tooltip can be verified against what's
         # actually saved, rather than asking the user to take the count on
-        # faith. Cheap here: at most the vault's own entry count squared,
-        # and only for entries group_reused already flagged.
+        # faith. Only sites on a different registrable domain are listed —
+        # same-domain siblings aren't reuse and would just be noise. Cheap
+        # here: at most the vault's own entry count squared, and only for
+        # entries group_reused already flagged.
         reused_sites_by_index = {
-            i: [e2.site for j, e2 in revealed if j != i and e2.password == e.password]
+            i: [e2.site for j, e2 in revealed
+                if j != i and e2.password == e.password
+                and reg_domain_by_index[j] != reg_domain_by_index[i]]
             for i, e in revealed if i in reused_counts}
+
         # Exact-duplicate groups (site + username + password all match) --
         # a separate, stricter concern from reuse: see vault.py's
         # find_duplicate_groups docstring.
