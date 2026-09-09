@@ -532,7 +532,7 @@ Bookmarks are the one thing kept between sessions — saved as plain JSON at
     have bookmarked (under `~/.vodou/favicons/`) and pruned when a bookmark is
     removed; a bookmark with no captured icon yet shows a generic globe.
 - **▤ toolbar dropdown** and the **☰ menu → Bookmarks** submenu both list your
-  bookmarks and rebuild each time they open.
+  bookmarks alphabetically by title and rebuild each time they open.
 - **Manage bookmarks…** — a full manager to add, edit (rename / change URL),
   delete, and open bookmarks.
 - **Import** a browser's exported bookmarks HTML (Netscape format).

@@ -4589,7 +4589,8 @@ class BrowserWindow(QMainWindow):
         menu.addAction("Bookmark this page\tCtrl+D", self.toggle_bookmark)
         menu.addAction("Manage bookmarks…", self.open_bookmarks_manager)
         menu.addSeparator()
-        items = self.bookmarks.all()
+        items = sorted(self.bookmarks.all(),
+                       key=lambda b: (b.title or b.url).casefold())
         if not items:
             empty = menu.addAction("No bookmarks yet")
             empty.setEnabled(False)
