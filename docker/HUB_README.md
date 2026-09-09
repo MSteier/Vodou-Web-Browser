@@ -22,9 +22,14 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.53.0` — pinned version
+- `1.53.1` — pinned version
 
 ## Changelog
+- **1.53.1** — The **☰ menu → Bookmarks** submenu and the **▤ toolbar
+  dropdown** now list saved bookmarks alphabetically by title (case-
+  insensitively); the stored order, and bookmarks-bar drag ordering, are
+  unchanged. This build also refreshes the bundled PyQt6 / Qt WebEngine
+  runtime wheels.
 - **1.53.0** — New coordinated updater for the Qt stack (**About → "Qt &
   WebEngine…"**). It treats PyQt6, PyQt6-WebEngine and their bundled Qt +
   Chromium runtime as one dependency group: resolves a mutually compatible
