@@ -1,10 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_dynamic_libs
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=collect_dynamic_libs('c2pa'),
     datas=[('trackers.txt', '.'), ('c2pa_trust_anchors.pem', '.'),
            ('vodou.ico', '.')],
     # The updater is imported lazily (About -> Qt & WebEngine…); name its
