@@ -249,6 +249,8 @@ def build_site_safety_prompt(facts: dict) -> str:
             reason = facts.get("cert_trust_error") or "not specified"
             lines.append(
                 f"- Certificate: NOT verified/trusted ({reason}).")
+    if facts.get("cert_check_skipped"):
+        lines.append(f"- Certificate: not checked ({facts['cert_check_skipped']}).")
     spoof = facts.get("spoof")
     if spoof is not None:
         lines.append(

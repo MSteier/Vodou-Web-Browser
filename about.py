@@ -3,14 +3,14 @@
 Vodou has three independently updatable parts:
   * the app itself — this git checkout; updated with `git pull`
   * the engine — the Chromium/Qt build bundled in the PyQt6-WebEngine
-    package; updated with `pip install --upgrade`
+    package; staged and installed after exit by the coordinated updater
   * the malicious-site definitions — the local Safe Browsing host lists,
     refreshed straight from their public feeds (see safebrowsing.py)
 
 UpdateChecker discovers newer versions of the first two (GitHub raw for the
 app's APP_VERSION, PyPI's JSON API for the engine) without blocking the UI, and
-AboutDialog's single button updates all three in sequence. Both subprocesses run
-through QProcess so the UI stays responsive.
+AboutDialog's single button checks all three in sequence. Git runs through
+QProcess; the engine uses updater_ui's backup, verification and restart flow.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from PyQt6.QtWidgets import (
 
 from theme import make_app_icon
 
-APP_VERSION = "1.53.2"
+APP_VERSION = "1.53.3"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
@@ -254,7 +254,6 @@ class UpdateChecker(QObject):
 
 # Packages that carry the engine + toolkit. Upgrading PyQt6-WebEngine pulls the
 # matching Qt/Chromium binaries; PyQt6 keeps the widget layer in step.
-_ENGINE_PACKAGES = ["PyQt6", "PyQt6-WebEngine"]
 
 # How long the definitions step waits for the feeds before giving up on them.
 # SafeBrowsing.refresh() is fire-and-forget and stays silent when every feed
@@ -353,8 +352,8 @@ class AboutDialog(QDialog):
         self.update_btn = QPushButton("Update Vodou && engine…")
         self.update_btn.setToolTip(
             "One click updates every part: pulls the latest Vodou from "
-            "GitHub, upgrades the bundled Chromium engine and Qt toolkit via "
-            "pip, then re-downloads the malicious-site definitions")
+            "GitHub, offers a verified engine update on restart, then "
+            "re-downloads the malicious-site definitions")
         self.update_btn.clicked.connect(self._update_all)
         buttons.addWidget(self.update_btn)
 
@@ -377,7 +376,7 @@ class AboutDialog(QDialog):
         buttons.addWidget(self.close_btn)
         outer.addLayout(buttons)
 
-    def _open_qt_updater(self) -> None:
+    def _open_qt_updater(self):
         """Open the coordinated Qt/PyQt6/WebEngine updater dialog. Imported
         lazily so About stays cheap to open and a problem in the updater UI
         can never stop the About box itself from showing."""
@@ -388,9 +387,11 @@ class AboutDialog(QDialog):
                 self, "Updater unavailable",
                 f"The Qt/WebEngine updater could not be loaded: {exc}")
             return
-        UpdatesDialog(self).exec()
+        dialog = UpdatesDialog(self)
+        dialog.exec()
+        return dialog
 
-    # -- one-click update: Vodou (git pull), then engine (pip upgrade) ------
+    # -- app update, staged engine update, then definitions ----------------
 
     def _update_all(self) -> None:
         box = QMessageBox(self)
@@ -398,9 +399,10 @@ class AboutDialog(QDialog):
         box.setWindowTitle("Update Vodou & engine")
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(
-            "This updates every part of the browser in one go:\n\n"
+            "This checks each part of the browser for updates:\n\n"
             "1. Vodou itself — pulls the latest version from GitHub\n"
-            "2. The engine — upgrades the bundled Chromium/Qt via pip\n"
+            "2. The engine — opens the compatible-update dialog to back up "
+            "and verify the download, then install it after Vodou exits\n"
             "3. Malicious-site definitions — re-downloads the phishing and "
             "malware lists\n\n"
             "An engine update can download a few hundred MB. Vodou stays "
@@ -421,7 +423,7 @@ class AboutDialog(QDialog):
         # Real flags, so "was something applied?" never depends on matching the
         # wording of a status string.
         self._app_updated = False
-        self._engine_updated = False
+        self._engine_status = "not_checked"
         # Definitions are data, not code: they count as "something updated"
         # for the wording, but they never call for a restart.
         self._defs_updated = False
@@ -465,7 +467,7 @@ class AboutDialog(QDialog):
             self._note(
                 "Vodou app: skipped — this copy is not a git checkout. "
                 f"Get updates from {REPO_URL}")
-            self._start_pip()
+            self._start_engine()
             return
         self.status.setText("Step 1/3: updating Vodou from GitHub…")
         # --ff-only so a locally modified checkout is never merged or
@@ -480,7 +482,7 @@ class AboutDialog(QDialog):
         self._note(
             "Vodou app: could not run git — update manually from "
             f"{REPO_URL}")
-        self._start_pip()
+        self._start_engine()
 
     def _git_finished(self, exit_code: int, _status) -> None:
         self._read_output()
@@ -488,7 +490,7 @@ class AboutDialog(QDialog):
         if exit_code != 0:
             tail = (out.strip().splitlines() or ["unknown git error"])[-1]
             self._note(f"Vodou app: update FAILED — {tail}")
-            self._start_pip()
+            self._start_engine()
             return
         new_head = _git_head()
         already = "Already up to date" in out or (
@@ -496,7 +498,7 @@ class AboutDialog(QDialog):
         if already:
             self._note_already_current(
                 "Vodou app: already the current version.")
-            self._start_pip()
+            self._start_engine()
             return
         # A real update landed. Report the version change, then fetch the list
         # of commits that came in so the summary can say what actually changed.
@@ -511,7 +513,7 @@ class AboutDialog(QDialog):
         if self._git_old_head and new_head:
             self._start_git_log(self._git_old_head, new_head)
         else:
-            self._start_pip()
+            self._start_engine()
 
     # step 1b: list the commits the pull brought in ("what changed")
     def _start_git_log(self, old_head: str, new_head: str) -> None:
@@ -525,7 +527,7 @@ class AboutDialog(QDialog):
         if self._proc is None:
             return
         self._proc = None  # a missing changelog must not stop the engine step
-        self._start_pip()
+        self._start_engine()
 
     def _git_log_finished(self, _exit_code: int, _status) -> None:
         self._read_output()
@@ -538,60 +540,26 @@ class AboutDialog(QDialog):
             if extra > 0:
                 lines += f"\n   • …and {extra} more change(s)"
             self._note("What changed:\n" + lines)
-        self._start_pip()
+        self._start_engine()
 
-    # step 2: the engine
-    def _start_pip(self) -> None:
-        self.status.setText("Step 2/3: checking the Chromium engine on PyPI — "
-                            "this can take a few minutes…")
-        self._start_proc(self._pip_finished, self._pip_error,
-                         sys.executable,
-                         ["-m", "pip", "install", "--upgrade",
-                          *_ENGINE_PACKAGES])
-
-    def _pip_error(self, _error) -> None:
-        if self._proc is None:
-            return
-        self._proc = None
-        self._note(
-            "Engine: could not launch pip — update manually with:  "
-            "python -m pip install --upgrade " + " ".join(_ENGINE_PACKAGES))
-        self._start_definitions()
-
-    @staticmethod
-    def _parse_pip_installed(out: str) -> str:
-        """The engine/toolkit packages pip reports it actually installed, e.g.
-        'PyQt6-6.9.0, PyQt6-WebEngine-6.9.0'. Empty when nothing was upgraded."""
-        for line in out.splitlines():
-            line = line.strip()
-            if line.startswith("Successfully installed"):
-                tokens = line[len("Successfully installed"):].split()
-                ours = [t for t in tokens if any(
-                    t.lower().startswith(pkg.lower() + "-")
-                    for pkg in _ENGINE_PACKAGES)]
-                return ", ".join(ours or tokens)
-        return ""
-
-    def _pip_finished(self, exit_code: int, _status) -> None:
-        self._read_output()
-        out, self._proc = self._output, None
-        if exit_code != 0:
-            tail = "\n".join(out.strip().splitlines()[-4:]) or "(no output)"
-            hint = ""
-            if "CERTIFICATE_VERIFY_FAILED" in out or "SSLError" in out:
-                hint = (" This looks like your antivirus intercepting TLS; "
-                        "installing 'pip-system-certs' fixes it.")
-            self._note(
-                f"Engine: update FAILED (exit code {exit_code}).{hint}\n"
-                f"{tail}")
-            self._start_definitions()
-            return
-        installed = self._parse_pip_installed(out)
-        if installed:
-            self._engine_updated = True
-            self._note(f"Engine: UPDATED to {installed} (restart to apply).")
+    # step 2: the engine -- never install into the running Qt process
+    def _start_engine(self) -> None:
+        self.status.setText("Step 2/3: checking compatible engine updates…")
+        dialog = self._open_qt_updater()
+        if dialog is None:
+            self._engine_status = "unavailable"
+            self._note("Engine: could not open the coordinated updater.")
         else:
-            self._note_already_current("Engine: already the current version.")
+            self._engine_status = dialog.outcome
+            if self._engine_status == "applying":
+                return  # the helper owns the update; the application is quitting
+            if self._engine_status == "current":
+                self._note_already_current("Engine: already the current compatible version.")
+            elif self._engine_status == "staged":
+                self._note("Engine: download verified and staged. Use Qt & WebEngine → "
+                           "Restart & finish to install it after Vodou closes.")
+            else:
+                self._note("Engine: no update applied; see Qt & WebEngine for details.")
         self._start_definitions()
 
     # step 3: the malicious-site definitions
@@ -670,7 +638,7 @@ class AboutDialog(QDialog):
         self.status.hide()
         # Only new code needs a restart; refreshed definitions take effect at
         # once, so they must not raise the restart prompt.
-        restart_needed = self._app_updated or self._engine_updated
+        restart_needed = self._app_updated
         updated = restart_needed or self._defs_updated
         # Once anything did update, drop the "already the current version"
         # notes — they contradict the headline the user is reading.
@@ -686,8 +654,6 @@ class AboutDialog(QDialog):
         parts: list[tuple[str, bool]] = []
         if self._app_updated:
             parts.append(("Vodou", False))
-        if self._engine_updated:
-            parts.append(("the engine", False))
         if self._defs_updated:
             parts.append(("the malicious-site definitions", True))
         labels = [label for label, _ in parts]
@@ -711,10 +677,10 @@ class AboutDialog(QDialog):
             text = (f"Update applied successfully — {what} {verb} updated.\n\n"
                     f"{summary}{restart}")
         else:
-            icon, title = QMessageBox.Icon.Information, "No update needed"
-            text = ("You are already running the most current version of "
-                    f"Vodou and its engine — nothing needed updating.\n\n"
-                    f"{summary}")
+            icon = QMessageBox.Icon.Information
+            title = ("Engine update ready" if self._engine_status == "staged"
+                     else "Update check finished")
+            text = summary
         box = QMessageBox(self)
         box.setIcon(icon)
         box.setWindowTitle(title)

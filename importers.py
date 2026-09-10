@@ -38,79 +38,66 @@ _NOTE_KEYS = {"note", "notes", "comment", "comments"}
 # Leading characters that make a spreadsheet treat a cell as a formula rather
 # than text. Tab and CR count because Excel strips them before parsing.
 _FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+_ENCODING_COLUMN = "vodou_encoding"
+_ENCODING_VERSION = "apostrophe-v1"
 
 
 def _defuse_formula(value: str) -> str:
-    """Neutralise a spreadsheet formula hiding in an exported field.
-
-    Vault fields are not all self-authored: parse_password_csv imports them
-    from an arbitrary file, so a site/username/note can begin with '=' and
-    become a live formula (=HYPERLINK, =cmd|…) the moment the export is opened
-    in Excel or LibreOffice. A leading apostrophe is the standard escape.
-
-    It has to be applied to the password column too — a crafted password is as
-    good an injection vector as a crafted note — which makes the escape
-    lossy unless it is reversible. _refuse_formula is that inverse, and the
-    pair is what keeps an exported password importing back as itself.
-    """
-    return "'" + value if value.startswith(_FORMULA_LEAD) else value
+    """Escape formula cells and literal apostrophes, without losing data."""
+    if (value.startswith(("'",) + _FORMULA_LEAD)
+            or value.lstrip().startswith(_FORMULA_LEAD)):
+        return "'" + value
+    return value
 
 
 def _refuse_formula(value: str) -> str:
-    """Undo _defuse_formula: drop a leading apostrophe, but only when it is
-    shielding a formula character.
-
-    Conditioning on the *next* character is what makes this safe to run over
-    every import. A password that genuinely starts with an apostrophe ("'ok")
-    is left alone; only the exact shape this exporter produces ("'=…") is
-    unwrapped. The one value it still mangles is a password literally starting
-    "'=" in a CSV from some other tool — rare enough to accept, and the
-    alternative was exporting live formulas.
-    """
-    return (value[1:] if len(value) >= 2 and value[0] == "'"
-            and value[1] in _FORMULA_LEAD else value)
+    """Decode a cell ONLY in a row carrying our explicit encoding marker."""
+    return value[1:] if value.startswith("'") else value
 
 
-def _pick(row: dict[str, str], keys: set[str]) -> str:
+def _pick(row: dict[str, str], keys: set[str], *, encoded: bool = False) -> str:
     for header, value in row.items():
         if header and header.strip().lower() in keys and value:
-            return _refuse_formula(value.strip())[:MAX_FIELD]
+            return _refuse_formula(value) if encoded else value
     return ""
 
 
 def parse_password_csv(path: Path) -> tuple[list[Entry], int]:
     """Return (entries, skipped_count). Requires a password column."""
-    text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
-    reader = csv.DictReader(text.splitlines())
-    if not reader.fieldnames:
-        return [], 0
-
     entries: list[Entry] = []
     skipped = 0
-    for count, row in enumerate(reader):
-        if count >= MAX_ROWS:
-            break
-        password = _pick(row, _PASS_KEYS)
-        if not password:
-            skipped += 1
-            continue
-        url = _pick(row, _URL_KEYS)
-        site = normalize_site(url) if url else _pick(row, {"name", "title"})
-        if not site:
-            skipped += 1
-            continue
-        entries.append(Entry(
-            site=site,
-            username=_pick(row, _USER_KEYS),
-            password=password,
-            notes=_pick(row, _NOTE_KEYS)))
+    try:
+        # newline='' preserves CR/LF inside quoted fields. Strict decoding
+        # reports invalid input instead of silently altering a password.
+        with Path(path).open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for count, row in enumerate(reader):
+                if count >= MAX_ROWS:
+                    break
+                encoded = row.get(_ENCODING_COLUMN) == _ENCODING_VERSION
+                pick = lambda keys: _pick(row, keys, encoded=encoded)
+                password = pick(_PASS_KEYS)
+                username = pick(_USER_KEYS)
+                url = pick(_URL_KEYS)
+                site = normalize_site(url or pick({"name", "title"}))
+                notes = pick(_NOTE_KEYS)
+                # Reject overlong rows rather than save truncated credentials.
+                if (not password or not site or any(len(v) > MAX_FIELD
+                        for v in (password, username, url, site, notes))):
+                    skipped += 1
+                    continue
+                entries.append(Entry(site=site, username=username,
+                                     password=password, notes=notes))
+    except (UnicodeError, csv.Error) as error:
+        raise OSError("Invalid CSV or UTF-8 encoding; no passwords were imported.") from error
     return entries, skipped
 
 
 def write_password_csv(path: Path, entries: list[Entry]) -> None:
-    """Write entries to a CSV using the common Chrome/Edge column layout
-    (name,url,username,password,note), so the file re-imports cleanly here or
-    into another password manager.
+    """Write common login columns plus an explicit Vodou encoding marker.
+
+    Formula escaping is reversible when importing here. Other tools must
+    honor vodou_encoding to decode escaped values exactly.
 
     The passwords are written in PLAIN TEXT — this is an explicit export, and
     the caller is responsible for warning the user and for handling the file
@@ -118,11 +105,13 @@ def write_password_csv(path: Path, entries: list[Entry]) -> None:
     """
     with Path(path).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["name", "url", "username", "password", "note"])
+        writer.writerow(["name", "url", "username", "password", "note",
+                         _ENCODING_COLUMN])
         for e in entries:
             url = e.site if "://" in e.site else f"https://{e.site}"
             writer.writerow([_defuse_formula(v) for v in
-                             (e.site, url, e.username, e.password, e.notes)])
+                             (e.site, url, e.username, e.password, e.notes)]
+                            + [_ENCODING_VERSION])
 
 
 class _BookmarkHTMLParser(HTMLParser):

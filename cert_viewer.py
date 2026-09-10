@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtNetwork import QNetworkProxy
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
     QDialog,
@@ -42,6 +43,10 @@ class CertProbe:
     cipher: str | None
 
 
+class CertificateProxyUnsupported(RuntimeError):
+    """The direct TLS probe must not bypass a configured proxy."""
+
+
 def fetch_certificate(host: str, port: int = 443,
                       timeout: float = 5.0) -> CertProbe:
     try:
@@ -55,6 +60,13 @@ def fetch_certificate(host: str, port: int = 443,
 
 def _handshake(host: str, port: int, timeout: float,
                verify: bool) -> CertProbe:
+    # Python sockets do not inherit Qt's application proxy. Fail closed,
+    # including DefaultProxy (which could delegate to a proxy factory),
+    # before DNS resolution or any direct connection takes place.
+    if QNetworkProxy.applicationProxy().type() != QNetworkProxy.ProxyType.NoProxy:
+        raise CertificateProxyUnsupported(
+            "Certificate inspection is unavailable while a proxy is active; "
+            "no direct connection was made.")
     if verify:
         context = ssl.create_default_context()
     else:

@@ -35,6 +35,7 @@ from PyQt6.QtNetwork import QHostAddress, QTcpServer
 import blockstats
 
 CONTROL_FILE = Path.home() / ".vodou" / "control.json"
+MAX_REQUEST_BYTES = 64 * 1024
 
 
 class ControlError(Exception):
@@ -145,10 +146,15 @@ class ControlServer(QObject):
     def _on_new_connection(self) -> None:
         while self._server.hasPendingConnections():
             sock = self._server.nextPendingConnection()
+            sock.setReadBufferSize(MAX_REQUEST_BYTES + 1)
             buffer = bytearray()
 
             def on_ready(s=sock, b=buffer):
                 b.extend(bytes(s.readAll()))
+                if len(b) > MAX_REQUEST_BYTES:
+                    b.clear()
+                    s.abort()
+                    return
                 while b"\n" in b:
                     line, _, rest = bytes(b).partition(b"\n")
                     b.clear()
@@ -157,15 +163,26 @@ class ControlServer(QObject):
 
             sock.readyRead.connect(on_ready)
             sock.disconnected.connect(sock.deleteLater)
+            if sock.bytesAvailable():
+                on_ready()
 
     def _handle_line(self, sock, line: bytes) -> None:
+        if len(line) > MAX_REQUEST_BYTES:
+            return self._reply(sock, {"ok": False, "error": "request too large"})
         try:
             msg = json.loads(line.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):
             return self._reply(sock, {"ok": False, "error": "bad json"})
+        if not isinstance(msg, dict):
+            return self._reply(sock, {"ok": False, "error": "expected object"})
         # Constant-time token check.
-        if not secrets.compare_digest(str(msg.get("token", "")), self._token):
+        token = msg.get("token")
+        if (not isinstance(token, str) or not token.isascii()
+                or not secrets.compare_digest(token, self._token)):
             return self._reply(sock, {"ok": False, "error": "unauthorized"})
+        if (not isinstance(msg.get("cmd"), str)
+                or not isinstance(msg.get("params", {}), (dict, type(None)))):
+            return self._reply(sock, {"ok": False, "error": "invalid command or params"})
         try:
             result = dispatch(self._window, str(msg.get("cmd", "")),
                               msg.get("params"),

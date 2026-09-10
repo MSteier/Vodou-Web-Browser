@@ -91,8 +91,12 @@ default control-disabled launch. The environment itself is not included in
 the repository; each checkout installs its own dependencies.
 
 Updating Python does not change Qt WebEngine's Chromium base. The verified
-v1.53.2 Windows runtime uses Qt WebEngine 6.11.2 / Chromium 140; Qt backports
+v1.53.3 Windows runtime uses Qt WebEngine 6.11.2 / Chromium 140; Qt backports
 newer Chromium security fixes separately from changes to the base version.
+
+Only one Vodou process owns a profile at a time. Opening another shortcut or
+external link forwards to the existing window, without reopening the vault or
+wiping the active profile. This forwarding also works with remote control off.
 
 > **Behind a TLS-intercepting antivirus (e.g. Norton)?** If `pip install` fails
 > with `CERTIFICATE_VERIFY_FAILED`, run
@@ -178,7 +182,7 @@ it's not supported there.
 | Safe Browsing (local) | Navigations are checked **entirely on your device** against public phishing/malware **domain** lists — no per-URL lookup, so nothing about your browsing is ever sent out. A reported host is blocked with the same full-screen warning. See *Safe Browsing* |
 | Download manager | Every download is user-approved (no drive-by saves); executable/installer types (`.exe`, `.msi`, `.bat`, `.ps1`, `.dmg`, …) that can run code get a sterner, default-**No** warning. Approved downloads are tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
 | Clear on demand | **Ctrl+Shift+Del** (or the ☰ menu) wipes the cache (memory and disk), cookies — *including* the saved jar for allowlisted sites — this session's blocking counts, visited-link history, and every tab's back/forward memory, with a confirmation of what was cleared. Quitting is not a substitute for the cookies: exit deliberately keeps the saved cookie jar, so this is the only control that destroys it (and the only way to drop cookies without losing your open tabs) |
-| Certificate viewer | A security pill **inside** the address bar (green closed padlock = verified HTTPS, red open padlock = unencrypted, muted info dot = internal page); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store |
+| Certificate viewer | A security pill **inside** the address bar (green closed padlock = verified HTTPS, red open padlock = unencrypted, muted info dot = internal page); click it for a full certificate view: subject, SANs, issuer, validity, key, fingerprints, TLS version, with verification against the system root store. Certificate probes are disabled while a proxy is active, so neither the viewer nor the AI safety check opens a direct connection around it |
 
 The bundled list is **`trackers.txt`** in the repo (curated from
 [Peter Lowe's ad-server list](https://pgl.yoyo.org/adservers/)); it grows with
@@ -505,7 +509,11 @@ everything; **Start fresh** discards it and opens the usual home tab.
 - **Import / export** — pull passwords in from a Chrome, Edge, Firefox, Brave,
   or Bitwarden **CSV** export, or export the vault to CSV (behind a plain-text
   warning). Both live under the vault window's **Manage** menu; import is also
-  on the ☰ menu.
+  on the ☰ menu. Imports preserve password whitespace, apostrophes, and quoted
+  newlines exactly. New Vodou exports include a `vodou_encoding` column for
+  reversible spreadsheet escaping; other password managers must honor it to
+  decode escaped cells. Unmarked third-party or older CSVs are imported
+  literally, since an apostrophe could be part of the actual password.
 - Downloads always require confirmation (no silent drive-by downloads), and
   the server-suggested filename is sanitised: path components, NTFS
   alternate-data-stream colons (`report.pdf:evil.exe`), reserved device names
@@ -700,15 +708,17 @@ installed.
 
 **Help → About Vodou…** shows the app version and the live Chromium / Qt /
 PyQt / Python versions, and offers an **Update Vodou & engine** button that
-updates both parts of the browser in one click: it pulls the latest Vodou
+checks both parts of the browser: it pulls the latest Vodou
 from GitHub (`git pull --ff-only`, so a locally modified checkout is never
-silently merged), then upgrades the bundled Chromium/Qt engine via pip. When
+silently merged), then opens the coordinated engine updater. Engine updates
+are backed up, downloaded, and verified before the user chooses **Restart &
+finish**; installation runs only after Vodou exits. When
 an update is actually applied, the summary spells out **what** changed — the
 new Vodou version (e.g. `1.10.0 → 1.11.0`), a bulleted list of the changes
 that came in (read from the local git log, nothing sent anywhere), and the
-new engine package versions — and gives a clear per-part verdict: *applied
-successfully*, *partly applied*, *failed*, or *nothing needed updating*. It no
-longer reports "you're already current" when something was in fact updated.
+engine staging status — and distinguishes updates already applied from ones
+still awaiting restart. Cancelling the engine check does not report the
+engine as up to date.
 
 The footer shows the running version (click it to open the GitHub repo).
 About ten seconds after startup — and every six hours while it runs — Vodou

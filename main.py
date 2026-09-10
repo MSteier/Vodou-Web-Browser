@@ -417,7 +417,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from autofill import PROBE_JS, build_capture_script, build_fill_script
+from autofill import DOCUMENT_JS, PROBE_JS, build_capture_script, build_fill_script
 from blockstats import BlockStats
 from blockstats_ui import BlockingReportWindow
 from bookmarks import Bookmarks
@@ -453,6 +453,7 @@ import celebrate
 import content_credentials
 import setting_protection
 from remote_control import ControlServer, control_enabled
+from browser_instance import BrowserInstance
 from safebrowsing import SafeBrowsing
 from session import (
     clear_snapshot, consume_restart, load_snapshot, mark_restart,
@@ -1303,6 +1304,11 @@ class WebView(QWebEngineView):
         page.certificateError.connect(self._on_certificate_error)
         self.setPage(page)
         self._apply_settings(page.settings())
+        self.document_generation = 0
+        self.loadStarted.connect(self._document_started)
+
+    def _document_started(self) -> None:
+        self.document_generation += 1
 
     @staticmethod
     def _on_certificate_error(error) -> None:
@@ -3384,17 +3390,21 @@ class BrowserWindow(QMainWindow):
         mark_restart()                 # new instance reopens them silently
         self._restarting = True        # closeEvent keeps the snapshot
         script = str(Path(__file__).resolve())
-        # PyQt6's 3-arg startDetached returns (started, pid).
-        started, _pid = QProcess.startDetached(
-            sys.executable, [script] + sys.argv[1:], str(Path(script).parent))
-        if not started:
-            self._restarting = False   # relaunch failed — don't lose the tabs
-            QMessageBox.warning(
-                self, "Couldn't restart",
-                "Vodou couldn't relaunch itself. Please close and reopen it "
-                "to apply the change.")
-            return
+        # main() launches only after cleanup and releasing profile ownership.
+        # Starting now would forward the new process back to this instance.
+        args = [] if getattr(sys, "frozen", False) else [script]
+        self._relaunch_command = (sys.executable, args, str(Path(script).parent))
         self.close()
+
+    def _accept_launch(self, text: str) -> None:
+        """Handle a desktop/browser link forwarded by a second invocation."""
+        if text:
+            url = to_url(text)
+            if url.isValid() and url.scheme() in ("http", "https", "file"):
+                self.add_tab(url)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     @staticmethod
     def _load_pending(view: WebView | None) -> None:
@@ -5278,10 +5288,12 @@ class BrowserWindow(QMainWindow):
         }
         if host and url.scheme() == "https":
             try:
-                from cert_viewer import fetch_certificate
+                from cert_viewer import fetch_certificate, CertificateProxyUnsupported
                 probe = fetch_certificate(host, url.port(443), timeout=3.0)
                 facts["cert_trusted"] = probe.trusted
                 facts["cert_trust_error"] = probe.trust_error
+            except CertificateProxyUnsupported as error:
+                facts["cert_check_skipped"] = str(error)
             except Exception:
                 pass  # best-effort: the check still works without this one
         if host:
@@ -5553,6 +5565,9 @@ class BrowserWindow(QMainWindow):
         # trail of pages you moved through this session is dropped too.
         for view in self._views:
             view.history().clear()
+        for window in self._detached_windows:
+            window.view.history().clear()
+        self._closed_tabs.clear()
         self.statusBar().showMessage("History and memory cleared.", 6000)
         # This summary must name the *persistent* cookie jar too. Quitting
         # keeps it (closeEvent flushes it), so this is the only control that
@@ -6019,6 +6034,30 @@ class BrowserWindow(QMainWindow):
                 "No page open to fill a login on.", 3000)
             return
         url = view.url()
+        page = view.page()
+        generation = view.document_generation
+
+        def identified(document) -> None:
+            if (not self._fill_target_current(view, page, url, generation)
+                    or not isinstance(document, dict)
+                    or not isinstance(document.get("token"), str)
+                    or not document["token"]
+                    or QUrl(document.get("url", "")) != url):
+                self._on_fill_result("page-changed")
+                return
+            self._fill_document(view, page, url, generation, document["token"])
+
+        page.runJavaScript(DOCUMENT_JS, APP_WORLD, identified)
+
+    def _fill_target_current(self, view, page, url, generation) -> bool:
+        try:
+            return (view is self.current_view() and view.page() is page
+                    and view.url() == url
+                    and view.document_generation == generation)
+        except RuntimeError:  # the tab was closed while a dialog was open
+            return False
+
+    def _fill_document(self, view, page, url, generation, document_token) -> None:
         if url.scheme() != "https":
             answer = QMessageBox.warning(
                 self, "Insecure page",
@@ -6031,6 +6070,9 @@ class BrowserWindow(QMainWindow):
         if not self._unlock_vault():
             return
 
+        if not self._fill_target_current(view, page, url, generation):
+            self._on_fill_result("page-changed")
+            return
         host = url.host().removeprefix("www.")
         matches = self.vault.entries_for_host(host)  # list[(index, Entry)]
         if not matches:
@@ -6067,12 +6109,19 @@ class BrowserWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
-        # Decrypt the password only now, at the point of use.
-        script = build_fill_script(entry.username, self.vault.reveal(index))
-        view.page().runJavaScript(script, APP_WORLD, self._on_fill_result)
+        if not self._fill_target_current(view, page, url, generation):
+            self._on_fill_result("page-changed")
+            return
+        # Decrypt only after all dialogs, then also guard the renderer's
+        # document identity against a navigation racing this queued script.
+        script = build_fill_script(entry.username, self.vault.reveal(index),
+                                   expected_url=url.toString(),
+                                   document_token=document_token)
+        page.runJavaScript(script, APP_WORLD, self._on_fill_result)
 
     def _on_fill_result(self, result: str) -> None:
         messages = {
+            "page-changed": "Page changed; select autofill again on the intended page.",
             "ok": "Login filled.",
             "password-only": "Password filled (no username field found).",
             "username-only": ("Username filled — continue to the password "
@@ -6181,22 +6230,18 @@ class DetachedWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def _dispose_browser(window) -> None:
+    """Finish profile writes and destroy pages before releasing ownership."""
+    window.close()
+    for page in window.findChildren(QWebEnginePage):
+        page.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    window.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def main() -> None:
-    migrate_config_dir()
-    # Before the first write of the run — every module below assumes the
-    # directory it writes into is already private.
-    secure_config_dir()
-    # A leftover profile folder means the last run ended before its exit
-    # wipe (crash/kill) — shred it before the engine starts and recreates it.
-    shred_dir(PROFILE_DIR)
     if sys.platform == "win32":
-        # Running as `python`/`pythonw` (not a built .exe) means Windows has
-        # no app identity to hang a taskbar icon on, so it falls back to
-        # showing the interpreter's own icon for the grouped taskbar button
-        # — regardless of what app.setWindowIcon() below sets on the window
-        # itself. Giving the process an explicit AppUserModelID before any
-        # window exists is what makes Windows use *our* icon/identity for
-        # that taskbar button instead. Must run before QApplication().
         import ctypes
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
@@ -6205,26 +6250,42 @@ def main() -> None:
             pass
     app = QApplication(sys.argv)
     app.setApplicationName("Vodou Browser")
-    # Ties the window to packaging/vodou.desktop so Linux desktops show the
-    # Vodou icon in the taskbar and group its windows, instead of deriving
-    # WM_CLASS from argv[0] and labelling everything "main.py". Ignored on
-    # Windows, where the icon comes from the executable.
     app.setDesktopFileName("vodou")
-    # Give the running app the same icon as the "Vodou Browser" shortcut
-    # (launch_vodou.vbs's .lnk points its own IconLocation at vodou.ico,
-    # but that's cosmetic for the shortcut only — the live window/taskbar
-    # icon is whatever this process sets, which defaults to Qt's icon
-    # otherwise since we run under pythonw.exe rather than a built exe).
-    ico = Path(__file__).resolve().parent / "vodou.ico"
-    if ico.exists():
-        app.setWindowIcon(QIcon(str(ico)))
-    apply_theme(app)
-    window = BrowserWindow()
-    window.show()
-    code = app.exec()
-    # Engine shutdown can keep the odd cache file locked for a moment;
-    # anything skipped here is caught by the startup shred on the next run.
-    shred_dir(PROFILE_DIR)
+    instance = BrowserInstance(VAULT_DIR, app)
+    relaunch = None
+    code = 0
+    try:
+        if not instance.acquire():
+            instance.forward(_startup_url_from_argv() or "")
+            return
+        instance.listen()
+        # Only the profile owner may migrate, shred, or open shared storage.
+        migrate_config_dir()
+        secure_config_dir()
+        shred_dir(PROFILE_DIR)
+        ico = Path(__file__).resolve().parent / "vodou.ico"
+        if ico.exists():
+            app.setWindowIcon(QIcon(str(ico)))
+        apply_theme(app)
+        window = BrowserWindow()
+        window.show()
+        instance.set_handler(window._accept_launch)
+        code = app.exec()
+        relaunch = getattr(window, "_relaunch_command", None)
+        _dispose_browser(window)
+        # Keep ownership through the final wipe, before a restart can open it.
+        shred_dir(PROFILE_DIR)
+    except (OSError, ValueError) as error:
+        plain_message(None, QMessageBox.Icon.Warning, "Could not open Vodou", str(error))
+        code = 1
+    finally:
+        instance.close()
+    if relaunch:
+        started, _pid = QProcess.startDetached(*relaunch)
+        if not started:
+            plain_message(None, QMessageBox.Icon.Warning, "Could not restart Vodou",
+                          "Please reopen Vodou to apply the change. Your tab snapshot is saved.")
+            code = 1
     sys.exit(code)
 
 

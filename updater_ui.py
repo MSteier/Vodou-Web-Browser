@@ -96,6 +96,7 @@ class UpdatesDialog(QDialog):
         self._check_worker: _CheckWorker | None = None
         self._stage_worker: _StageWorker | None = None
         self._staged = False
+        self._apply_started = False
 
         outer = QVBoxLayout(self)
 
@@ -326,6 +327,19 @@ class UpdatesDialog(QDialog):
         self._update_btn.setText("Restart && finish")
         self._update_btn.setEnabled(True)
 
+    @property
+    def outcome(self) -> str:
+        if self._apply_started:
+            return "applying"
+        if self._staged:
+            return "staged"
+        if self._plan is not None:
+            if not self._plan.possible:
+                return "unavailable"
+            if not self._plan.update_available:
+                return "current"
+        return "not_applied"
+
     def _restart_and_finish(self) -> None:
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
@@ -350,6 +364,7 @@ class UpdatesDialog(QDialog):
             return
         app = QApplication.instance()
         if app is not None:
+            self._apply_started = True
             app.quit()
 
     # -- misc --------------------------------------------------------

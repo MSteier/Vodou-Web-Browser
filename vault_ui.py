@@ -1381,6 +1381,9 @@ class VaultDialog(QDialog):
             f"This writes all {count} login(s) to a CSV file with the "
             f"passwords in PLAIN TEXT — anyone who reads the file can see "
             f"them. Store it securely and delete it when done.\n\n"
+            "The export uses reversible spreadsheet escaping. Vodou restores "
+            "the exact values on import; other password managers must support "
+            "the vodou_encoding column to decode escaped values.\n\n"
             f"Continue?")
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setStandardButtons(QMessageBox.StandardButton.Yes

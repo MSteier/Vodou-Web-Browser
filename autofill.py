@@ -115,6 +115,13 @@ _HELPERS = r"""
 # screen of a multi-step login where only the username field is shown yet.
 _FILL_JS = r"""
 (function() {
+    // This runs in ApplicationWorld, so the page cannot forge the token.
+    // Check inside the renderer as well as in Python: navigation can commit
+    // after Python queues runJavaScript but before the script executes.
+    if (window.__vodouFillDocument !== %(document_token)s ||
+            location.href !== new URL(%(expected_url)s).href) {
+        return 'page-changed';
+    }
     %(helpers)s
     function setVal(el, v) {
         var setter = Object.getOwnPropertyDescriptor(
@@ -144,12 +151,26 @@ _FILL_JS = r"""
 """
 
 
-def build_fill_script(username: str, password: str) -> str:
+def build_fill_script(username: str, password: str, *,
+                      expected_url: str, document_token: str) -> str:
     return _FILL_JS % {
         "helpers": _HELPERS,
         "username": json.dumps(username),
         "password": json.dumps(password),
+        "expected_url": json.dumps(expected_url),
+        "document_token": json.dumps(document_token),
     }
+
+
+DOCUMENT_JS = r"""
+(function() {
+    if (!window.__vodouFillDocument) {
+        window.__vodouFillDocument = Array.from(
+            crypto.getRandomValues(new Uint32Array(4))).join('-');
+    }
+    return {token: window.__vodouFillDocument, url: location.href};
+})();
+"""
 
 
 # Reports what kind of login the page currently shows, so the caller can

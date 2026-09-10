@@ -78,6 +78,12 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python tests/test_updater.py
 
+      - name: Security and data-integrity regressions
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: python tests/test_review_regressions.py
+
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer
         if: runner.os == 'Linux'
