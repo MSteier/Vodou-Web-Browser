@@ -5,7 +5,8 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('trackers.txt', '.')],
+    datas=[('trackers.txt', '.'), ('c2pa_trust_anchors.pem', '.'),
+           ('vodou.ico', '.')],
     # The updater is imported lazily (About -> Qt & WebEngine…); name its
     # modules so a frozen build still bundles them -- it can at least show the
     # diagnostics report and the "rebuild required" refusal.

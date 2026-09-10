@@ -25,7 +25,7 @@ fireworks — congratulating you on the new version:
 
 **Requirements**
 
-- **Python 3.10+** (developed on 3.10)
+- **Python 3.10+** (Windows runtime verified on **3.14.7**)
 - **pip**
 - Windows, macOS, or Linux (the bundled Qt WebEngine build is platform-specific
   but installs automatically via pip)
@@ -73,6 +73,26 @@ fails to start, try `QT_QPA_PLATFORM=xcb python main.py`.
 ```bash
 python main.py
 ```
+
+**Windows — Python 3.14 and the desktop launcher.** With Python 3.14 installed,
+create a new environment from the project directory (close Vodou first if
+replacing an existing environment):
+
+```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Double-click `launch_vodou.vbs`, or point a desktop shortcut at it, to run
+without a console window. The launcher uses this checkout's `.venv`, supports
+an optional URL/file argument, and enables the loopback, token-authenticated
+control interface for local MCP tools. Run `python main.py` instead for the
+default control-disabled launch. The environment itself is not included in
+the repository; each checkout installs its own dependencies.
+
+Updating Python does not change Qt WebEngine's Chromium base. The verified
+v1.53.2 Windows runtime uses Qt WebEngine 6.11.2 / Chromium 140; Qt backports
+newer Chromium security fixes separately from changes to the base version.
 
 > **Behind a TLS-intercepting antivirus (e.g. Norton)?** If `pip install` fails
 > with `CERTIFICATE_VERIFY_FAILED`, run
