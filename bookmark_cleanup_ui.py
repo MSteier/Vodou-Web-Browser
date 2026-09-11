@@ -22,6 +22,7 @@ class BookmarkCleanupDialog(QDialog):
                        "Suspected failures are checked up to three times. Sites requesting a longer wait "
                        "are left for a later scan. Nothing is removed during scanning.")
         label.setWordWrap(True)
+        self.explanation = label
         layout.addWidget(label)
         self.status = QLabel("Ready. Local AI uses the model selected in AI settings.")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
@@ -60,6 +61,7 @@ class BookmarkCleanupDialog(QDialog):
             row.addWidget(button)
         layout.addLayout(row)
         self.finished.connect(lambda _: self._cancel())
+        self.confirmation_note = "AI suggestions can be wrong."
 
     def _start(self):
         self._cancel()
@@ -135,7 +137,7 @@ class BookmarkCleanupDialog(QDialog):
         box.setIcon(QMessageBox.Icon.Question)
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(f"Permanently remove these {len(selected)} checked bookmarks? "
-                    "AI suggestions can be wrong. Use Show Details to review the full list.")
+                    f"{self.confirmation_note} Use Show Details to review the full list.")
         box.setDetailedText("\n\n".join(f"{b.title}\n{b.url}" for b in selected))
         box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
@@ -149,3 +151,10 @@ class BookmarkCleanupDialog(QDialog):
         self.status.setText(f"Removed {removed} bookmarks. Entries edited since the scan were kept.")
         for row in range(self.table.rowCount()):
             self.table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
+        # Reflect actual store deletions in the results, not just the saved file.
+        for row in range(len(self.results) - 1, -1, -1):
+            if not self.store.contains(self.results[row].bookmark.url):
+                self.table.removeRow(row)
+                self.results.pop(row)
+        self.details.clear()
+        self._selection()

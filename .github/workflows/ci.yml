@@ -90,6 +90,12 @@ jobs:
           PYTHONUTF8: "1"
         run: python tests/test_bookmark_cleanup.py
 
+      - name: Bookmark health checks
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: python tests/test_bookmark_health.py
+
       - name: AI web search checks
         env:
           QT_QPA_PLATFORM: offscreen

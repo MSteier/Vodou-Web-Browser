@@ -579,6 +579,23 @@ Bookmarks are the one thing kept between sessions — saved as plain JSON at
   bookmarks alphabetically by title and rebuild each time they open.
 - **Manage bookmarks…** — a full manager to add, edit (rename / change URL),
   delete, and open bookmarks.
+- **Check Bookmarks…** — available directly in the bookmarks menu and manager.
+  Checks link health in a dedicated Qt worker thread, with up to **16 concurrent
+  checks** and an **8-second timeout per request** by default. Both settings are
+  adjustable in the dialog. HEAD is tried first; any failed HEAD is retried
+  with GET before the bookmark is flagged. A 429/503 response is backed off
+  and retried on the same method (honoring the server's `Retry-After` header,
+  capped at a minute) up to three attempts before giving up, so bookmarks that
+  merely share a rate-limited host aren't misreported as broken. Only failed
+  bookmarks appear, with their title, URL and reason (HTTP errors, DNS
+  failures, connection errors, timeouts, SSL errors or redirect loops). TLS
+  verification remains enabled. The progress counter shows completed
+  bookmarks. **Select all** and **Delete Selected** operate on the review
+  list; deletion requires confirmation and updates the actual bookmark store.
+  Temporary outages and login restrictions are included as failures, not
+  claims that a page is permanently gone. This check has no dependency on
+  the local-AI review feature or Ollama — use the separate AI review below
+  when a page loads but seems to have changed purpose.
 - **Manage bookmarks… → Review with local AI…** — scan existing bookmarks,
   then review the evidence before removing any. The scanner checks failures
   up to three times with a delay, follows at most five redirects, and labels

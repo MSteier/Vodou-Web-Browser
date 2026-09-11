@@ -100,6 +100,7 @@ class BookmarksManagerDialog(QDialog):
                 ("Add", self._add),
                 ("Edit", self._edit),
                 ("Delete", self._delete),
+                ("Check Bookmarks", self._check_health),
                 ("Review with local AI…", self._cleanup),
                 ("Open", self._open)):
             btn = QPushButton(label)
@@ -181,4 +182,9 @@ class BookmarksManagerDialog(QDialog):
         from bookmark_cleanup_ui import BookmarkCleanupDialog
         dialog = BookmarkCleanupDialog(self.store, self, open_url=self.open_url)
         dialog.exec()
+        self._refresh()
+
+    def _check_health(self) -> None:
+        from bookmark_health_ui import BookmarkHealthDialog
+        BookmarkHealthDialog(self.store, self, open_url=self.open_url).exec()
         self._refresh()

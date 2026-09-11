@@ -4599,6 +4599,7 @@ class BrowserWindow(QMainWindow):
         menu.clear()
         menu.addAction("Bookmark this page\tCtrl+D", self.toggle_bookmark)
         menu.addAction("Manage bookmarks…", self.open_bookmarks_manager)
+        menu.addAction("Check Bookmarks…", self.check_bookmarks)
         menu.addSeparator()
         items = sorted(self.bookmarks.all(),
                        key=lambda b: (b.title or b.url).casefold())
@@ -4612,6 +4613,15 @@ class BrowserWindow(QMainWindow):
                                self._open_in_current_or_new(QUrl(u)))
         menu.addSeparator()
         menu.addAction("Import bookmarks (.html)…", self.import_bookmarks)
+
+    def check_bookmarks(self) -> None:
+        from bookmark_health_ui import BookmarkHealthDialog
+        BookmarkHealthDialog(self.bookmarks, self,
+            open_url=lambda url: self._open_in_current_or_new(QUrl(url))).exec()
+        view = self.current_view()
+        if view is not None:
+            self._update_star(view.url())
+        self._bookmarks_changed()
 
     def open_bookmarks_manager(self) -> None:
         BookmarksManagerDialog(
