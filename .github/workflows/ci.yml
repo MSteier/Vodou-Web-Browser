@@ -84,6 +84,18 @@ jobs:
           PYTHONUTF8: "1"
         run: python tests/test_review_regressions.py
 
+      - name: Bookmark cleanup checks
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: python tests/test_bookmark_cleanup.py
+
+      - name: AI web search checks
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: python tests/test_ai_websearch.py
+
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer
         if: runner.os == 'Linux'

@@ -1,7 +1,7 @@
 """On-device AI, via a local Ollama instance: search summaries, chat, and a
 site-safety check.
 
-Vodou's search already stays on your machine (a local SearXNG instance). This
+Vodou uses a local SearXNG instance that queries upstream search engines. This
 adds three optional, on-demand features, all produced **entirely locally** by
 talking to Ollama over HTTP on 127.0.0.1:
 
@@ -13,11 +13,11 @@ talking to Ollama over HTTP on 127.0.0.1:
     it answer questions like "is this spoofed", "is it a scam", "will a
     download from here have malware" — see build_site_safety_prompt.
 
-Nothing leaves the device: SearXNG is local, Ollama is local, and Vodou is only
-a client of Ollama's HTTP API — it never changes Ollama's models, config, or
-environment, so any other tools you run against Ollama keep working unchanged.
-Plain Ask mode sends *only what you type* — no page content, URL, or history is
-attached to an ordinary question. "Check this site" is the one deliberate,
+Inference runs locally. Optional Search web sends the latest typed question to
+SearXNG and its upstream search engines, then gives the returned snippets to
+local Ollama. The conversation and browser history are not sent to search.
+Vodou never changes Ollama's models, config, or environment. With Search web
+off, Ask mode sends only the conversation to Ollama. "Check this site" is a deliberate,
 user-triggered exception: it attaches the current page's locally-computed
 safety facts (never the page's actual content) to that one chat turn, and only
 when the user explicitly asks for the check.
@@ -56,7 +56,9 @@ import re
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QUrl, pyqtSignal
-from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest, QNetworkProxy
+
+from ai_websearch import WebSearch, grounded_messages, source_footer
 
 VODOU_DIR = Path.home() / ".vodou"
 CONFIG_FILE = VODOU_DIR / "ai_search.json"
@@ -69,6 +71,8 @@ DEFAULTS = {
     "keep_alive": "5m",
     "temperature": 0.3,
     "max_turns": 12,
+    "web_search": False,
+    "web_search_url": "",
 }
 
 
@@ -345,10 +349,16 @@ class OllamaClient(QObject):
     thinking = pyqtSignal(bool)     # True while inside the model's reasoning
     finished = pyqtSignal(str)      # final visible text
     failed = pyqtSignal(str)        # human-readable error
+    status = pyqtSignal(str)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
+        self._nam.setProxy(QNetworkProxy(QNetworkProxy.ProxyType.NoProxy))
+        self._search = WebSearch(self)
+        self._search.finished.connect(self._searched)
+        self._search.failed.connect(self._fail)
+        self._sources = []
         self._reply: QNetworkReply | None = None
         self._raw = ""
         self._netbuf = b""
@@ -357,7 +367,7 @@ class OllamaClient(QObject):
 
     @property
     def busy(self) -> bool:
-        return self._reply is not None
+        return self._reply is not None or self._search.busy
 
     @staticmethod
     def _endpoint(cfg: dict) -> str | None:
@@ -401,10 +411,27 @@ class OllamaClient(QObject):
         self._start([{"role": "user",
                       "content": build_prompt(query, results)}], cfg)
 
-    def chat(self, history: list[dict], cfg: dict) -> None:
+    def chat(self, history: list[dict], cfg: dict, *, search_url=None) -> None:
         """Answer the conversation in `history` (a list of {role, content},
         ending with the user's newest question)."""
-        self._start(build_chat_messages(history, cfg), cfg)
+        if search_url and cfg.get("web_search"):
+            self.cancel()
+            if self._endpoint(cfg) is None:
+                self.failed.emit("A local Ollama endpoint is required.")
+                return
+            messages = build_chat_messages(history, cfg)
+            question = next((m['content'] for m in reversed(messages) if m['role'] == 'user'), '')
+            self._search_pending = (messages, dict(cfg))
+            self.status.emit("Searching the web through SearXNG…")
+            self._search.start(question, search_url)
+        else:
+            self._start(build_chat_messages(history, cfg), cfg)
+
+    def _searched(self, results):
+        messages, cfg = self._search_pending
+        self.status.emit("Answering with web results using your local model…")
+        self._start(grounded_messages(messages, results), cfg)
+        self._sources = results
 
     def _start(self, messages: list[dict], cfg: dict) -> None:
         self.cancel()
@@ -421,6 +448,8 @@ class OllamaClient(QObject):
                 "127.0.0.1 — fix \"endpoint\" in ai_search.json.")
             return
         req = QNetworkRequest(QUrl(endpoint + "/api/chat"))
+        req.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
+                         QNetworkRequest.RedirectPolicy.ManualRedirectPolicy)
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")
         body = json.dumps({
@@ -438,6 +467,8 @@ class OllamaClient(QObject):
         self._reply.finished.connect(self._on_finished)
 
     def cancel(self) -> None:
+        self._search.cancel()
+        self._sources = []
         if self._reply is not None:
             reply, self._reply = self._reply, None
             try:
@@ -489,12 +520,18 @@ class OllamaClient(QObject):
         if reply is None:
             return
         error = reply.error()
+        code = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         self._reply = None
         reply.deleteLater()
         if error != QNetworkReply.NetworkError.NoError and not self._got_content:
             self._fail(self._explain(error, reply.errorString()))
             return
+        if not self._got_content or (code and not 200 <= code < 300):
+            self._fail("Ollama returned no answer. Check the selected model and try again.")
+            return
         visible, _ = split_reasoning(self._raw)
+        if self._sources:
+            visible += source_footer(self._sources)
         self.finished.emit(visible)
 
     def _fail(self, message: str) -> None:

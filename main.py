@@ -1812,6 +1812,7 @@ class BrowserWindow(QMainWindow):
         self.ai_client.thinking.connect(self._on_ai_thinking)
         self.ai_client.finished.connect(self._on_ai_finished)
         self.ai_client.failed.connect(self._on_ai_failed)
+        self.ai_client.status.connect(self._set_ai_status)
         self._ai_panel = None
         self._ai_mode = "ask"                    # "ask" | "summary"
         self._ai_last: tuple[str, list] | None = None   # last summarized search
@@ -5069,13 +5070,19 @@ class BrowserWindow(QMainWindow):
         # load inside the read-only summary view.
         self._ai_text.setOpenLinks(False)
         self._ai_text.anchorClicked.connect(
-            lambda u: self.add_tab(QUrl(u)))
+            lambda u: self.add_tab(QUrl(u)) if u.scheme() in ("http", "https") else None)
 
         # Ask box. Always available, in either mode — typing a question while a
         # summary is on screen continues from that summary as a conversation.
         ask_row = QHBoxLayout()
         ask_row.setContentsMargins(10, 6, 10, 0)
         ask_row.setSpacing(6)
+        self._ai_web = QCheckBox("Search web")
+        self._ai_web.setChecked(bool(self.ai_cfg.get("web_search")))
+        self._ai_web.setToolTip("Send your latest question to SearXNG and its upstream search engines. "
+                                "The conversation and browser history are not sent to search engines.")
+        self._ai_web.toggled.connect(self._toggle_ai_web)
+        ask_row.addWidget(self._ai_web)
         self._ai_input = QLineEdit()
         self._ai_input.setObjectName("aiInput")
         self._ai_input.setPlaceholderText("Ask anything…")
@@ -5219,7 +5226,7 @@ class BrowserWindow(QMainWindow):
         if not self._ai_chat:
             self._set_ai_status(
                 f"Ask {self.ai_cfg.get('model', '')} anything — runs on your "
-                "device, and only what you type is sent to it.")
+                "device. Search web adds current results and source links.")
         self._ai_input.setFocus()
         self._ai_input.selectAll()
 
@@ -5359,7 +5366,16 @@ class BrowserWindow(QMainWindow):
             f"Asking {self.ai_cfg.get('model', '')} — on your device…")
         self._ai_stop.setEnabled(True)
         self._ai_send.setEnabled(False)
-        self.ai_client.chat(self._ai_chat, self.ai_cfg)
+        self.ai_client.chat(self._ai_chat, self.ai_cfg,
+                            search_url=self.ai_cfg.get("web_search_url") or SEARXNG_BASE)
+
+    def _toggle_ai_web(self, enabled):
+        self.ai_cfg["web_search"] = bool(enabled)
+        save_ai_config(self.ai_cfg)
+        if self.ai_client.busy:
+            self._stop_ai()
+        self._set_ai_status("Web search enabled: your latest question goes to search engines."
+                            if enabled else "Web search off: answers use local model knowledge and this chat.")
 
     def _carry_summary_into_chat(self) -> None:
         """Seed the conversation with the summary that's on screen, so the
@@ -5517,8 +5533,10 @@ class BrowserWindow(QMainWindow):
             "instance. Vodou never changes Ollama's models or settings.\n\n"
             "  • Summarize — reads the results off the local SearXNG page and "
             "sends those to Ollama.\n"
-            "  • Ask — sends only what you type. Never the page you're on, "
-            "its address, or your history.\n\n"
+            "  • Ask — sends the conversation to local Ollama. With Search web "
+            "enabled, your latest question also goes to SearXNG and upstream "
+            "search engines; results and source links inform the answer. "
+            "Browser history and open pages are not included.\n\n"
             f"Enabled:      {'yes' if cfg.get('enabled') else 'no'}\n"
             f"Model:        {cfg.get('model')}\n"
             f"Ollama URL:   {cfg.get('endpoint')}{rejected}\n"

@@ -1,5 +1,9 @@
 # Vodou Browser
 
+Version **1.54.0** adds local AI bookmark review and optional web search in chat.
+Bookmark removal always requires confirmation. **Search web** starts off and
+can be toggled beside the chat input; your choice is remembered.
+
 **by Mist Technologies** — co-authored by Claude Fable 5
 
 A privacy-centric web browser with a built-in encrypted password manager.
@@ -177,7 +181,7 @@ it's not supported there.
 | Open local files | Type a local path in the address bar and Vodou opens it. It accepts what you'd naturally type on Windows — `C:\Users\you\file.html`, a `file://` URL, forward or back slashes — and normalises it to the form the engine needs. A local page is sandboxed: it **can't reach the network or read other local files**, and web pages can't link into your filesystem |
 | Drag pages in and out | **In:** drag a **link** (or a file from the file manager) onto Vodou's **tab strip** and it opens in a new tab — dropped links pass the same deceptive-site check as anything you type, and `javascript:` payloads are refused. **Out:** drag a **Vodou tab** out of the window and drop it on another browser's tab strip (Chrome, Edge, Firefox) or the desktop, and that page opens there — the tab carries the page's URL (not cookies or login). Dragging a tab *down* still makes a Split View; dragging it *out of the window* sends it elsewhere |
 | No telemetry | Nothing about you or your browsing is ever sent anywhere. Vodou's only outbound calls of its own are the two anonymous version checks (*About & updates*) and the anonymous periodic download of the public Safe Browsing lists (*Safe Browsing*) — public files fetched by IP, carrying no identifiers and no browsing data. The optional local AI features talk only to a **local** Ollama instance, so they add no off-device traffic either |
-| Local AI (summaries + chat) | Optional, off-by-default, powered by your **own local [Ollama](https://ollama.com) instance**: the ✨ button summarizes a search-results page, and **Ctrl+Shift+A** opens the same panel as a general chat you can ask anything. Summaries are read from the local SearXNG page; chat sends only what you type — never the page, its address, or your history. SearXNG is local, Ollama is local, so nothing leaves the machine, and Vodou is only an HTTP client of Ollama and never changes its models or config. See *Local AI* |
+| Local AI (summaries + chat) | Optional, off-by-default, powered by your **own local [Ollama](https://ollama.com) instance**: the ✨ button summarizes a search-results page, and **Ctrl+Shift+A** opens the same panel as a general chat you can ask anything. Summaries are read from the local SearXNG page; chat sends only what you type — never the page, its address, or your history. Optional **Search web** sends the latest question to search engines and adds result snippets and source links; inference remains local. Vodou never changes Ollama models or settings. See *Local AI* |
 | Deceptive-site protection | Every address you navigate to is checked **locally** for look-alike (homograph), mixed-alphabet/punycode, and typosquatting imitations of well-known brands. A suspected spoof is blocked with a full-screen warning that shows the real vs. deceptive address and its un-fakeable punycode spelling. See *Deceptive-site protection* |
 | Safe Browsing (local) | Navigations are checked **entirely on your device** against public phishing/malware **domain** lists — no per-URL lookup, so nothing about your browsing is ever sent out. A reported host is blocked with the same full-screen warning. See *Safe Browsing* |
 | Download manager | Every download is user-approved (no drive-by saves); executable/installer types (`.exe`, `.msi`, `.bat`, `.ps1`, `.dmg`, …) that can run code get a sterner, default-**No** warning. Approved downloads are tracked in a Downloads panel (**Ctrl+J**) with live progress, cancel, and open-folder; the list is session-only like everything else |
@@ -317,8 +321,9 @@ update. It layers with the deceptive-site detection, which needs no list.
 
 Two optional, **on-device** features powered by your own local
 [Ollama](https://ollama.com) instance: a summary of your search results, and a
-general-purpose chat. Both keep the same privacy guarantee as the rest of
-Vodou — nothing leaves the machine.
+general-purpose chat. Inference stays on your computer. Optional **Search web**
+sends your latest question to SearXNG and its upstream search engines, then
+passes the returned snippets to local Ollama.
 
 **Setting up Ollama** (skip if you already used the Docker `--profile ai` path
 in Installation):
@@ -358,6 +363,16 @@ Type a question, press Enter, and the answer streams back. The conversation is
 multi-turn, so follow-ups keep their context; **New chat** forgets it and
 starts over.
 
+**Search web.** Check this box beside the question field for current web
+information and clickable sources. Only the latest typed question is sent to
+search engines, not the conversation, browser history, or open pages. The model
+receives up to six result snippets; it does not browse full pages autonomously.
+Search failures are reported explicitly. Uncheck it for chat without web
+retrieval. **Stop** cancels both search and model generation. SearXNG must enable
+JSON results (`search.formats: [html, json]`, already enabled in the Docker bundle).
+`web_search` saves the toggle; optional `web_search_url` overrides the configured
+SearXNG base URL, for example `http://127.0.0.1:8081`.
+
 - **Follow-ups on a summary work too:** after summarizing, just type a question
   — the summary carries into the conversation, so *"which of those looks most
   trustworthy?"* has the context it needs.
@@ -369,7 +384,8 @@ starts over.
   from the rendered SearXNG page (no SearXNG configuration needed) and sends
   them, with your query, to Ollama on `127.0.0.1`. In ask mode it sends **only
   what you type** — never the page you're on, its address, or your history.
-  SearXNG is local and Ollama is local, so nothing is transmitted off-device.
+  With Search web enabled, the latest question goes through SearXNG to upstream
+  search engines, and the returned snippets are added to the local model prompt.
   Vodou is purely an HTTP client of Ollama's API — it never changes Ollama's
   models, config, or environment, so anything else you run against Ollama keeps
   working unchanged.
@@ -563,6 +579,22 @@ Bookmarks are the one thing kept between sessions — saved as plain JSON at
   bookmarks alphabetically by title and rebuild each time they open.
 - **Manage bookmarks…** — a full manager to add, edit (rename / change URL),
   delete, and open bookmarks.
+- **Manage bookmarks… → Review with local AI…** — scan existing bookmarks,
+  then review the evidence before removing any. The scanner checks failures
+  up to three times with a delay, follows at most five redirects, and labels
+  repeated 404/410 responses as *likely* permanent. Network errors, rate limits,
+  outages, and login restrictions remain temporary or unverified; long
+  `Retry-After` requests are deferred to a later scan.
+  The Ollama model selected in AI settings compares readable page text against
+  the saved title and URL to flag replaced pages, parked domains, or soft error
+  pages. Suspected changes are checked again. These are suggestions, not proof:
+  bookmarks have no archived page baseline, and JavaScript-only or authenticated
+  pages may need manual inspection. Without Ollama, HTTP checks still work.
+  Scanning visits the websites through the application's proxy without browser
+  login cookies; AI requests stay on this computer and cannot follow redirects.
+  Results show the destination, attempts, and explanation. Nothing is checked
+  for removal automatically. Only explicitly checked entries are removed after
+  a separate confirmation, and bookmarks edited since the scan are kept.
 - **Import** a browser's exported bookmarks HTML (Netscape format).
 - Only `http`/`https` URLs are ever stored or opened — `javascript:`, `data:`,
   and `file:` are rejected, even from a tampered file or import.

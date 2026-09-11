@@ -85,6 +85,21 @@ class Bookmarks:
         self._save()
         return True
 
+    def remove_reviewed(self, reviewed: list[Bookmark]) -> int:
+        """Atomically remove only unchanged entries from a confirmed scan snapshot."""
+        selected = {(b.title, b.url) for b in reviewed}
+        remaining = [b for b in self._items if (b.title, b.url) not in selected]
+        count = len(self._items) - len(remaining)
+        if count:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps([asdict(b) for b in remaining], indent=2),
+                           encoding="utf-8")
+            tmp.replace(self.path)
+            self._items = remaining
+            self._urls = {b.url for b in remaining}
+        return count
+
     def update(self, index: int, title: str, url: str) -> bool:
         """Edit the bookmark at index. False if the index is invalid, the URL
         is an unsafe scheme, or the new URL would duplicate a *different*
