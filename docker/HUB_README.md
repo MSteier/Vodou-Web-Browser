@@ -22,9 +22,23 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.53.1` — pinned version
+- `1.54.1` — pinned version
 
 ## Changelog
+- **1.54.1** — **Manage bookmarks… → Check Bookmarks…**, a fast HEAD/GET link
+  checker that needs no AI model: only failed bookmarks are listed (HTTP
+  errors, DNS failures, timeouts, SSL errors, redirect loops), with adjustable
+  timeout and concurrency. A rate-limited or overloaded server (429/503) is
+  backed off and retried on the same method — honoring `Retry-After` — instead
+  of being hammered or misreported as broken. Also adds **Review with local
+  AI…**, which compares fetched page text against the saved title/URL via your
+  local Ollama model to flag replaced pages, parked domains, or soft error
+  pages that a status-code check alone would miss; failures are retried up to
+  three times before being shown for review, and removal always requires
+  confirmation. Local AI chat also gained an optional **Search web** toggle
+  that sends only the latest typed question through SearXNG to upstream search
+  engines for current results and source links — inference stays local, and
+  the toggle is remembered.
 - **1.53.1** — The **☰ menu → Bookmarks** submenu and the **▤ toolbar
   dropdown** now list saved bookmarks alphabetically by title (case-
   insensitively); the stored order, and bookmarks-bar drag ordering, are
