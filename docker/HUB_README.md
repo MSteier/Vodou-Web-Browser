@@ -30,9 +30,19 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.3` — pinned version
+- `1.54.4` — pinned version
 
 ## Changelog
+- **1.54.4** — Removed roughly 40 more vulnerabilities by no longer installing
+  noVNC and websockify via apt: Debian's `novnc` package hard-depends on
+  `websockify`, which drags in `python3-numpy`, `python3-redis`,
+  `python3-jwcrypto`, and Node.js — none of which noVNC's static web assets or
+  websockify's actual runtime use — plus stale duplicate copies of
+  `cryptography`/`urllib3` alongside the current ones Vodou's own dependencies
+  install. websockify is now installed via pip (same upstream project, no
+  extra baggage); noVNC's web assets are fetched directly from its pinned,
+  checksum-verified upstream release — the same v1.6.0 Debian's package
+  shipped. No functional change to the web viewer.
 - **1.54.3** — Docker Scout found 249 vulnerabilities in the 1.54.2 image, all
   in third-party OS packages and Python libraries, none in Vodou's own code.
   Root causes: the pinned `python:3.13-slim` base digest had gone stale since
