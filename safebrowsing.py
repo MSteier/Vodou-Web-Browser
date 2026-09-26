@@ -65,6 +65,10 @@ _VERDICT_CACHE_MAX = 8192
 # Never treat these as blockable even if a list is malformed.
 _NEVER = frozenset({"localhost", "localhost.localdomain"})
 
+# Distinct from any real cache value (including False, a cached "safe"
+# verdict) so a cache miss can't be confused with one.
+_MISSING = object()
+
 
 def _valid_host(host: str) -> bool:
     if not host or "." not in host or host in _NEVER:
@@ -108,6 +112,7 @@ class SafeBrowsing(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(REFRESH_INTERVAL_MS)
         self._timer.timeout.connect(self.refresh)
+        self._had_failure = False
         self._load_extra()
         self._load_cache()
 
@@ -150,8 +155,8 @@ class SafeBrowsing(QObject):
         host = host.lower().rstrip(".")
         if not host or host in _NEVER:
             return None
-        cached = self._verdicts.get(host, 0)
-        if cached != 0:
+        cached = self._verdicts.get(host, _MISSING)
+        if cached is not _MISSING:
             return cached or None            # False (safe) -> None
         verdict = self._make_verdict(host) if self._match(host) else False
         if len(self._verdicts) >= _VERDICT_CACHE_MAX:
@@ -189,6 +194,7 @@ class SafeBrowsing(QObject):
         if not sources:
             return
         self._collected = set()
+        self._had_failure = False
         self._pending = len(sources)
         for url in sources:
             req = QNetworkRequest(QUrl(url))
@@ -203,8 +209,10 @@ class SafeBrowsing(QObject):
             if reply.error() == QNetworkReply.NetworkError.NoError:
                 text = bytes(reply.readAll()).decode("utf-8", "replace")
                 self._collected |= parse_hosts(text)
+            else:
+                self._had_failure = True
         except Exception:
-            pass  # a failed feed must never disturb browsing
+            self._had_failure = True  # a failed feed must never disturb browsing
         finally:
             reply.deleteLater()
             self._pending -= 1
@@ -216,6 +224,11 @@ class SafeBrowsing(QObject):
         if not self._collected:
             return
         hosts = self._collected
+        if self._had_failure:
+            # A feed failed this cycle: merge with the existing cache rather
+            # than replacing it outright, so the failed feed's previously
+            # known-bad hosts aren't dropped from protection.
+            hosts = hosts | self._hosts
         if len(hosts) > MAX_HOSTS:
             hosts = set(islice(hosts, MAX_HOSTS))
         self._hosts = frozenset(hosts)

@@ -213,12 +213,12 @@ _CAPTURE_JS = r"""
             }
         }
         if (!pw) return;
-        var user = "";
-        for (var j = 0; j < pwIndex; j++) {
-            if (_isUserCand(inputs[j]) && inputs[j].value) {
-                user = inputs[j].value;
-            }
-        }
+        // Same field the fill path would pick (autocomplete=username/email
+        // wins over "last candidate before password"), so an intermediate
+        // field that merely looks like a username box — a referral code, a
+        // company ID — isn't captured as one just for being non-empty.
+        var userField = _pickUser(inputs, pwIndex);
+        var user = (userField && userField.value) ? userField.value : "";
         var payload = JSON.stringify({u: user, p: pw.value});
         if (payload === last) return;
         last = payload;

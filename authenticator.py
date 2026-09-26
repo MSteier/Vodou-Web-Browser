@@ -224,9 +224,16 @@ def _run_on_mta_thread(fn):
     A sidecar watcher thread keeps the native prompt in the foreground so it
     can't open behind Vodou (e.g. after the user clicks OK on the master-
     password dialog).
+
+    join() is bounded: a hung native call (key never tapped, a stuck driver)
+    must not freeze the whole GUI thread forever. The runner thread is a
+    daemon, so on timeout it's simply abandoned — this call raises instead
+    of hanging, giving the UI back to the user.
     """
     import ctypes
     import threading
+
+    CEREMONY_TIMEOUT = 120  # seconds; generous for PIN entry / touch, not infinite
 
     box: dict = {}
     stop = threading.Event()
@@ -245,8 +252,11 @@ def _run_on_mta_thread(fn):
     thread = threading.Thread(target=runner, daemon=True)
     watcher.start()
     thread.start()
-    thread.join()
+    thread.join(CEREMONY_TIMEOUT)
     stop.set()
+    if thread.is_alive():
+        raise AuthenticatorError(
+            "The security key didn't respond in time. Try again.")
     if "error" in box:
         raise box["error"]
     return box["result"]

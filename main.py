@@ -494,11 +494,24 @@ from vault_autolock import (
     save_vault_autolock_minutes,
 )
 from vault_ui import (
+    ChangeMasterDialog,
     EntryDialog,
+    GeneratePasswordDialog,
     PickEntryDialog,
+    SecurityKeysDialog,
+    UnlockDialog,
     VaultDialog,
     clear_copied_secrets,
     ensure_unlocked,
+)
+
+# Vault-related modal dialogs that should defer auto-lock while open (see
+# _autolock_vault). VaultDialog itself is deliberately non-modal, so it is
+# NOT in this tuple; only its modal children, and dialogs main.py opens
+# directly (EntryDialog, PickEntryDialog), belong here.
+_VAULT_MODAL_DIALOGS = (
+    ChangeMasterDialog, EntryDialog, GeneratePasswordDialog,
+    PickEntryDialog, SecurityKeysDialog, UnlockDialog,
 )
 
 
@@ -847,6 +860,15 @@ class WebPage(QWebEnginePage):
                 return False
             return super().acceptNavigationRequest(url, nav_type,
                                                    is_main_frame)
+
+        # Any other main-frame navigation means the interstitial (if one was
+        # showing) was left by some means other than its own Continue/Back
+        # links — a typed URL, a bookmark, toolbar Back/Forward. Clear the
+        # flag so this navigation gets a fresh check instead of being
+        # skipped forever, since it otherwise only ever resets from
+        # _handle_interstitial_choice.
+        if is_main_frame:
+            self._interstitial_active = False
 
         # Deceptive-site / Safe-Browsing check: block a main-frame navigation
         # to a look-alike / mixed-script / typosquatting host, or one on the
@@ -5737,7 +5759,7 @@ class BrowserWindow(QMainWindow):
             f"inactivity.", 4000)
 
     def _autolock_vault(self) -> None:
-        if QApplication.activeModalWidget() is not None:
+        if isinstance(QApplication.activeModalWidget(), _VAULT_MODAL_DIALOGS):
             self._vault_lock_timer.start()  # vault UI in use; retry later
             return
         if self.vault.unlocked:
@@ -6046,6 +6068,23 @@ class BrowserWindow(QMainWindow):
             index, entry = existing
             if self.vault.reveal(index) == password:
                 return
+            # Same cross-site confirmation as the fill path (line ~6137):
+            # entries_for_host matches by shared suffix, so a login saved for
+            # a shared-suffix domain (e.g. github.io) could otherwise be
+            # silently overwritten by a submit on an unrelated subdomain.
+            site = normalize_site(entry.site)
+            if host != site:
+                answer = plain_message(
+                    self, QMessageBox.Icon.Question, "Confirm update",
+                    f"This saved login was saved for “{site}”, but the "
+                    f"current page is “{host}”.\n\nIf {site} hosts pages "
+                    f"for different people (like *.github.io), this page "
+                    f"may not belong to the site the login was saved for."
+                    f"\n\nOverwrite the saved password anyway?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
             entry.password = password
             self.vault.update(index, entry)
             self.statusBar().showMessage(

@@ -45,12 +45,16 @@ class Bookmarks:
             return
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            # Drop any entry whose URL isn't a safe web scheme, even if the
-            # on-disk file was hand-edited or tampered with.
+            if not isinstance(data, list):
+                data = []
+            # Drop any entry whose URL isn't a safe web scheme, or that isn't
+            # even an object, even if the on-disk file was hand-edited or
+            # tampered with.
             self._items = [
                 Bookmark(title=str(b.get("title", ""))[:MAX_TITLE],
                          url=str(b["url"]))
-                for b in data if _is_safe_url(str(b.get("url", "")))]
+                for b in data
+                if isinstance(b, dict) and _is_safe_url(str(b.get("url", "")))]
         except (ValueError, KeyError, TypeError, OSError):
             self._items = []  # corrupt file: start clean, don't crash
         self._urls = {b.url for b in self._items}

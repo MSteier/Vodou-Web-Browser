@@ -615,6 +615,33 @@ class Vault:
         if self._fernet is None:
             raise VaultLocked()
 
+    @staticmethod
+    def _lock_down_windows_acl(path: Path) -> None:
+        """Best-effort: deny every other local account access to `path`.
+
+        secure_config_dir() treats ~/.vodou's ACL on Windows as a no-op,
+        trusting the profile's inherited ACL — not guaranteed on a shared or
+        kiosk machine, or a profile restored from another one. Strip
+        inherited entries on the vault file itself and grant only the
+        current user, matching the POSIX chmod(0o600) below: the file holds
+        the scrypt salt and Fernet ciphertext an offline attack needs.
+        """
+        import subprocess
+
+        domain = os.environ.get("USERDOMAIN", "")
+        user = os.environ.get("USERNAME", "")
+        if not user:
+            return
+        account = f"{domain}\\{user}" if domain else user
+        try:
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r",
+                 "/grant:r", f"{account}:F"],
+                capture_output=True, timeout=5, check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.SubprocessError):
+            pass
+
     def _save(self) -> None:
         self._require_unlocked()
         # Re-materialize full entries (passwords decrypted) only transiently
@@ -668,6 +695,8 @@ class Vault:
                 os.chmod(tmp, 0o600)
             except OSError:
                 pass
+        else:
+            self._lock_down_windows_acl(tmp)
         tmp.replace(self.path)
 
 
