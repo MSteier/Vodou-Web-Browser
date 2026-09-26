@@ -30,9 +30,17 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.2` — pinned version
+- `1.54.3` — pinned version
 
 ## Changelog
+- **1.54.3** — Docker Scout found 249 vulnerabilities in the 1.54.2 image, all
+  in third-party OS packages and Python libraries, none in Vodou's own code.
+  Root causes: the pinned `python:3.13-slim` base digest had gone stale since
+  it was set, freezing in since-patched Debian `perl`/`glibc`/`openssl` CVEs
+  (all 6 critical findings were here); and a reused Docker build-cache layer
+  meant `pip install` never re-resolved `cryptography`/`urllib3` to newer
+  patched releases despite floating version requirements. This build bumps
+  the base image digest and forces a clean dependency install.
 - **1.54.2** — Security and reliability fixes from a full-repo review: a
   deceptive-site warning that could get stuck disabled for the rest of a tab
   after leaving it any way other than its own buttons; a Safe Browsing cache
