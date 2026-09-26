@@ -22,9 +22,22 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.1` — pinned version
+- `1.54.2` — pinned version
 
 ## Changelog
+- **1.54.2** — Security and reliability fixes from a full-repo review: a
+  deceptive-site warning that could get stuck disabled for the rest of a tab
+  after leaving it any way other than its own buttons; a Safe Browsing cache
+  that never actually hit for known-safe sites and could lose a feed's
+  malware hosts if only one of two feeds failed to refresh; a cross-site
+  confirmation for password capture/update on shared-suffix domains (e.g.
+  `*.github.io`), matching the existing fill-time warning; vault auto-lock no
+  longer stays deferred just because an unrelated dialog is open; a hung
+  security-key ceremony can no longer freeze the whole window; the vault file
+  gets the same permission hardening on Windows that it already had on Linux;
+  a malformed bookmarks file can no longer crash startup; a TOCTOU symlink
+  race in secure delete is closed; and credential capture no longer risks
+  grabbing an unrelated form field as the username.
 - **1.54.1** — **Manage bookmarks… → Check Bookmarks…**, a fast HEAD/GET link
   checker that needs no AI model: only failed bookmarks are listed (HTTP
   errors, DNS failures, timeouts, SSL errors, redirect loops), with adjustable
