@@ -28,3 +28,23 @@ gh pr merge --squash   # or --merge, whichever matches existing history
 This was set up 2026-09-25 specifically so a dependency CVE can't land on
 either branch unnoticed — see git log around that date for the discussion if
 the reasoning here ever needs re-deriving.
+
+## Docker Hub release checklist
+
+`docker/HUB_README.md` is the source of truth for the changelog and pinned
+version, but **Docker Hub does not read it automatically** — this repo isn't
+linked via Docker Hub's Autobuild, so `docker push` never touches the
+repository description. Updating the file in git and forgetting this step is
+how the Docker Hub page went stale for several releases (still showing
+`1.50.1` pinned and an old changelog entry as of 2026-09-25, despite the git
+file being current through 1.54.2).
+
+Every version bump that gets pushed to Docker Hub needs BOTH:
+
+1. Bump `APP_VERSION` in `about.py` and add the changelog entry + new pinned
+   tag to `docker/HUB_README.md` (as usual).
+2. Build and `docker push` the new tags.
+3. **Manually paste the full contents of `docker/HUB_README.md` into Docker
+   Hub's "Full Description" field** (msteier/vodou repo → General tab → edit
+   the description). There is no API-free way to skip this, and skipping it
+   is not a bug — it's this exact known gap.
