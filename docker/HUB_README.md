@@ -30,9 +30,14 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.4` — pinned version
+- `1.54.5` — pinned version
 
 ## Changelog
+- **1.54.5** — Moved the image to Python 3.14: the base is now
+  `python:3.14-slim` (still the slim Debian variant, pinned by digest) instead
+  of `python:3.13-slim`, matching the Python the desktop app is developed and
+  tested on. The required dependency-audit check now resolves against 3.14 too,
+  so it audits the same interpreter the image ships.
 - **1.54.4** — Removed roughly 40 more vulnerabilities by no longer installing
   noVNC and websockify via apt: Debian's `novnc` package hard-depends on
   `websockify`, which drags in `python3-numpy`, `python3-redis`,
