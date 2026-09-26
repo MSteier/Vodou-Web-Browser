@@ -21,7 +21,8 @@
 FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
 
 # ---- Runtime system libraries Qt6 + bundled Chromium dlopen, PLUS the headless
-#      display stack (xvfb, a light WM, x11vnc, the noVNC web client). ----------
+#      display stack (xvfb, a light WM, x11vnc). noVNC and websockify are
+#      installed separately below, not via apt -- see that step for why. -----
 RUN apt-get update && apt-get install --no-install-recommends -y \
         libgl1 libegl1 libgbm1 libglib2.0-0 libdbus-1-3 \
         libx11-6 libx11-xcb1 libxext6 libxrender1 libxcb1 \
@@ -36,8 +37,45 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libcairo-gobject2 \
         libatk1.0-0t64 libgdk-pixbuf-2.0-0 libgtk-3-0t64 \
         fonts-dejavu-core fontconfig \
-        xvfb x11-utils fluxbox x11vnc novnc websockify socat tini \
+        xvfb x11-utils fluxbox x11vnc socat tini \
     && rm -rf /var/lib/apt/lists/*
+
+# noVNC + websockify, installed directly instead of via apt: Debian's `novnc`
+# package hard-depends on `websockify`, which in turn drags in python3-numpy,
+# python3-redis, python3-jwcrypto and nodejs -- none of which noVNC's static
+# web assets or websockify's actual runtime need, and which added ~40 CVEs to
+# the image, including stale duplicate copies of cryptography/urllib3 sitting
+# alongside the current ones pip installs below (found via Docker Scout).
+# websockify via pip is the same upstream project without Debian's extra
+# baggage; noVNC's web assets come straight from its own pinned, checksummed
+# release tarball -- the identical v1.6.0 Debian's package used to ship.
+RUN python -m pip install --no-cache-dir --disable-pip-version-check websockify
+RUN cat > /tmp/fetch_novnc.py <<'EOF' \
+    && python3 /tmp/fetch_novnc.py \
+    && rm /tmp/fetch_novnc.py
+import hashlib
+import io
+import tarfile
+import urllib.request
+
+URL = "https://github.com/novnc/noVNC/archive/refs/tags/v1.6.0.tar.gz"
+SHA256 = "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa"
+PREFIX = "noVNC-1.6.0/"
+
+data = urllib.request.urlopen(URL, timeout=30).read()
+digest = hashlib.sha256(data).hexdigest()
+if digest != SHA256:
+    raise SystemExit(f"noVNC tarball checksum mismatch: got {digest}")
+
+with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+    members = []
+    for member in tar.getmembers():
+        if member.name == PREFIX.rstrip("/") or not member.name.startswith(PREFIX):
+            continue
+        member.name = member.name[len(PREFIX):]
+        members.append(member)
+    tar.extractall("/usr/share/novnc", members=members)
+EOF
 
 # Land http://localhost:8080/ straight on the auto-connecting viewer.
 RUN printf '%s\n' \
