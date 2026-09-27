@@ -268,6 +268,10 @@ def engine_versions() -> dict[str, str]:
     info = {
         "Vodou": VERSION_DISPLAY,
         "Chromium engine": "unknown",
+        # Qt stays on one Chromium base per release but backports security
+        # fixes from newer Chrome, so the base version alone overstates how
+        # far behind Chrome the engine is on security.
+        "Security patches": "unknown",
         "Qt WebEngine": "unknown",
         "Qt": QT_VERSION_STR,
         "PyQt6": PYQT_VERSION_STR,
@@ -275,10 +279,13 @@ def engine_versions() -> dict[str, str]:
     }
     try:
         from PyQt6.QtWebEngineCore import (
+            qWebEngineChromiumSecurityPatchVersion,
             qWebEngineChromiumVersion,
             qWebEngineVersion,
         )
         info["Chromium engine"] = qWebEngineChromiumVersion()
+        info["Security patches"] = \
+            f"Chrome {qWebEngineChromiumSecurityPatchVersion()}"
         info["Qt WebEngine"] = qWebEngineVersion()
     except Exception:
         pass
