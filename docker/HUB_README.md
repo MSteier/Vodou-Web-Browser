@@ -37,7 +37,10 @@ running inside the container. Works the same on Windows, macOS, and Linux.
   `python:3.14-slim` (still the slim Debian variant, pinned by digest) instead
   of `python:3.13-slim`, matching the Python the desktop app is developed and
   tested on. The required dependency-audit check now resolves against 3.14 too,
-  so it audits the same interpreter the image ships.
+  so it audits the same interpreter the image ships. About Vodou also gained a
+  **Security patches** row: Qt WebEngine backports Chrome's security fixes onto
+  an older Chromium base, so this shows the Chrome release the engine is
+  actually patched through, next to the base Chromium version.
 - **1.54.4** — Removed roughly 40 more vulnerabilities by no longer installing
   noVNC and websockify via apt: Debian's `novnc` package hard-depends on
   `websockify`, which drags in `python3-numpy`, `python3-redis`,
