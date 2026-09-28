@@ -30,9 +30,20 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.6` — pinned version
+- `1.54.7` — pinned version
 
 ## Changelog
+- **1.54.7** — Security hardening of the image, cutting Docker Scout's findings
+  from 13 High / 19 Medium / 102 Low to 5 High / 14 Medium / 85 Low, with no
+  fixable vulnerability of any severity left. pip is now removed once the
+  dependencies are installed: even the newest pip vendors msgpack 1.1.2 and
+  setuptools 70.3.0's pkg_resources (both High), and nothing in the container
+  needs pip at runtime. The window manager is now **evilwm** instead of
+  fluxbox: fluxbox pulled in imlib2 and, through it, the libheif, librsvg, and
+  jpeg-xl image decoders (9 High/Medium CVEs), none of which anything else
+  uses. Vodou's window now has a thin border instead of a title bar; move it
+  with Alt+drag. The 5 remaining High findings are in core Debian libraries
+  (expat, libxml2, perl, zlib) that Debian hasn't fixed yet.
 - **1.54.6** — Fixed an intermittent crash in **Check Bookmarks**: freeing a
   finished link check mid-scan let Qt reuse its memory for a newer check
   before PyQt was done with the old one. On Linux (including this image) that

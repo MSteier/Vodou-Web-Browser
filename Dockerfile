@@ -37,7 +37,11 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 WORKDIR /app
 COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir --disable-pip-version-check \
-        -r requirements.txt
+        -r requirements.txt \
+    && python -m pip uninstall --yes --disable-pip-version-check pip
+# pip goes once everything is installed: nothing needs it at runtime, and it
+# vendors msgpack and setuptools' pkg_resources, which Docker Scout flags as
+# High (see docker/Dockerfile.vnc).
 
 # ---- Application source -------------------------------------------------------
 COPY . .
