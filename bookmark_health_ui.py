@@ -1,10 +1,14 @@
 """Broken-only health review dialog: plain HTTP checks, no AI or Ollama dependency."""
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (QApplication, QDialog, QDoubleSpinBox, QHBoxLayout, QHeaderView,
-                             QLabel, QMessageBox, QPushButton, QSpinBox, QTableWidget,
-                             QTableWidgetItem, QTextEdit, QVBoxLayout)
+                             QLabel, QMessageBox, QProgressBar, QPushButton, QSpinBox,
+                             QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout)
 
 from bookmark_health import DEFAULT_CONCURRENCY, DEFAULT_TIMEOUT_SECONDS, HealthCheckWorker
+
+
+def _failed(count):
+    return f'{count} failed link' + ('' if count == 1 else 's')
 
 
 class BookmarkHealthDialog(QDialog):
@@ -29,6 +33,11 @@ class BookmarkHealthDialog(QDialog):
         self.status = QLabel('Ready. Checks run in the background; no AI model is required.')
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.status)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setFormat('Not started')
+        layout.addWidget(self.progress)
         options = QHBoxLayout()
         options.addWidget(QLabel('Timeout per request (seconds):'))
         self.timeout = QDoubleSpinBox()
@@ -40,9 +49,9 @@ class BookmarkHealthDialog(QDialog):
         self.concurrency.setRange(1, 64)
         self.concurrency.setValue(DEFAULT_CONCURRENCY)
         options.addWidget(self.concurrency)
-        select_all = QPushButton('Select all')
-        select_all.clicked.connect(self._select_all)
-        options.addWidget(select_all)
+        self.select_all = QPushButton('Select all')
+        self.select_all.clicked.connect(self._select_all)
+        options.addWidget(self.select_all)
         layout.addLayout(options)
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(['Delete', 'Title', 'Reason', 'URL'])
@@ -68,16 +77,26 @@ class BookmarkHealthDialog(QDialog):
         self.stop.clicked.connect(self._stop)
         self.open = QPushButton('Open saved bookmark')
         self.open.clicked.connect(self._open)
-        self.open.setEnabled(open_url is not None)
         self.remove = QPushButton('Delete Selected…')
-        self.remove.setEnabled(False)
         self.remove.clicked.connect(self._remove)
-        close = QPushButton('Close')
-        close.clicked.connect(self.reject)
-        for button in (self.scan, self.stop, self.open, self.remove, close):
+        self.close_button = QPushButton('Close')
+        self.close_button.clicked.connect(self.reject)
+        for button in (self.scan, self.stop, self.open, self.remove, self.close_button):
             row.addWidget(button)
         layout.addLayout(row)
         self.finished.connect(lambda _: self._cancel())
+        self._set_running(False)
+
+    def _set_running(self, running):
+        """While a scan runs, only Stop scan is usable; otherwise everything but Stop scan.
+        (The window's own close button still works and cancels the scan.)"""
+        self.stop.setEnabled(running)
+        for widget in (self.scan, self.select_all, self.close_button,
+                       self.timeout, self.concurrency):
+            widget.setEnabled(not running)
+        self.open.setEnabled(not running and self.open_url is not None)
+        # Delete also needs at least one checked row; _selection() owns that rule.
+        self._selection()
 
     def _select_all(self):
         for row in range(self.table.rowCount()):
@@ -88,16 +107,15 @@ class BookmarkHealthDialog(QDialog):
         self.results = []
         self.table.setRowCount(0)
         self.details.clear()
-        self.remove.setEnabled(False)
-        self.scan.setEnabled(False)
-        self.stop.setEnabled(True)
-        self.timeout.setEnabled(False)
-        self.concurrency.setEnabled(False)
         self.checked, self.total = 0, len(self.store.all())
-        self.status.setText(f'Checked 0/{self.total} — 0 failed links')
+        self.status.setText(f'Scanning… Checked 0/{self.total} — {_failed(0)}')
+        self.progress.setRange(0, max(self.total, 1))
+        self.progress.setValue(0)
+        self.progress.setFormat('%v / %m checked (%p%)')
         worker = HealthCheckWorker(self.store.all(), QApplication.instance(),
                                    timeout=self.timeout.value(), concurrency=self.concurrency.value())
         self.scanner = worker
+        self._set_running(True)
         self.scan_error = ''
         worker.result.connect(self._result)
         worker.progress.connect(self._progress)
@@ -115,7 +133,8 @@ class BookmarkHealthDialog(QDialog):
 
     def _stop(self):
         self._cancel()
-        self._finished(f'Stopped. Checked {self.checked}/{self.total}; {len(self.results)} failed links listed.')
+        self.progress.setFormat(f'Stopped at {self.checked} / {self.total}')
+        self._finished(f'Scan stopped. Checked {self.checked}/{self.total}; {_failed(len(self.results))} listed.')
 
     def _from_current_scanner(self):
         sender = self.sender()
@@ -126,7 +145,9 @@ class BookmarkHealthDialog(QDialog):
         if not self._from_current_scanner():
             return
         self.checked, self.total = checked, total
-        self.status.setText(f'Checked {checked}/{total} — {len(self.results)} failed links')
+        self.status.setText(f'Scanning… Checked {checked}/{total} — {_failed(len(self.results))}')
+        self.progress.setRange(0, max(total, 1))
+        self.progress.setValue(checked)
 
     @pyqtSlot(str)
     def _error(self, message):
@@ -138,16 +159,25 @@ class BookmarkHealthDialog(QDialog):
         if not self._from_current_scanner():
             return
         self.scanner = None
-        self._finished(self.scan_error or
-                       f'Checked {self.checked}/{self.total} — {len(self.results)} failed links. Review before deleting.')
+        if self.scan_error:
+            self.progress.setFormat(f'Scan failed at {self.checked} / {self.total}')
+            self._finished(self.scan_error)
+            return
+        # Complete even when the last progress tick was missed, or there was nothing to check.
+        self.progress.setValue(self.progress.maximum())
+        failed = len(self.results)
+        self.progress.setFormat(f'Scan complete — {self.total} checked, {failed} failed')
+        summary = (f'Scan complete. Checked {self.checked}/{self.total} — no broken links found.'
+                   if not failed else
+                   f'Scan complete. Checked {self.checked}/{self.total} — {_failed(failed)}. '
+                   'Review before deleting.')
+        self._finished(summary)
+        # Flash the window in the taskbar if the user switched away during a long scan.
+        QApplication.alert(self)
 
     def _finished(self, message):
-        self.scan.setEnabled(True)
-        self.stop.setEnabled(False)
-        self.timeout.setEnabled(True)
-        self.concurrency.setEnabled(True)
+        self._set_running(False)
         self.status.setText(message)
-        self._selection()
 
     @pyqtSlot(object)
     def _result(self, result):
