@@ -183,6 +183,7 @@ class UpdatesDialog(QDialog):
             ("Qt", cv.qt),
             ("Qt WebEngine", cv.qt_webengine),
             ("Chromium", cv.chromium),
+            ("Security patches", f"Chrome {cv.chromium_security_patch}"),
         ]
         _fill_grid(self._current_grid, rows)
 

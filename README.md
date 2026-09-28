@@ -1,8 +1,10 @@
 # Vodou Browser
 
-Version **1.54.0** adds local AI bookmark review and optional web search in chat.
-Bookmark removal always requires confirmation. **Search web** starts off and
-can be toggled beside the chat input; your choice is remembered.
+Version **1.54.6** fixes an intermittent crash when checking bookmarks on Linux
+and shows the Chromium security-patch version in the engine updater. Recent
+releases moved the Docker images to Python 3.14 (1.54.5), added a non-AI
+bookmark link checker (1.54.1), local AI bookmark review and optional web
+search in chat (1.54.0), and a coordinated Qt / WebEngine updater (1.53.0).
 
 **by Mist Technologies** — co-authored by Claude Fable 5
 
@@ -16,7 +18,7 @@ Python + PyQt6 on Qt WebEngine (the Chromium engine).
 | ![Vodou's home page with local SearXNG search](docs/vodou-home.png) | ![Vodou browsing a live page](docs/vodou-browsing.png) |
 
 Tabs above the address bar, a security pill **inside** the address bar (green
-padlock = verified HTTPS), an alphabetical bookmarks bar with favicons, the ✦
+padlock = verified HTTPS), a bookmarks bar with favicons, the ✦
 on-device AI-summary button, and a live tracker-blocking counter + version tag
 in the footer.
 
@@ -52,7 +54,8 @@ python -m venv .venv
 # macOS / Linux:
 source .venv/bin/activate
 
-# 3. Install dependencies (PyQt6, PyQt6-WebEngine, cryptography)
+# 3. Install dependencies (PyQt6, PyQt6-WebEngine, cryptography, c2pa-python;
+#    plus fido2 on Windows and keyring on Linux)
 pip install -r requirements.txt
 ```
 
@@ -78,6 +81,23 @@ fails to start, try `QT_QPA_PLATFORM=xcb python main.py`.
 python main.py
 ```
 
+**Or run it in a browser tab (Docker).** The
+[`msteier/vodou`](https://hub.docker.com/r/msteier/vodou) image carries its own
+virtual display and a noVNC web client, so there's nothing to install but
+Docker:
+
+```bash
+docker run -p 8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
+```
+
+Then open <http://localhost:8080/>. The volume keeps your profile (bookmarks,
+vault, plugins) between runs; drop it for a disposable session. Chromium's
+sandbox is **off** by default in the container so it runs with no extra flags;
+add `--cap-add SYS_ADMIN -e QTWEBENGINE_DISABLE_SANDBOX=0` to keep it on. The
+image is built from [`docker/Dockerfile.vnc`](docker/Dockerfile.vnc), and
+[`docker/HUB_README.md`](docker/HUB_README.md) has the full details and
+changelog.
+
 **Windows — Python 3.14 and the desktop launcher.** With Python 3.14 installed,
 create a new environment from the project directory (close Vodou first if
 replacing an existing environment):
@@ -95,8 +115,10 @@ default control-disabled launch. The environment itself is not included in
 the repository; each checkout installs its own dependencies.
 
 Updating Python does not change Qt WebEngine's Chromium base. The verified
-v1.53.3 Windows runtime uses Qt WebEngine 6.11.2 / Chromium 140; Qt backports
-newer Chromium security fixes separately from changes to the base version.
+Windows runtime uses Qt WebEngine 6.11.2 on a Chromium 140 base, with security
+fixes backported through Chrome 151. About Vodou shows both numbers
+(*Chromium engine* and *Security patches*); compare the second with Chrome's
+version when judging how current the engine is.
 
 Only one Vodou process owns a profile at a time. Opening another shortcut or
 external link forwards to the existing window, without reopening the vault or
@@ -170,7 +192,7 @@ it's not supported there.
 | Block Webcam | On by default (☰ menu → Settings → Privacy & security → Block Webcam). Denies any page request for your camera at the engine level, so a site's `getUserMedia` fails without ever reaching the hardware — no JS workaround. Turn it off to be asked (Allow / Block) per site instead; takes effect on the next request, no reload needed |
 | Block Microphone | On by default (☰ menu → Settings → Privacy & security → Block Microphone). Same engine-level gate for your microphone, toggled independently of the camera. A combined camera+microphone request is atomic, so it is denied if *either* guard is on and only offered to you when both are off. Screen capture, notifications, clipboard and font access stay denied by default regardless |
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
-| Location & region emulation | ☰ menu → Settings → Privacy & security → **Location & region…** — pick a region (New York, London, Tokyo, Sydney, Paris, Berlin, Toronto, São Paulo) and sites see that region's environment, driven by one coherent **Location Profile** so nothing contradictory leaks. **Language & locale** are emulated **natively** (no script, no debug port): `navigator.language` / `navigator.languages` / `Accept-Language` live, and `Intl` date/number/currency formatting after a restart (via Chromium's `--lang`). Optionally tick **"Also emulate geolocation & timezone"** to spoof `navigator.geolocation` coordinates and the `Intl`/`Date` timezone via a script injected before page load, across frames. **Honest scope, stated in the UI:** the geolocation/timezone part is script-based — it does **not** reach web/service workers, is **detectable** by a determined site, and is **not undetectable**; nothing here changes your **IP** (use a VPN/proxy for that). A built-in Diagnostics view spells out exactly what is and isn't emulated. **Per-site overrides** (Location → **Per-site overrides…**) give chosen hosts their own geolocation & timezone — resolved per frame by hostname, so different sites can sit in different regions at once; the browser *language* stays the global setting (one profile can't vary `Accept-Language` per site without leaking across tabs). **Match VPN location** (Location → **Match VPN location…**) is an **opt-in, never-automatic** one-shot HTTPS lookup of your current public IP's region (via ipapi.co) that then emulates it — it names the service and asks first, sees only the IP you're already browsing from, and does **not** change your IP. Works the same over **IPv4 or IPv6**, whichever your connection uses. A repeat click within a few seconds reuses that lookup instead of sending another request, and tells you if it's now a **different exit IP than last time** (your VPN reconnected somewhere else) or the same one — that comparison is kept in memory for the session only, never written to disk. A failed lookup says why (timed out, rate-limited, no network, or an unrecognized response) rather than a generic error. **Honest limits:** Vodou is a browser with **no VPN client of its own** — it does not detect when a VPN connects, disconnects, or changes servers; you connect your VPN/proxy yourself (OS-level), then click the button. There is also no OS/browser **native geolocation-provider API** this can hook into (confirmed: QtWebEngine exposes none to an embedding app), so "Match VPN location" reuses the same script-based override as manual region emulation above, with the same detectability caveat. Unchecking **"Emulate a region…"** is the closest thing to "VPN disconnected" this feature has: it turns emulation off again — not "restore your real location", since Vodou never hands a site your real geolocation regardless (see *Location Guard*) |
+| Location & region emulation | ☰ menu → Settings → Privacy & security → **Location & region…** — pick a region (New York, London, Tokyo, Sydney, Paris, Berlin, Toronto, São Paulo) and sites see that region's environment, driven by one coherent **Location Profile** so nothing contradictory leaks. **Language & locale** are emulated **natively** (no script, no debug port): `navigator.language` / `navigator.languages` / `Accept-Language` live, and `Intl` date/number/currency formatting after a restart (via Chromium's `--lang`). Optionally tick **"Also emulate geolocation & timezone"** to spoof `navigator.geolocation` coordinates and the `Intl`/`Date` timezone via a script injected before page load, across frames. **Honest scope, stated in the UI:** the geolocation/timezone part is script-based — it does **not** reach web/service workers, is **detectable** by a determined site, and is **not undetectable**; nothing here changes your **IP** (use a VPN/proxy for that). A built-in Diagnostics view spells out exactly what is and isn't emulated. **Per-site overrides** (Location → **Per-site overrides…**) give chosen hosts their own geolocation & timezone — resolved per frame by hostname, so different sites can sit in different regions at once; the browser *language* stays the global setting (one profile can't vary `Accept-Language` per site without leaking across tabs). **Match VPN location** (Location → **Match VPN location…**) is an **opt-in, never-automatic** one-shot HTTPS lookup of your current public IP's region (via ipwho.is) that then emulates it — it names the service and asks first, sees only the IP you're already browsing from, and does **not** change your IP. Works the same over **IPv4 or IPv6**, whichever your connection uses. A repeat click within a few seconds reuses that lookup instead of sending another request, and tells you if it's now a **different exit IP than last time** (your VPN reconnected somewhere else) or the same one — that comparison is kept in memory for the session only, never written to disk. A failed lookup says why (timed out, rate-limited, no network, or an unrecognized response) rather than a generic error. **Honest limits:** Vodou is a browser with **no VPN client of its own** — it does not detect when a VPN connects, disconnects, or changes servers; you connect your VPN/proxy yourself (OS-level), then click the button. There is also no OS/browser **native geolocation-provider API** this can hook into (confirmed: QtWebEngine exposes none to an embedding app), so "Match VPN location" reuses the same script-based override as manual region emulation above, with the same detectability caveat. Unchecking **"Emulate a region…"** is the closest thing to "VPN disconnected" this feature has: it turns emulation off again — not "restore your real location", since Vodou never hands a site your real geolocation regardless (see *Location Guard*) |
 | Content Credentials (C2PA) | Right-click any image → **Check content credentials** to verify its provenance **on your device** (nothing leaves the machine): who signed it, when, whether the credential declares it **AI/algorithmically generated**, and whether it's **untampered**. Signer trust is checked against the bundled official **C2PA trust list**, so "Verified — trusted signer" means the issuer is vetted, while a valid-but-unlisted signer is flagged as caution. This is honest provenance, **not a deepfake detector**: it can only check media that *carries* a credential, and "no credential" means **unknown, never authentic**. Powered by the official Content Authenticity Initiative library |
 | Private search | Local SearXNG instance (`https://localhost/searxng`) is the default start page and search engine — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
 | Start page, startup page & search engine | All yours to change (☰ menu → Settings → Start page & search). **Set start page…** picks the page new tabs and the Home button open (blank restores the private SearXNG page). **Set startup page…** picks the page a fresh *launch* opens, independently of new tabs (blank = open your start page on launch too). **Search engine** chooses where address-bar searches go — SearXNG (local, keeps queries on your machine) or an external service (DuckDuckGo, Startpage, Brave, Google), plus a **Custom…** template. Choosing an external engine sends your searches to that service; the SearXNG default keeps them local. Start page, startup page, and search engine are all integrity-signed, so adware can't silently hijack them |
@@ -363,6 +385,13 @@ Type a question, press Enter, and the answer streams back. The conversation is
 multi-turn, so follow-ups keep their context; **New chat** forgets it and
 starts over.
 
+**Check this site.** ☰ → *Check this site's safety…* (or the **Check this
+site** button in the panel) runs Vodou's own local checks on the current page —
+deceptive-address detection, Safe Browsing, and the certificate — and asks the
+model to explain the result in plain language. The answer is grounded in those
+checks rather than the model's guess, and page content isn't attached to
+ordinary chat.
+
 **Search web.** Check this box beside the question field for current web
 information and clickable sources. Only the latest typed question is sent to
 search engines, not the conversation, browser history, or open pages. The model
@@ -465,7 +494,18 @@ everything; **Start fresh** discards it and opens the usual home tab.
   written to disk unencrypted, and a forgotten master password is
   unrecoverable by design.
 - **🗄 / Ctrl+Shift+V** — open the vault: add, edit, delete, copy entries,
-  and generate strong random passwords (`secrets` module). The vault is an
+  and generate strong random passwords (`secrets` module) with **Generate
+  password** — pick the length (4–64) and which of letters, numbers, and
+  punctuation to use, with a live strength rating.
+- **The vault dashboard** lists every login in columns — **Website**,
+  **Website Safety** (Vodou's local deceptive-site and Safe Browsing checks for
+  that site), **Username/Email**, **Password** (hidden; click to reveal),
+  **Strength**, **Duplicated**, and **Last Changed**. *Strength* rates each
+  password and flags one as **Reused** when the same password is saved for a
+  *different* site (logins on the same registrable domain don't count).
+  *Duplicated* marks the same login saved more than once — same site,
+  username, *and* password; **Manage → Remove duplicate logins…** keeps one copy
+  of each after asking. The vault is an
   ordinary window, not a modal dialog — it stays usable alongside the
   browser and other apps, drops behind when you click elsewhere, and
   returns via its taskbar button. Everyday actions sit up front (add / edit /
@@ -516,7 +556,9 @@ everything; **Start fresh** discards it and opens the usual home tab.
   type `RESET` first and erases every saved login permanently, so keep an
   encrypted CSV export somewhere safe if that matters to you.
 - Copied passwords are wiped from the clipboard after 30 seconds.
-- The vault auto-locks after 5 minutes of inactivity; because the vault
+- The vault auto-locks after **5 minutes** of inactivity by default; **Manage →
+  Auto-lock vault** offers 5 minutes, 2 hours, 1 day, or 1 week instead (saved
+  as `vault_autolock_minutes` in `~/.vodou/config.json`). Because the vault
   window can be left open in the background, auto-locking closes it too.
   Active use (any add/edit/reveal dialog open) defers the lock.
 - **In-memory hardening** — while unlocked, passwords are not held as
@@ -550,6 +592,10 @@ key, so existing vaults keep opening unchanged.
   the first key turns 2FA on and re-encrypts the vault; each further key is an
   independent **backup** (any one enrolled key opens the vault). Removing the
   last key reverts the vault to password-only.
+- **Manage → Two-factor (security key)** is a single on/off switch. Turning
+  it on with no key enrolled starts enrollment; turning it off asks you to
+  confirm, then removes every enrolled key, returning the vault to
+  password-only. Turning it back on later means enrolling your keys again.
 - **No bypass — so enroll a backup.** If you lose *every* registered key the
   saved logins cannot be recovered; that irreversibility is the whole point of
   a second factor. Register at least two (a spare kept somewhere safe).
@@ -566,10 +612,10 @@ Bookmarks are the one thing kept between sessions — saved as plain JSON at
 
 - **☆ / Ctrl+D** — bookmark (or un-bookmark) the current page; the star fills
   in when a page is saved.
-- **Bookmarks bar** — a strip under the address bar listing your bookmarks,
-  kept in **alphabetical order automatically**, with a `»` overflow menu when
-  there are more than fit. Clicking one opens it in a **new tab**. It hides
-  itself when you have no bookmarks.
+- **Bookmarks bar** — a strip under the address bar listing your bookmarks
+  in **your own order**: drag a bookmark left or right to rearrange it. A `»`
+  overflow menu holds any that don't fit. Clicking one opens it in a **new
+  tab**. It hides itself when you have no bookmarks.
   - **Favicons** on the bar are captured from pages **as you browse** and at
     the moment you bookmark — never fetched from a third-party favicon service
     (which would leak your bookmark list). They're cached only for hosts you
@@ -744,8 +790,8 @@ flag fixes it; switching the compositor does.
 **☰ menu → Help** collects the support tools:
 
 - **Report an issue…** — opens a new GitHub issue with the environment
-  pre-filled: Vodou version **and the exact git commit**, Chromium / Qt /
-  PyQt / Python versions, and your OS. Every report pins the precise code
+  pre-filled: Vodou version **and the exact git commit**, Chromium (base and
+  security-patch level) / Qt / PyQt / Python versions, and your OS. Every report pins the precise code
   it's about.
 - **View on GitHub** — opens the repository.
 - **About Vodou…** — version info and the one-click updater (below).
@@ -756,7 +802,10 @@ directly from the repo's `.git` files, so it works even where git isn't
 installed.
 
 **Help → About Vodou…** shows the app version and the live Chromium / Qt /
-PyQt / Python versions, and offers an **Update Vodou & engine** button that
+PyQt / Python versions. Chromium gets two rows: **Chromium engine** is the
+base version (the web features Vodou has), and **Security patches** is the
+Chrome release whose security fixes Qt has backported onto it — the number to
+compare with Chrome. It also offers an **Update Vodou & engine** button that
 checks both parts of the browser: it pulls the latest Vodou
 from GitHub (`git pull --ff-only`, so a locally modified checkout is never
 silently merged), then opens the coordinated engine updater. Engine updates
@@ -797,10 +846,11 @@ treats PyQt6, PyQt6-WebEngine and their bundled Qt/Chromium runtime wheels as
 one dependency group and never moves a single Qt binary on its own:
 
 - **Version discovery** reads the *running* stack — `PYQT_VERSION_STR`,
-  `QT_VERSION_STR`, `qWebEngineVersion()`, `qWebEngineChromiumVersion()` and
-  the installed wheel versions — so it can tell the PyQt6 binding version from
-  the Qt version from the Qt WebEngine version from the Chromium version
-  (they are not the same number).
+  `QT_VERSION_STR`, `qWebEngineVersion()`, `qWebEngineChromiumVersion()`,
+  `qWebEngineChromiumSecurityPatchVersion()` and the installed wheel versions
+  — so it can tell the PyQt6 binding version from the Qt version from the Qt
+  WebEngine version from the Chromium version (they are not the same number).
+  The *Current installation* block shows the security-patch level too.
 - **Resolution** asks PyPI's JSON API for the stable releases whose
   `requires_python` fits your Python, then picks the highest `PyQt6` /
   `PyQt6-WebEngine` pair that share a version series. No version numbers are
@@ -819,13 +869,26 @@ one dependency group and never moves a single Qt binary on its own:
   detected on the next start and offered a one-click repair.
 - **Diagnostics.** The same dialog's *Copy diagnostics* button (and
   `python -m updater.diagnostics`) dumps Vodou / Python / PyQt6 / Qt / Qt
-  WebEngine / Chromium versions, OS, architecture, packaging method, install
+  WebEngine / Chromium versions (including the security-patch level), OS, architecture, packaging method, install
   directory and whether site-packages is writable — everything a bug report
   needs.
 
 This updater only works from a source checkout (how Vodou is meant to run). A
 frozen/PyInstaller build is detected and refused with an explanation —
 a new Qt runtime there needs a full rebuild.
+
+## MCP server
+
+[`mcp_server/`](mcp_server/) is a local
+[Model Context Protocol](https://modelcontextprotocol.io) server that gives an
+MCP client (Claude Desktop, Claude Code) Vodou's **private search** — through
+your own SearXNG, with optional answers from your **loopback-only** Ollama —
+plus **read-only** access to your bookmarks, last session's tab URLs, and
+whether a vault exists (never its contents). It runs over stdio, so nothing
+listens on the network. Optional live-control tools work only while Vodou is
+running with its loopback, token-authenticated control interface enabled (the
+Windows `launch_vodou.vbs` launcher turns it on). See
+[`mcp_server/README.md`](mcp_server/README.md) for setup.
 
 ## Shortcuts
 
