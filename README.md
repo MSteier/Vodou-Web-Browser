@@ -1,14 +1,15 @@
 # Vodou Browser
 
-Version **1.54.9** trims the Docker image further: GTK 3 and CUPS are gone,
-leaving Docker Scout at 5 High / 7 Medium / 66 Low with nothing fixable.
-1.54.8 removed the AI bookmark review (Check Bookmarks already finds broken
-links without AI), and 1.54.7 removed pip and fluxbox from the image. 1.54.6
-fixed an intermittent crash when checking bookmarks (on Windows it could close
-the browser) and added the Chromium security-patch version to the engine
-updater. Recent releases also moved the Docker images to Python 3.14 (1.54.5),
-added a non-AI bookmark link checker (1.54.1), optional web search in local AI
-chat (1.54.0), and a coordinated Qt / WebEngine updater (1.53.0).
+Version **1.54.10** gives Check Bookmarks a progress bar and a clear "scan
+complete" report, and greys out every button but Stop scan while a scan runs.
+1.54.9 trimmed the Docker image (GTK 3 and CUPS removed: 5 High / 7 Medium /
+66 Low in Docker Scout, nothing fixable), 1.54.8 removed the AI bookmark
+review, and 1.54.7 removed pip and fluxbox from the image. 1.54.6 fixed an
+intermittent crash when checking bookmarks (on Windows it could close the
+browser) and added the Chromium security-patch version to the engine updater.
+Recent releases also moved the Docker images to Python 3.14 (1.54.5), added a
+non-AI bookmark link checker (1.54.1), optional web search in local AI chat
+(1.54.0), and a coordinated Qt / WebEngine updater (1.53.0).
 
 **by Mist Technologies** — co-authored by Claude Fable 5
 
