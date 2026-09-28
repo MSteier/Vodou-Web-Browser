@@ -15,6 +15,11 @@ FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343
 # ---- Runtime system libraries Qt6 + the bundled Chromium dlopen at runtime ---
 # Grouped roughly: GL/EGL + GBM, glib/dbus, X11 + the xcb platform plugin set,
 # xkbcommon, the X extensions Chromium needs, NSS (TLS), ALSA, and a font.
+# No GTK 3 / CUPS / ATK / gdk-pixbuf / cairo / pango: across Qt and Chromium only two
+# optional Qt plugins link them -- the GNOME platform theme (loaded only on a
+# GNOME-like desktop session) and the CUPS printer backend (Vodou never prints)
+# -- and a running Vodou maps none of them. Dropping them removed 7 Medium and
+# 19 Low Docker Scout findings with no change in behaviour.
 RUN apt-get update && apt-get install --no-install-recommends -y \
         libgl1 libegl1 libgbm1 libglib2.0-0 libdbus-1-3 \
         libx11-6 libx11-xcb1 libxext6 libxrender1 libxcb1 \
@@ -25,9 +30,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libxkbcommon0 libxkbcommon-x11-0 libxkbfile1 \
         libxcomposite1 libxdamage1 libxrandr2 libxi6 libxtst6 libxcursor1 \
         libnss3 libnspr4 libasound2t64 libpulse0 \
-        libgssapi-krb5-2 libcups2 libharfbuzz0b \
-        libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libcairo-gobject2 \
-        libatk1.0-0t64 libgdk-pixbuf-2.0-0 libgtk-3-0t64 \
+        libgssapi-krb5-2 \
         fonts-dejavu-core fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
