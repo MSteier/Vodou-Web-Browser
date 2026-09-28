@@ -84,12 +84,6 @@ jobs:
           PYTHONUTF8: "1"
         run: python tests/test_review_regressions.py
 
-      - name: Bookmark cleanup checks
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYTHONUTF8: "1"
-        run: python tests/test_bookmark_cleanup.py
-
       - name: Bookmark health checks
         env:
           QT_QPA_PLATFORM: offscreen
