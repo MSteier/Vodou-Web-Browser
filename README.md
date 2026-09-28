@@ -639,8 +639,11 @@ Bookmarks are the one thing kept between sessions — saved as plain JSON at
   merely share a rate-limited host aren't misreported as broken. Only failed
   bookmarks appear, with their title, URL and reason (HTTP errors, DNS
   failures, connection errors, timeouts, SSL errors or redirect loops). TLS
-  verification remains enabled. The progress counter shows completed
-  bookmarks. **Select all** and **Delete Selected** operate on the review
+  verification remains enabled. A progress bar shows how many bookmarks have
+  been checked, and the dialog reports when the scan is complete (flashing in
+  the taskbar if you've switched away). While a scan runs, **Stop scan** is
+  the only active button; the rest come back, and Stop scan greys out, once it
+  finishes or is stopped. **Select all** and **Delete Selected** operate on the review
   list; deletion requires confirmation and updates the actual bookmark store.
   Temporary outages and login restrictions are included as failures, not
   claims that a page is permanently gone. It makes plain HTTP requests only
