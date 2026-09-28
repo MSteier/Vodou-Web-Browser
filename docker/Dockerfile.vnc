@@ -13,12 +13,12 @@
 # sandbox, run with:  --cap-add SYS_ADMIN -e QTWEBENGINE_DISABLE_SANDBOX=0
 
 # Base pinned by digest (supply-chain hardening): a tag can be repointed at
-# different code, a digest can't. This is python:3.13-slim as of the last
+# different code, a digest can't. This is python:3.14-slim as of the last
 # update (2026-09-26) -- a pinned digest freezes in whatever CVEs existed at
-# pin time, so bump it periodically (`docker pull python:3.13-slim` then
-# `docker inspect --format='{{index .RepoDigests 0}}' python:3.13-slim`),
+# pin time, so bump it periodically (`docker pull python:3.14-slim` then
+# `docker inspect --format='{{index .RepoDigests 0}}' python:3.14-slim`),
 # not just when something's known to be wrong.
-FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
+FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
 
 # ---- Runtime system libraries Qt6 + bundled Chromium dlopen, PLUS the headless
 #      display stack (xvfb, a light WM, x11vnc). noVNC and websockify are
