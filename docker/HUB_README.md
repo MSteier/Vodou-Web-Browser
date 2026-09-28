@@ -1,11 +1,3 @@
-<!--
-  This file is NOT auto-synced to Docker Hub. After editing it, manually
-  paste the full contents into Docker Hub's "Full Description" field
-  (msteier/vodou repo -> General tab -> edit description) or the changelog
-  on the live page goes stale. See CLAUDE.md's "Docker Hub release
-  checklist" for the full release steps.
--->
-
 # Vodou (containerized)
 
 A privacy-first desktop web browser built on **PyQt6 / QtWebEngine**, packaged
