@@ -11,6 +11,7 @@ from threading import Event
 
 from PyQt6.QtCore import QCoreApplication, QEvent, QEventLoop, QObject, QThread, QTimer, QUrl, Qt, pyqtSignal
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkReply, QNetworkRequest
+from PyQt6 import sip
 
 from bookmarks import Bookmark
 
@@ -106,6 +107,7 @@ class HealthCheckWorker(QThread):
         finally:
             if batch is not None:
                 batch.stop()
+                batch.reap()
                 batch.deleteLater()
                 QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
@@ -122,6 +124,9 @@ class _Batch(QObject):
             manager.setProxy(worker.proxy)
             self.available.append(manager)
         self.active = {}
+        # Released replies awaiting reap(); see release() for why they aren't
+        # simply deleteLater()'d.
+        self.graveyard = []
         self.next_index = self.checked = 0
         # Items that have started but not yet reported, including ones backing off
         # a retry outside of `active` — pump() must not finish while this is nonzero.
@@ -149,10 +154,26 @@ class _Batch(QObject):
         # Unregister before abort: finished may be emitted synchronously.
         if reply.isRunning():
             reply.abort()
-        reply.deleteLater()
+        # Not deleteLater(): PyQt can learn of that deletion late, and Qt may
+        # already have reused the freed address for a newer reply — whose
+        # signals then reach this now-dead Python wrapper and crash the scan
+        # ("wrapped C/C++ object of type QNetworkReply has been deleted").
+        # This may run inside the reply's own finished signal, so the delete
+        # itself waits for reap().
+        self.graveyard.append(reply)
         return state
 
+    def reap(self):
+        """Delete released replies through sip, so PyQt drops their wrappers
+        before Qt can reuse the memory. Only call this when no reply signal is
+        being delivered: from pump() (always timer-driven) or after the loop."""
+        replies, self.graveyard = self.graveyard, []
+        for reply in replies:
+            if not sip.isdeleted(reply):
+                sip.delete(reply)
+
     def pump(self):
+        self.reap()
         if self.stopped or self.worker.cancelled.is_set():
             self.check_cancel()
             return
