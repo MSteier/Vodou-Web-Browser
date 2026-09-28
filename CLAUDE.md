@@ -38,10 +38,29 @@ repository description. Forgetting to publish it is how the page went stale for
 several releases (still showing `1.50.1` as of 2026-09-25, and 1.54.8 on
 2026-09-28).
 
+### Version numbers: app releases vs. Docker-only rebuilds
+
+`APP_VERSION` in `about.py` is **the app's version**, and every installed copy
+polls it (`UpdateChecker` reads `about.py` from GitHub) to decide whether to
+show "update available". So bump it **only when Vodou itself changes**.
+
+- **App release** (any change to what the browser does): bump `APP_VERSION`,
+  tag the image `X.Y.Z` + `latest`, publish the Windows release.
+- **Docker-only rebuild** (Dockerfile, base image, OS packages, a fresh
+  no-cache rebuild for CVE fixes): **leave `APP_VERSION` alone**. Tag the image
+  `<APP_VERSION>-rN` (first rebuild `-r1`, then `-r2`, ...) + `latest`, add the
+  changelog entry and pinned tag under that name in `docker/HUB_README.md`, and
+  skip the Windows release. Bumping `APP_VERSION` for 1.54.7 and 1.54.9 (both
+  Docker-only) told every desktop user an update existed when none did.
+
+`about._version_tuple` reads only each segment's leading number, so
+`1.54.10-r1` compares equal to `1.54.10` (tested in
+`tests/test_update_state.py`). Never put a `-rN` suffix in `APP_VERSION`.
+
 Every version bump that gets pushed to Docker Hub needs all three:
 
-1. Bump `APP_VERSION` in `about.py` and add the changelog entry + new pinned
-   tag to `docker/HUB_README.md` (as usual).
+1. Bump `APP_VERSION` in `about.py` (app releases only; see above) and add the
+   changelog entry + new pinned tag to `docker/HUB_README.md`.
 2. Build and `docker push` the new tags.
 3. **Run `python docker/sync_hub_readme.py`** to publish `HUB_README.md` as the
    Docker Hub description. It uses the Docker Hub login already stored by

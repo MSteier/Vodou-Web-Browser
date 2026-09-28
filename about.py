@@ -107,9 +107,13 @@ VERSION_DISPLAY = APP_VERSION + (f" ({GIT_COMMIT})" if GIT_COMMIT else "")
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
+    # Only each segment's LEADING number counts. Collecting every digit read
+    # "10-r1" (a Docker image revision) and "10rc1" (a release candidate) as
+    # 101, making them look newer than 11. A suffix like that is not a newer
+    # version of the app, so it compares equal to the plain number.
     parts = []
     for piece in version.split("."):
-        digits = "".join(ch for ch in piece if ch.isdigit())
+        digits = re.match(r"\d*", piece.strip()).group()
         parts.append(int(digits) if digits else 0)
     return tuple(parts)
 
