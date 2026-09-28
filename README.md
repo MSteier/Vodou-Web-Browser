@@ -1,12 +1,13 @@
 # Vodou Browser
 
-Version **1.54.7** hardens the Docker image: no fixable vulnerability of any
-severity is left in Docker Scout's scan. 1.54.6 fixed an intermittent crash
-when checking bookmarks (on Windows it could close the browser) and shows the
-Chromium security-patch version in the engine updater. Recent releases also
-moved the Docker images to Python 3.14 (1.54.5), added a non-AI bookmark link
-checker (1.54.1), optional web search in local AI chat (1.54.0), and a
-coordinated Qt / WebEngine updater (1.53.0).
+Version **1.54.8** removes the AI bookmark review; Check Bookmarks already
+finds broken links without AI. 1.54.7 hardened the Docker image so no fixable
+vulnerability of any severity is left in Docker Scout's scan. 1.54.6 fixed an
+intermittent crash when checking bookmarks (on Windows it could close the
+browser) and added the Chromium security-patch version to the engine updater.
+Recent releases also moved the Docker images to Python 3.14 (1.54.5), added a
+non-AI bookmark link checker (1.54.1), optional web search in local AI chat
+(1.54.0), and a coordinated Qt / WebEngine updater (1.53.0).
 
 **by Mist Technologies** — co-authored by Claude Fable 5
 
