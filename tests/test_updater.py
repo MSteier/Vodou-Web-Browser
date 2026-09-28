@@ -95,6 +95,8 @@ def test_get_current_versions() -> None:
     check("current: Qt WebEngine distinct field is populated",
           cv.qt_webengine not in ("",))
     check("current: chromium field is populated", bool(cv.chromium))
+    check("current: chromium security-patch field is populated",
+          cv.chromium_security_patch not in ("", "unknown"))
     check("current: not frozen when run from source", cv.frozen is False)
 
 
