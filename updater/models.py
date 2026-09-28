@@ -68,6 +68,9 @@ class CurrentVersions:
     qt: str = "unknown"                     # PyQt6.QtCore.QT_VERSION_STR
     qt_webengine: str = "unknown"           # qWebEngineVersion()
     chromium: str = "unknown"               # qWebEngineChromiumVersion()
+    # The Chrome release whose security fixes Qt backported onto that base;
+    # the number to compare with Chrome. qWebEngineChromiumSecurityPatchVersion()
+    chromium_security_patch: str = "unknown"
 
     frozen: bool = False                    # sys.frozen (PyInstaller etc.)
     site_packages: str = ""
@@ -84,6 +87,7 @@ class CurrentVersions:
             ("Qt", self.qt),
             ("Qt WebEngine", self.qt_webengine),
             ("Chromium", self.chromium),
+            ("Security patches", f"Chrome {self.chromium_security_patch}"),
         ]
 
 

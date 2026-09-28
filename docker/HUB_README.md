@@ -30,9 +30,15 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.5` — pinned version
+- `1.54.6` — pinned version
 
 ## Changelog
+- **1.54.6** — Fixed an intermittent crash when checking bookmarks on Linux
+  (including this image): a failed link check could abort the whole scan with
+  "wrapped C/C++ object of type QNetworkReply has been deleted" when Qt reused
+  a just-freed request's memory before PyQt noticed. The Qt & WebEngine
+  updater window and its diagnostics report now also show the Chromium
+  **security-patch** version, matching About Vodou.
 - **1.54.5** — Moved the image to Python 3.14: the base is now
   `python:3.14-slim` (still the slim Debian variant, pinned by digest) instead
   of `python:3.13-slim`, matching the Python the desktop app is developed and

@@ -143,11 +143,13 @@ def get_current_versions() -> CurrentVersions:
 
     try:
         from PyQt6.QtWebEngineCore import (
+            qWebEngineChromiumSecurityPatchVersion,
             qWebEngineChromiumVersion,
             qWebEngineVersion,
         )
         cv.qt_webengine = qWebEngineVersion()
         cv.chromium = qWebEngineChromiumVersion()
+        cv.chromium_security_patch = qWebEngineChromiumSecurityPatchVersion()
     except Exception:
         pass
 
