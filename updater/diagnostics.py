@@ -51,6 +51,7 @@ def diagnostics_report(cv: CurrentVersions | None = None) -> dict:
         "Qt": cv.qt,
         "Qt WebEngine": cv.qt_webengine,
         "Chromium": cv.chromium,
+        "Chromium security patches": cv.chromium_security_patch,
         "OS": platform.platform(),
         "Architecture": f"{platform.machine()} / "
                         f"{platform.architecture()[0]}",
