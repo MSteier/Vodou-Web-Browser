@@ -268,6 +268,45 @@ class NetworkTests(unittest.TestCase):
             self.assertEqual(len(store.all()),3)
             dialog.deleteLater()
 
+    def test_dialog_buttons_and_progress_bar_follow_the_scan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=Bookmarks(Path(directory)/'bookmarks.json')
+            for i in range(6):
+                store.add(f'Slow {i}',f'{self.base}/slow?p={i}')
+            store.add('Missing',self.base+'/404')
+            dialog=BookmarkHealthDialog(store,open_url=lambda url:None)
+            dialog.concurrency.setValue(1)  # one at a time, so there is a real "mid-scan"
+            others=(dialog.scan,dialog.select_all,dialog.open,dialog.remove,dialog.close_button)
+            # Idle: everything but Stop scan (Delete still needs a checked row).
+            self.assertFalse(dialog.stop.isEnabled())
+            self.assertTrue(all(b.isEnabled() for b in others if b is not dialog.remove))
+            self.assertEqual(dialog.progress.format(),'Not started')
+            dialog._start()
+            self.assertTrue(dialog.stop.isEnabled())
+            self.assertFalse(any(b.isEnabled() for b in others))
+            self.assertEqual(dialog.progress.maximum(),7)
+            spin(lambda:dialog.checked>0)
+            self.assertFalse(any(b.isEnabled() for b in others))  # still greyed mid-scan
+            self.assertEqual(dialog.progress.value(),dialog.checked)
+            spin(lambda:dialog.scanner is None)
+            self.assertFalse(dialog.stop.isEnabled())
+            self.assertTrue(all(b.isEnabled() for b in others if b is not dialog.remove))
+            self.assertEqual(dialog.progress.value(),dialog.progress.maximum())
+            self.assertEqual(dialog.progress.format(),'Scan complete — 7 checked, 1 failed')
+            self.assertIn('Scan complete',dialog.status.text())
+            self.assertIn('1 failed link.',dialog.status.text())
+            # Stopping mid-scan also re-enables everything and greys Stop scan out.
+            dialog._start()
+            spin(lambda:dialog.checked>0 or dialog.scanner is None)
+            if dialog.scanner is not None:
+                dialog._stop()
+                self.assertFalse(dialog.stop.isEnabled())
+                self.assertTrue(dialog.scan.isEnabled() and dialog.close_button.isEnabled())
+                self.assertTrue(dialog.progress.format().startswith('Stopped at'))
+                self.assertIn('Scan stopped',dialog.status.text())
+            dialog.reject()
+            dialog.deleteLater()
+
 
 class ReviewTests(unittest.TestCase):
     def setUp(self):

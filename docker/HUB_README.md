@@ -30,9 +30,13 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.9` — pinned version
+- `1.54.10` — pinned version
 
 ## Changelog
+- **1.54.10** — **Check Bookmarks** now shows a progress bar ("9 / 20 checked
+  (45%)") and clearly reports when the scan is complete, with how many
+  bookmarks failed. While a scan runs, Stop scan is the only active button;
+  when it finishes or is stopped, the others come back and Stop scan greys out.
 - **1.54.9** — Trimmed the image further: GTK 3, CUPS, ATK, gdk-pixbuf, cairo,
   and pango are no longer installed. Only two optional Qt plugins could use
   them (the GNOME desktop theme and the CUPS printer backend), and a running
