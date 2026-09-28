@@ -1,5 +1,4 @@
-"""Broken-only health review dialog. Independent of the local-AI review feature:
-no import of ai_search.py or bookmark_cleanup(_ui).py, no Ollama dependency."""
+"""Broken-only health review dialog: plain HTTP checks, no AI or Ollama dependency."""
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (QApplication, QDialog, QDoubleSpinBox, QHBoxLayout, QHeaderView,
                              QLabel, QMessageBox, QPushButton, QSpinBox, QTableWidget,
