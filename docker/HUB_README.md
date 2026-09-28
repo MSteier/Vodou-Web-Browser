@@ -30,9 +30,13 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.7` — pinned version
+- `1.54.8` — pinned version
 
 ## Changelog
+- **1.54.8** — Removed **Review with local AI** from Manage bookmarks. It was
+  slow, needed Ollama, and its verdicts were only suggestions; **Check
+  Bookmarks** already finds broken links with plain HTTP checks and needs no
+  AI. Local AI chat, search summaries, and "Check this site" are unchanged.
 - **1.54.7** — Security hardening of the image, cutting Docker Scout's findings
   from 13 High / 19 Medium / 102 Low to 5 High / 14 Medium / 85 Low, with no
   fixable vulnerability of any severity left. pip is now removed once the
