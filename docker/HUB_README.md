@@ -30,9 +30,15 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.8` — pinned version
+- `1.54.9` — pinned version
 
 ## Changelog
+- **1.54.9** — Trimmed the image further: GTK 3, CUPS, ATK, gdk-pixbuf, cairo,
+  and pango are no longer installed. Only two optional Qt plugins could use
+  them (the GNOME desktop theme and the CUPS printer backend), and a running
+  Vodou loads neither. Docker Scout: 5 High / 7 Medium / 66 Low, down from
+  5 / 14 / 85, still with nothing fixable. The 5 High findings are in core
+  Debian libraries (libxml2, expat, zlib, perl) awaiting upstream fixes.
 - **1.54.8** — Removed **Review with local AI** from Manage bookmarks. It was
   slow, needed Ollama, and its verdicts were only suggestions; **Check
   Bookmarks** already finds broken links with plain HTTP checks and needs no
