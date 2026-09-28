@@ -75,6 +75,28 @@ check("clear removes the state file",
 check("after clear, tracking starts fresh",
       about.note_engine_outdated("6.12.0") == 0)
 
+print("\nversion comparison (the app update check)")
+check("two-digit patch is newer than one-digit",
+      about.is_newer("1.54.10", "1.54.9"))
+check("one-digit patch is not newer than two-digit",
+      not about.is_newer("1.54.9", "1.54.10"))
+check("equal versions are not newer",
+      not about.is_newer("1.54.10", "1.54.10"))
+check("minor bump beats a large patch",
+      about.is_newer("1.55.0", "1.54.99"))
+# Docker image revisions (1.54.10-r1) are the same app version, so they must
+# never trigger "update available" -- and must not parse as 1.54.101.
+check("image revision tag is not newer than its app version",
+      not about.is_newer("1.54.10-r1", "1.54.10"))
+check("image revision tag is not newer than the next patch",
+      not about.is_newer("1.54.10-r1", "1.54.11"))
+check("a real next patch is newer than an image revision",
+      about.is_newer("1.54.11", "1.54.10-r1"))
+check("release-candidate suffix doesn't inflate the number",
+      not about.is_newer("6.11.0rc1", "6.11.1"))
+check("version tuple uses leading digits only",
+      about._version_tuple("1.54.10-r1") == (1, 54, 10))
+
 print("\nhelpers")
 check("installed_engine_version returns a string",
       isinstance(about.installed_engine_version(), str)
