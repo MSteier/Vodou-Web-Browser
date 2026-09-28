@@ -31,20 +31,25 @@ the reasoning here ever needs re-deriving.
 
 ## Docker Hub release checklist
 
-`docker/HUB_README.md` is the source of truth for the changelog and pinned
-version, but **Docker Hub does not read it automatically** — this repo isn't
-linked via Docker Hub's Autobuild, so `docker push` never touches the
-repository description. Updating the file in git and forgetting this step is
-how the Docker Hub page went stale for several releases (still showing
-`1.50.1` pinned and an old changelog entry as of 2026-09-25, despite the git
-file being current through 1.54.2).
+`docker/HUB_README.md` is the source of truth for the Docker Hub page (changelog
+and pinned version), but **Docker Hub does not read it automatically**: this repo
+isn't linked via Docker Hub's Autobuild, so `docker push` never touches the
+repository description. Forgetting to publish it is how the page went stale for
+several releases (still showing `1.50.1` as of 2026-09-25, and 1.54.8 on
+2026-09-28).
 
-Every version bump that gets pushed to Docker Hub needs BOTH:
+Every version bump that gets pushed to Docker Hub needs all three:
 
 1. Bump `APP_VERSION` in `about.py` and add the changelog entry + new pinned
    tag to `docker/HUB_README.md` (as usual).
 2. Build and `docker push` the new tags.
-3. **Manually paste the full contents of `docker/HUB_README.md` into Docker
-   Hub's "Full Description" field** (msteier/vodou repo → General tab → edit
-   the description). There is no API-free way to skip this, and skipping it
-   is not a bug — it's this exact known gap.
+3. **Run `python docker/sync_hub_readme.py`** to publish `HUB_README.md` as the
+   Docker Hub description. It uses the Docker Hub login already stored by
+   `docker login` / Docker Desktop (OS credential store), holds it in memory
+   only, and verifies the live page afterwards. `--check` just reports whether
+   the page is current.
+
+Deliberately **not** a GitHub Action: that would need a Docker Hub access token
+stored as a repo secret, which the owner prefers not to create. So step 3 runs
+from a machine logged in to Docker Hub as `msteier`; never put a token or
+password in the repo, a workflow, or the script.
