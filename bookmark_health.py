@@ -124,8 +124,8 @@ class _Batch(QObject):
             manager.setProxy(worker.proxy)
             self.available.append(manager)
         self.active = {}
-        # Released replies awaiting reap(); see release() for why they aren't
-        # simply deleteLater()'d.
+        # Released replies, freed together by reap() when the scan ends; see
+        # release() for why none is freed sooner.
         self.graveyard = []
         self.next_index = self.checked = 0
         # Items that have started but not yet reported, including ones backing off
@@ -154,26 +154,28 @@ class _Batch(QObject):
         # Unregister before abort: finished may be emitted synchronously.
         if reply.isRunning():
             reply.abort()
-        # Not deleteLater(): PyQt can learn of that deletion late, and Qt may
-        # already have reused the freed address for a newer reply — whose
-        # signals then reach this now-dead Python wrapper and crash the scan
-        # ("wrapped C/C++ object of type QNetworkReply has been deleted").
-        # This may run inside the reply's own finished signal, so the delete
-        # itself waits for reap().
+        # Keep the reply alive until the scan ends; reap() frees them all then.
+        # Freeing one mid-scan -- by deleteLater() or even sip.delete() --
+        # lets Qt reuse its address for a newer reply before PyQt has finished
+        # with the old one, and PyQt then marks the NEW reply's wrapper as
+        # deleted. The next signal from that live reply hits a dead wrapper:
+        # "wrapped C/C++ object ... has been deleted" on Linux, and a hard
+        # 0xC0000409 abort of the whole browser on Windows. A finished or
+        # aborted reply holds at most a small read buffer, so keeping them for
+        # one scan costs little.
         self.graveyard.append(reply)
         return state
 
     def reap(self):
-        """Delete released replies through sip, so PyQt drops their wrappers
-        before Qt can reuse the memory. Only call this when no reply signal is
-        being delivered: from pump() (always timer-driven) or after the loop."""
+        """Delete every released reply through sip. Only called once the
+        worker's event loop has exited (see HealthCheckWorker.run), when no
+        reply signal can be in flight and no new reply will be created."""
         replies, self.graveyard = self.graveyard, []
         for reply in replies:
             if not sip.isdeleted(reply):
                 sip.delete(reply)
 
     def pump(self):
-        self.reap()
         if self.stopped or self.worker.cancelled.is_set():
             self.check_cancel()
             return
