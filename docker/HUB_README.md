@@ -33,10 +33,12 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 - `1.54.6` — pinned version
 
 ## Changelog
-- **1.54.6** — Fixed an intermittent crash when checking bookmarks on Linux
-  (including this image): a failed link check could abort the whole scan with
-  "wrapped C/C++ object of type QNetworkReply has been deleted" when Qt reused
-  a just-freed request's memory before PyQt noticed. The Qt & WebEngine
+- **1.54.6** — Fixed an intermittent crash in **Check Bookmarks**: freeing a
+  finished link check mid-scan let Qt reuse its memory for a newer check
+  before PyQt was done with the old one. On Linux (including this image) that
+  aborted the scan with "wrapped C/C++ object of type QNetworkReply has been
+  deleted"; on Windows it could close the whole browser. Finished checks are
+  now kept until the scan ends and freed together. The Qt & WebEngine
   updater window and its diagnostics report now also show the Chromium
   **security-patch** version, matching About Vodou.
 - **1.54.5** — Moved the image to Python 3.14: the base is now

@@ -1,10 +1,11 @@
 # Vodou Browser
 
-Version **1.54.6** fixes an intermittent crash when checking bookmarks on Linux
-and shows the Chromium security-patch version in the engine updater. Recent
-releases moved the Docker images to Python 3.14 (1.54.5), added a non-AI
-bookmark link checker (1.54.1), local AI bookmark review and optional web
-search in chat (1.54.0), and a coordinated Qt / WebEngine updater (1.53.0).
+Version **1.54.6** fixes an intermittent crash when checking bookmarks (on
+Windows it could close the browser) and shows the Chromium security-patch
+version in the engine updater. Recent releases moved the Docker images to
+Python 3.14 (1.54.5), added a non-AI bookmark link checker (1.54.1), local AI
+bookmark review and optional web search in chat (1.54.0), and a coordinated
+Qt / WebEngine updater (1.53.0).
 
 **by Mist Technologies** — co-authored by Claude Fable 5
 
