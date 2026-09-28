@@ -1,11 +1,12 @@
 # Vodou Browser
 
-Version **1.54.7** hardens the Docker image: no fixable vulnerability of any
-severity is left in Docker Scout's scan. 1.54.6 fixed an intermittent crash
-when checking bookmarks (on Windows it could close the browser) and shows the
-Chromium security-patch version in the engine updater. Recent releases also
-moved the Docker images to Python 3.14 (1.54.5), added a non-AI bookmark link
-checker (1.54.1), local AI bookmark review and optional web search in chat
+Version **1.54.8** removes the AI bookmark review; Check Bookmarks already
+finds broken links without AI. 1.54.7 hardened the Docker image so no fixable
+vulnerability of any severity is left in Docker Scout's scan. 1.54.6 fixed an
+intermittent crash when checking bookmarks (on Windows it could close the
+browser) and added the Chromium security-patch version to the engine updater.
+Recent releases also moved the Docker images to Python 3.14 (1.54.5), added a
+non-AI bookmark link checker (1.54.1), optional web search in local AI chat
 (1.54.0), and a coordinated Qt / WebEngine updater (1.53.0).
 
 **by Mist Technologies** — co-authored by Claude Fable 5
@@ -641,25 +642,8 @@ Bookmarks are the one thing kept between sessions — saved as plain JSON at
   bookmarks. **Select all** and **Delete Selected** operate on the review
   list; deletion requires confirmation and updates the actual bookmark store.
   Temporary outages and login restrictions are included as failures, not
-  claims that a page is permanently gone. This check has no dependency on
-  the local-AI review feature or Ollama — use the separate AI review below
-  when a page loads but seems to have changed purpose.
-- **Manage bookmarks… → Review with local AI…** — scan existing bookmarks,
-  then review the evidence before removing any. The scanner checks failures
-  up to three times with a delay, follows at most five redirects, and labels
-  repeated 404/410 responses as *likely* permanent. Network errors, rate limits,
-  outages, and login restrictions remain temporary or unverified; long
-  `Retry-After` requests are deferred to a later scan.
-  The Ollama model selected in AI settings compares readable page text against
-  the saved title and URL to flag replaced pages, parked domains, or soft error
-  pages. Suspected changes are checked again. These are suggestions, not proof:
-  bookmarks have no archived page baseline, and JavaScript-only or authenticated
-  pages may need manual inspection. Without Ollama, HTTP checks still work.
-  Scanning visits the websites through the application's proxy without browser
-  login cookies; AI requests stay on this computer and cannot follow redirects.
-  Results show the destination, attempts, and explanation. Nothing is checked
-  for removal automatically. Only explicitly checked entries are removed after
-  a separate confirmation, and bookmarks edited since the scan are kept.
+  claims that a page is permanently gone. It makes plain HTTP requests only
+  and needs no AI model or Ollama.
 - **Import** a browser's exported bookmarks HTML (Netscape format).
 - Only `http`/`https` URLs are ever stored or opened — `javascript:`, `data:`,
   and `file:` are rejected, even from a tampered file or import.

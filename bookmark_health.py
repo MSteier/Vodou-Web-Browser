@@ -1,8 +1,8 @@
 """Concurrent HEAD/GET bookmark health checks in a dedicated Qt worker thread.
 
-Self-contained: no dependency on the local-AI review feature (bookmark_cleanup.py /
-ai_search.py). Retry-after-aware backoff avoids the checker hammering a rate-limited
-host and reporting live bookmarks as broken.
+Self-contained: plain HTTP checks with no AI or Ollama dependency. Retry-after-aware
+backoff avoids the checker hammering a rate-limited host and reporting live bookmarks
+as broken.
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
