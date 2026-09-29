@@ -26,8 +26,8 @@ import sys
 import time
 from pathlib import Path
 
-# Graphics profile. The mode names are the same everywhere (the ☰ menu and
-# --gfx are platform-independent); the flags behind them are not, because
+# Graphics profile. The --gfx mode names are platform-independent; the
+# flags behind them are not, because
 # ANGLE's backends aren't. d3d11 and warp are Direct3D, i.e. Windows-only.
 #
 # Windows — the default is tuned for integrated graphics:
@@ -317,7 +317,7 @@ def _safe_start_page(url: str) -> str:
 
 def _gfx_flags() -> str:
     global GFX_MODE
-    mode = _load_saved_gfx()          # ☰ menu → Graphics choice, if any
+    mode = _load_saved_gfx()          # Honor any previously saved choice.
     if "--gfx" in sys.argv:           # per-launch CLI override wins
         i = sys.argv.index("--gfx")
         if i + 1 >= len(sys.argv) or sys.argv[i + 1] not in GFX_MODES:
@@ -428,7 +428,7 @@ from favicons import FaviconStore
 from icons import icon_set, make_icon
 from bookmarks_ui import BookmarksManagerDialog
 from downloads_ui import DownloadsDialog
-from plugins import PluginManager, wrap_plugin_source
+from plugins import PluginManager, REPLIKA_DEFLICKER, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
 from privacy import (
@@ -1916,6 +1916,18 @@ class BrowserWindow(QMainWindow):
         # getUserMedia can't spam the status bar.
         self._capture_note_at = 0.0
 
+        # Site compatibility: Replika's glass chat panels can flicker over its
+        # animated scene. Apply the existing blur workaround automatically,
+        # scoped to that host and independent of optional plugin settings.
+        replika_fix = QWebEngineScript()
+        replika_fix.setName("vodou-replika-deflicker")
+        replika_fix.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentReady)
+        replika_fix.setWorldId(APP_WORLD)
+        replika_fix.setRunsOnSubFrames(False)
+        replika_fix.setSourceCode(wrap_plugin_source(REPLIKA_DEFLICKER))
+        self.profile.scripts().insert(replika_fix)
+
         # Reviewed, opt-in plugins injected into the isolated world. State is
         # ID-only (no code from disk); each plugin self-limits to its hosts.
         self.plugins = PluginManager()
@@ -2377,9 +2389,6 @@ class BrowserWindow(QMainWindow):
         self.ai_search_action.toggled.connect(self._set_ai_search)
         ai_menu.addAction("Local AI options…", self.show_ai_options)
         ai_menu.addAction("Set up Local AI…", self.show_ollama_setup)
-
-        # --- Display -------------------------------------------------------
-        self._build_graphics_menu(settings_menu.addMenu("Graphics"))
 
         # --- Extend --------------------------------------------------------
         settings_menu.addSeparator()
@@ -4750,32 +4759,6 @@ class BrowserWindow(QMainWindow):
             act.setChecked(mode == self._mode)
             act.setActionGroup(mode_group)
             act.triggered.connect(lambda _c, m=mode: self._set_mode(m))
-
-    _GFX_MENU_ITEMS = (
-        ("Hardware (fastest)", "default"),
-        ("Compatibility — fixes flicker on some sites", "compat"),
-        ("Software (most stable, slowest)", "software"),
-    )
-
-    def _build_graphics_menu(self, gfx: QMenu) -> None:
-        """Compositor profile picker. The flags are consumed when the web
-        engine starts, so a change only takes effect on the next launch."""
-        group = QActionGroup(self)
-        group.setExclusive(True)
-        for label, mode in self._GFX_MENU_ITEMS:
-            act = gfx.addAction(label)
-            act.setCheckable(True)
-            act.setChecked(mode == GFX_MODE)
-            act.setActionGroup(group)
-            act.triggered.connect(lambda _c, m=mode: self._set_gfx_mode(m))
-
-    def _set_gfx_mode(self, mode: str) -> None:
-        save_gfx_mode(mode)
-        if mode == GFX_MODE:
-            self.statusBar().showMessage(
-                "Graphics mode unchanged — already in effect.", 5000)
-            return
-        self._prompt_restart("The graphics mode has been changed.")
 
     def _set_theme(self, name: str) -> None:
         self._theme_name = name

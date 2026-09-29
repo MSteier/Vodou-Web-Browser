@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 PLUGINS_FILE = Path.home() / ".vodou" / "plugins.json"
@@ -203,6 +203,15 @@ for (const ev of ['contextmenu','selectstart','copy','cut','dragstart']) {
 ]
 
 CATALOG: dict[str, Plugin] = {p.id: p for p in _CATALOG_LIST}
+
+# Replika needs the blur workaround even when optional plugins are disabled.
+# Keep the automatic fix restricted to its chat host; the catalog entry stays
+# opt-in for people who need the same workaround on other sites.
+REPLIKA_DEFLICKER = replace(
+    CATALOG["deflicker-blur"],
+    id="replika-deflicker",
+    matches=("my.replika.ai",),
+)
 
 
 def catalog() -> list[Plugin]:
