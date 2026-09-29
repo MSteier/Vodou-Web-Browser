@@ -7,6 +7,8 @@ management/provisioning layer, which is what these tests exercise.
 Run:  python tests/test_viewer_auth.py
 """
 
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -194,6 +196,101 @@ check("status --fail-if-default exits nonzero on the published default",
       r.returncode != 0)
 check("CLI status output does not print the password",
       va.PUBLISHED_DEFAULT_PASSWORD not in (r.stdout + r.stderr))
+check("CLI status warns about the published default",
+      "WARNING" in r.stdout)
+
+# ---------------------------------------------------------------------------
+print("\nmigration: an install still on the published default is rotated")
+
+p6 = fresh()
+va.write_htpasswd(p6, {"vodou": va.apr1(va.PUBLISHED_DEFAULT_PASSWORD),
+                       "someone-else": va.apr1("their-own-secret")})
+outcome, pw6 = va.ensure_credential(p6)
+entries = va.read_htpasswd(p6)
+check("published default is rotated", outcome == "rotated")
+check("rotated password is random and authenticates",
+      pw6 and pw6 != va.PUBLISHED_DEFAULT_PASSWORD
+      and va.verify(pw6, entries["vodou"]))
+check("published default no longer authenticates after rotation",
+      not va.uses_published_default(p6))
+check("other users in the file are untouched",
+      va.verify("their-own-secret", entries["someone-else"]))
+check("re-running after rotation keeps the new password",
+      va.ensure_credential(p6) == ("kept", None)
+      and va.verify(pw6, va.read_htpasswd(p6)["vodou"]))
+
+p7 = fresh()
+va.write_htpasswd(p7, {"vodou": va.apr1("chosen-by-the-user")})
+check("a user-chosen password is kept",
+      va.ensure_credential(p7) == ("kept", None)
+      and va.verify("chosen-by-the-user", va.read_htpasswd(p7)["vodou"]))
+
+outcome, pw8 = va.ensure_credential(fresh())
+check("fresh file -> created with a random password",
+      outcome == "created" and pw8 and pw8 != va.PUBLISHED_DEFAULT_PASSWORD)
+
+# The CLI's seed performs the migration and says so.
+va.write_htpasswd(p5, {"vodou": va.apr1(va.PUBLISHED_DEFAULT_PASSWORD)})
+r = _cli("seed")
+shown = [line.split("password:", 1)[1].strip()
+         for line in r.stdout.splitlines() if "password:" in line]
+check("CLI seed warns when it rotates the published default",
+      "WARNING" in r.stdout)
+check("CLI seed prints the rotated password once",
+      len(shown) == 1 and va.verify(shown[0], va.read_htpasswd(p5)["vodou"]))
+check("status is clean after the CLI migration",
+      _cli("status", "--fail-if-default").returncode == 0)
+
+# The htpasswd path can come from the environment instead of --file.
+p9 = fresh()
+env = dict(os.environ, VODOU_VIEWER_HTPASSWD=str(p9))
+r = subprocess.run(
+    [sys.executable, str(_ROOT / "docker" / "manage_viewer_password.py"),
+     "seed"], capture_output=True, text=True, timeout=30, env=env)
+check("VODOU_VIEWER_HTPASSWD selects the file", p9.exists()
+      and "vodou" in va.read_htpasswd(p9))
+
+# ---------------------------------------------------------------------------
+print("\nsetup.sh generates the password on the host, once")
+
+sh = shutil.which("sh")
+if sh is None:
+    print("  --  (no POSIX sh available; skipped setup.sh run)")
+else:
+    work = Path(tempfile.mkdtemp()) / "docker"
+    (work / "searxng").mkdir(parents=True)
+    for name in ("setup.sh", "manage_viewer_password.py", "viewer_auth.py",
+                 ".env.example"):
+        shutil.copy(_ROOT / "docker" / name, work / name)
+    shutil.copy(_ROOT / "docker" / "searxng" / "settings.yml",
+                work / "searxng" / "settings.yml")
+    # Only this interpreter and the shell's own tools on PATH, so the script
+    # can't pick up an unrelated (or Store-stub) python.
+    env = {k: v for k, v in os.environ.items()
+           if k != "VODOU_VIEWER_HTPASSWD"}
+    env["PATH"] = os.pathsep.join([str(Path(sys.executable).parent),
+                                   str(Path(sh).parent)])
+
+    def _setup():
+        return subprocess.run([sh, "setup.sh"], cwd=work, capture_output=True,
+                              text=True, timeout=120, env=env)
+
+    r1 = _setup()
+    store = work / "viewer-auth" / "vodou.htpasswd"
+    shown = [line.split("password:", 1)[1].strip()
+             for line in r1.stdout.splitlines() if "password:" in line]
+    check("setup.sh succeeds", r1.returncode == 0)
+    check("setup.sh stores the credential in a host file",
+          store.exists() and "vodou" in va.read_htpasswd(store))
+    check("setup.sh prints a labeled, working password once",
+          "shown once" in r1.stdout and len(shown) == 1
+          and va.verify(shown[0], va.read_htpasswd(store)["vodou"]))
+    check("the plaintext password is not written to disk",
+          shown and shown[0] not in store.read_text(encoding="utf-8"))
+    r2 = _setup()
+    check("re-running setup.sh keeps the password (no regeneration)",
+          r2.returncode == 0 and "password:" not in r2.stdout
+          and shown and va.verify(shown[0], va.read_htpasswd(store)["vodou"]))
 
 # ---------------------------------------------------------------------------
 print()

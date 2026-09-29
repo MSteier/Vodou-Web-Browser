@@ -34,7 +34,7 @@ cd docker
 cp .env.example .env          # once
 
 # Windows (PowerShell):  ./setup.ps1
-./setup.sh                    # generates a unique SearXNG secret key
+./setup.sh                    # SearXNG secret key + viewer LAN password
 
 # Search only:
 docker compose up -d
@@ -106,50 +106,59 @@ purpose: LAN access is gated one layer up, by **HTTP Basic Auth on the reverse
 proxy** that fronts the viewer (nginx `auth_basic` → a `vodou.htpasswd` file).
 That htpasswd entry is the credential that actually protects LAN access.
 
-**Bootstrap credential (fresh install).** When no credential has been configured
-yet, `seed` creates the user `vodou` with a random password generated for this
-install. The password is printed **once** — save it in a password manager.
-There is no shared default password.
+**How the password is created.** There is no shared default password. The
+first time you run `setup.sh` / `setup.ps1`, it generates a random password
+for the user `vodou` **on your machine** (never at image build time, so it is
+never baked into an image layer) and prints it **once**, in a clearly labeled
+box. Save it in a password manager: only its salted hash is stored, so it
+can't be shown again.
 
-`manage_viewer_password.py` manages this file. It **never overwrites** an entry
-that already exists, so upgrading or re-running is safe and an installation that
-already set its own password keeps it.
+The hash lives in a host file, so it survives `docker compose down/up` and image
+rebuilds and isn't regenerated on restart. The file is `VODOU_VIEWER_HTPASSWD`
+from the environment or `.env` (point it at your nginx's `vodou.htpasswd`), or
+`viewer-auth/vodou.htpasswd` in this folder if that's unset (gitignored).
+
+**Upgrading an older install.** Older versions seeded every install with the
+same password, which was published in these docs. Re-running `setup` (or
+`manage_viewer_password.py seed`) detects that the old default is still active,
+replaces it with a new random password, and prints the new one with a warning.
+A password you chose yourself is never touched.
+
+`manage_viewer_password.py` manages the file directly:
 
 ```sh
 # Point it at your proxy's htpasswd (or export VODOU_VIEWER_HTPASSWD):
 export VODOU_VIEWER_HTPASSWD=/etc/nginx/vodou.htpasswd   # e.g. on Windows:
 #   set VODOU_VIEWER_HTPASSWD=C:\nginx-1.27.4\conf\vodou.htpasswd
 
-# Fresh install: create the login with a generated password, printed once
-# (no-op if one exists)
+# Create the login, or replace the old published default; prints the new
+# password once (no-op when you already have your own password)
 python manage_viewer_password.py seed
 
-# Pick your own password instead (prompts; nothing is echoed or logged)
+# Pick your own password instead (prompts; nothing is echoed or logged).
+# The old published default is refused.
 python manage_viewer_password.py change
 
-# Report whether the old published default is still in use (exit != 0 with
-# --fail-if-default, so a setup script can refuse to finish until it's changed)
+# Warn if the old published default is still active (exit != 0 with
+# --fail-if-default, so a script can refuse to continue)
 python manage_viewer_password.py status --fail-if-default
 ```
 
-**Upgrading from an older install?** Versions before per-install passwords
-seeded everyone with the same published password, `vodou-lan-2026`. If
-`status` reports it, run `change` right away — anyone can look that password up.
-
 Passwords are stored only as salted Apache-MD5 (`$apr1$`) hashes — the format
 nginx accepts on every platform, including Windows — never in plaintext, and are
-never logged; the only plaintext output is `seed`'s one-time display. Whether
-the published default is still in use is derived from the stored hash itself
-(no separate flag to drift out of sync).
+never logged; the only plaintext output is the one-time display of a newly
+generated password. Whether the old default is still in use is derived from the
+stored hash itself (no separate flag to drift out of sync). nginx re-reads the
+htpasswd file on each request, so a new password takes effect without a reload.
 
 **Limitation (by design).** There is **no "force a password change at first VNC
 login."** The RFB/VNC protocol has no password-change-on-login mechanism, and
 HTTP Basic Auth is stateless (it has no login event to intercept). Enforcement
-is therefore at **provisioning time**: `seed` installs the default, `status
---fail-if-default` lets your setup step block until it's changed, and `change`
-replaces it. Adding a stateful web login purely to simulate a first-login prompt
-would mean standing up a second authentication system, which this deliberately
-avoids.
+is therefore at **provisioning time**: `setup` / `seed` generate a random
+password (or replace the old default), and `status --fail-if-default` lets
+other scripts check for it. Adding a stateful web login purely to simulate a
+first-login prompt would mean standing up a second authentication system, which
+this deliberately avoids.
 
 ## Notes & gotchas
 

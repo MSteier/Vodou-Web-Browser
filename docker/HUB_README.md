@@ -16,7 +16,10 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 - `-p 127.0.0.1:8080:8080` — serves the noVNC web viewer on this computer only.
   The viewer has no password of its own, so keep the `127.0.0.1:` prefix unless
-  an authenticating reverse proxy sits in front of it (see the full docs). Change
+  an authenticating reverse proxy sits in front of it. For LAN access, the
+  repo's `docker/setup` script generates that proxy's password on your machine
+  (random per install, shown once; never baked into the image). See the full
+  docs. Change
   the middle number to use a different local port (e.g.
   `-p 127.0.0.1:9000:8080` → http://localhost:9000/).
 - `-v vodou-data:/home/vodou/.vodou` — persists your profile (bookmarks, vault,

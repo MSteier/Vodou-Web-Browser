@@ -193,6 +193,35 @@ def uses_published_default(path: str | os.PathLike,
     return bool(h) and verify(PUBLISHED_DEFAULT_PASSWORD, h)
 
 
+def ensure_credential(path: str | os.PathLike,
+                      username: str = DEFAULT_USERNAME
+                      ) -> tuple[str, str | None]:
+    """Make sure ``username`` has a credential that isn't publicly known.
+
+    Returns ``(outcome, password)``:
+      * ``("created", pw)`` -- no entry existed; one was seeded with a random
+        password.
+      * ``("rotated", pw)`` -- the entry still used the published default
+        (an install seeded by an older version); it was replaced with a random
+        password. Any other user's entry in the file is left untouched.
+      * ``("kept", None)`` -- the entry already had its own password; nothing
+        was changed.
+
+    ``pw`` is the only time the new password exists in plaintext, so the
+    caller must show it to the administrator.
+    """
+    created = seed_default(path, username)
+    if created is not None:
+        return "created", created
+    if not uses_published_default(path, username):
+        return "kept", None
+    entries = read_htpasswd(path)
+    password = generate_password()
+    entries[username] = apr1(password)
+    write_htpasswd(path, entries)
+    return "rotated", password
+
+
 def change_password(path: str | os.PathLike,
                     username: str,
                     current: str,
