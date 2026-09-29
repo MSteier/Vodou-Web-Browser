@@ -9,23 +9,32 @@ docker/README.md for the security model.
 
 There is deliberately NO "force change at first VNC login": the RFB protocol has
 no such hook and HTTP Basic Auth is stateless. Enforcement is therefore at
-provisioning time — `seed` installs the bootstrap credential on a fresh install,
-`status` reports (and can fail a setup script) while the default is still in
-use, and `change` replaces it.
+provisioning time — `seed` (run by setup.sh / setup.ps1) installs a
+credential with a password generated for this install and shown once, and
+replaces the old published default on installs that still use it; `status`
+reports (and can fail a setup script) while that default is in use; `change`
+sets a password of your choosing.
 
 Examples
 --------
-    # Seed the bootstrap credential on a fresh install (no-op if one exists):
+    # Create the credential with a random password, or replace the old
+    # published default with one; prints the new password once. A no-op when
+    # the credential already has its own password:
     python manage_viewer_password.py seed --file /path/to/vodou.htpasswd
 
-    # In a setup script: stop with a nonzero exit while the default is unchanged
+    # In a setup script: stop with a nonzero exit while the old published
+    # default password is still in use
     python manage_viewer_password.py status --file ... --fail-if-default
 
     # Change the password (prompts, never echoes):
     python manage_viewer_password.py change --file ...
 
-The htpasswd path comes from --file or the VODOU_VIEWER_HTPASSWD environment
-variable. Passwords are never echoed, logged, or written except as $apr1$ hashes.
+The htpasswd path comes from --file, else the VODOU_VIEWER_HTPASSWD environment
+variable, else docker/viewer-auth/vodou.htpasswd on the host (gitignored). It is
+a host file, never part of an image, so the credential survives
+`docker compose down/up` and image rebuilds. Passwords are never logged or
+written except as $apr1$ hashes; the only plaintext output is the one-time
+display of a newly generated password.
 """
 
 from __future__ import annotations
@@ -34,28 +43,40 @@ import argparse
 import getpass
 import os
 import sys
+from pathlib import Path
 
 import viewer_auth as va
 
+DEFAULT_HTPASSWD = Path(__file__).resolve().parent / "viewer-auth" / \
+    "vodou.htpasswd"
+
 
 def _resolve_path(args) -> str:
-    path = args.file or os.environ.get("VODOU_VIEWER_HTPASSWD")
-    if not path:
-        sys.exit("error: no htpasswd path given (use --file or set "
-                 "VODOU_VIEWER_HTPASSWD)")
-    return path
+    return (args.file or os.environ.get("VODOU_VIEWER_HTPASSWD")
+            or str(DEFAULT_HTPASSWD))
 
 
 def _cmd_seed(args) -> int:
     path = _resolve_path(args)
-    if va.seed_default(path, args.username):
-        print(f"Seeded bootstrap credential for “{args.username}” at {path}.")
-        print("IMPORTANT: this is the default LAN password. Change it before "
-              "normal use:")
-        print(f"    python {os.path.basename(__file__)} change --file {path}")
+    outcome, password = va.ensure_credential(path, args.username)
+    if outcome == "kept":
+        print(f"The viewer login “{args.username}” at {path} already has its "
+              f"own password; left unchanged.")
         return 0
-    print(f"A credential for “{args.username}” already exists at {path}; "
-          f"left unchanged.")
+    if outcome == "rotated":
+        print(f"WARNING: “{args.username}” was still using the old published "
+              f"default password,\nwhich anyone can look up. It has been "
+              f"replaced with a new random password.")
+    else:
+        print(f"Created the viewer login “{args.username}” at {path}.")
+    print()
+    print("  ============ Vodou viewer LAN password (shown once) ============")
+    print(f"    username: {args.username}")
+    print(f"    password: {password}")
+    print("  ================================================================")
+    print("Save it in a password manager now; it is stored only as a hash and")
+    print("won't be shown again. To choose your own instead:")
+    print(f"    python {os.path.basename(__file__)} change --file {path}")
     return 0
 
 
@@ -65,11 +86,12 @@ def _cmd_status(args) -> int:
     if args.username not in entries:
         print(f"No credential configured for “{args.username}” at {path}.")
         return 2
-    if va.is_default_unchanged(path, args.username):
-        print(f"“{args.username}” is still using the DEFAULT bootstrap "
-              f"password — change it before normal use.")
+    if va.uses_published_default(path, args.username):
+        print(f"WARNING: “{args.username}” is still using the old PUBLISHED "
+              f"default password, which anyone can look up. Run `seed` to "
+              f"replace it with a random one, or `change` to pick your own.")
         return 1 if args.fail_if_default else 0
-    print(f"“{args.username}” is using a changed (non-default) password.")
+    print(f"“{args.username}” is not using the published default password.")
     return 0
 
 
@@ -89,23 +111,32 @@ def _cmd_change(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The one-time password banner must never crash on a legacy console code
+    # page (e.g. cp1252 when setup.ps1 pipes our output).
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(
         description="Manage the Vodou viewer's LAN (nginx Basic-Auth) password.")
-    parser.add_argument("--file", help="Path to the htpasswd file "
-                        "(or set VODOU_VIEWER_HTPASSWD).")
+    parser.add_argument("--file", help="Path to the htpasswd file (default: "
+                        "$VODOU_VIEWER_HTPASSWD, else "
+                        "docker/viewer-auth/vodou.htpasswd).")
     parser.add_argument("--username", default=va.DEFAULT_USERNAME,
                         help=f"Username to manage (default: "
                              f"{va.DEFAULT_USERNAME}).")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("seed", help="Install the bootstrap credential if none "
-                   "exists (never overwrites).")
+    sub.add_parser("seed", help="Create the credential with a random "
+                   "password, or replace the old published default; prints "
+                   "the new password once. Never touches a password you set.")
 
-    p_status = sub.add_parser("status", help="Report whether the default "
-                              "password is still in use.")
+    p_status = sub.add_parser("status", help="Report whether the old "
+                              "published default password is still in use.")
     p_status.add_argument("--fail-if-default", action="store_true",
-                          help="Exit nonzero while the default is unchanged "
-                               "(for setup scripts).")
+                          help="Exit nonzero while the published default is "
+                               "in use (for setup scripts).")
 
     sub.add_parser("change", help="Change the password (prompts; no echo).")
 

@@ -2,6 +2,8 @@
 # One-time setup for the Vodou backend bundle (macOS / Linux).
 #   1. creates .env from .env.example (if missing)
 #   2. writes a unique random secret_key into searxng/settings.yml
+#   3. creates the noVNC viewer's LAN password (random per install, shown
+#      once) or replaces the old published default -- see README.md
 #
 # Run from this folder:  ./setup.sh
 # Then:  docker compose up -d          (search only)
@@ -29,6 +31,27 @@ if grep -q "__REPLACE_WITH_RANDOM_SECRET__" "$SETTINGS"; then
   echo "Wrote a unique secret_key into $SETTINGS"
 else
   echo "secret_key already set — leaving it as is"
+fi
+
+# Viewer LAN password: generated here, on the host, never at image build time.
+# Only its hash is stored, in a host file that survives `docker compose
+# down/up`. Re-running is safe: an existing password is kept, and an install
+# still on the old published default gets a new random one.
+HTPASSWD="${VODOU_VIEWER_HTPASSWD:-}"
+if [ -z "$HTPASSWD" ] && [ -f .env ]; then
+  HTPASSWD="$(sed -n 's/^VODOU_VIEWER_HTPASSWD=//p' .env | tail -n 1 | tr -d '\r"')"
+fi
+PY=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1; then PY="$candidate"; break; fi
+done
+if [ -z "$PY" ]; then
+  echo "WARNING: Python not found, so the viewer LAN password was not set up."
+  echo "         Install Python, then run:  python manage_viewer_password.py seed"
+elif [ -n "$HTPASSWD" ]; then
+  "$PY" manage_viewer_password.py --file "$HTPASSWD" seed
+else
+  "$PY" manage_viewer_password.py seed
 fi
 
 cat <<'EOF'
