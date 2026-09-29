@@ -392,6 +392,38 @@ def test_stage_hash_mismatch_aborts() -> None:
     check("stage-hash: no plan.json", not mgr.plan_path.exists())
 
 
+def test_stage_unverifiable_named_wheel_aborts() -> None:
+    # One named package verifying must not wave the others through: a
+    # PyQt6-WebEngine wheel PyPI publishes no digest for is refused.
+    payload = b"payload"
+    good = _fetch_with_digests(payload)
+
+    def fetch_missing_target(name):
+        j = good(name)
+        if name == "PyQt6-WebEngine":
+            j = {**j, "releases": {v: f for v, f in j["releases"].items()
+                                   if v != "6.11.0"}}
+        return j
+
+    def fetch_down(name):
+        if name == "PyQt6-WebEngine":
+            raise pypi.PyPIError("simulated outage")
+        return good(name)
+
+    for label, fetch in (("no-digest", fetch_missing_target),
+                         ("fetch-fails", fetch_down)):
+        mgr = UpdateManager(state_dir=Path(tempfile.mkdtemp()))
+        plan = _good_plan(mgr)
+        mgr._fetch = fetch
+        try:
+            mgr.stage(plan, pip_download=spec_aware_download(payload))
+            check(f"stage-unverifiable ({label}): raised", False)
+        except (StageError, backup_mod.BackupError):
+            check(f"stage-unverifiable ({label}): raised", True)
+        check(f"stage-unverifiable ({label}): no plan.json",
+              not mgr.plan_path.exists())
+
+
 def test_stage_success_writes_state() -> None:
     mgr = UpdateManager(state_dir=Path(tempfile.mkdtemp()))
     plan = _good_plan(mgr)
@@ -629,7 +661,9 @@ ALL = [
     test_prerelease_gate, test_frozen_build_refused,
     test_readonly_site_packages_refused,
     test_stage_download_failure_leaves_nothing,
-    test_stage_hash_mismatch_aborts, test_stage_success_writes_state,
+    test_stage_hash_mismatch_aborts,
+    test_stage_unverifiable_named_wheel_aborts,
+    test_stage_success_writes_state,
     test_stage_user_cancellation,
     test_apply_success, test_apply_install_failure_rolls_back,
     test_apply_verify_failure_rolls_back, test_apply_resume_repairs,

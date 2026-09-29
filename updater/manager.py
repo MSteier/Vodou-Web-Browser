@@ -421,17 +421,25 @@ def _pip_download(python_exe: str, dest: Path, specs: list[str]):
 
 def _verify_against_pypi(wheels_dir: Path, want: dict[str, str], fetch):
     """Independent SHA-256 check of the downloaded wheels against PyPI's
-    published digests. *want* maps distribution name -> exact version. Any
-    file pip pulled that we did not name (e.g. PyQt6-sip) is left in
-    'unverified' -- pip fetched it from the same TLS'd index."""
+    published digests. *want* maps distribution name -> exact version. Every
+    wheel of a named distribution must match; if PyPI's digests for one can't
+    be fetched, staging fails rather than installing it unchecked. Any file
+    pip pulled that we did not name (e.g. PyQt6-sip) is left in 'unverified'
+    -- pip fetched it from the same TLS'd index."""
     import hashlib
 
     digests: dict[str, str] = {}
+    named: set[str] = set()
     for name, ver in want.items():
+        # Wheel filenames normalize the distribution name: PyQt6-WebEngine
+        # -> PyQt6_WebEngine-6.x-....whl.
+        named.add(name.replace("-", "_").lower())
         try:
             j = fetch(name)
-        except pypi.PyPIError:
-            continue
+        except pypi.PyPIError as exc:
+            raise StageError(
+                f"could not fetch PyPI's published digests for {name} "
+                f"({exc}). No changes have been made.") from exc
         for f in (j.get("releases") or {}).get(ver, []):
             sha = (f.get("digests") or {}).get("sha256")
             if f.get("filename") and sha:
@@ -442,6 +450,10 @@ def _verify_against_pypi(wheels_dir: Path, want: dict[str, str], fetch):
     for wheel in sorted(wheels_dir.glob("*.whl")):
         want = digests.get(wheel.name)
         if not want:
+            if wheel.name.split("-", 1)[0].lower() in named:
+                raise StageError(
+                    f"downloaded {wheel.name} is not a file PyPI publishes "
+                    "for the requested version. No changes have been made.")
             unverified.append(wheel.name)
             continue
         h = hashlib.sha256()
