@@ -125,7 +125,7 @@ done
 # its default isn't installed; 6x13 is built into Xvfb, so no font package is
 # needed either (without -fn it exits at once: "couldn't find a font to use").
 evilwm -fn 6x13 >/dev/null 2>&1 &
-x11vnc -display :0 -forever -shared -nopw -rfbport 5900 -bg -quiet
+x11vnc -display :0 -forever -shared -nopw -localhost -rfbport 5900 -bg -quiet
 websockify --web=/usr/share/novnc 8080 localhost:5900 >/dev/null 2>&1 &
 if [ "${QTWEBENGINE_DISABLE_SANDBOX:-1}" = "1" ]; then
     export QTWEBENGINE_DISABLE_SANDBOX=1
@@ -158,6 +158,8 @@ RUN useradd --create-home --uid 10001 vodou \
     && chown -R vodou:vodou /app /home/vodou/.vodou
 USER vodou
 ENV HOME=/home/vodou
+# Tells the in-app updater that updates come from a newer image, not pip.
+ENV VODOU_DOCKER_IMAGE=1
 VOLUME ["/home/vodou/.vodou"]
 
 # Off by default in THIS variant so it runs with no special flags (see banner).

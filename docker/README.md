@@ -11,10 +11,11 @@ same on any machine without hand-configuring SearXNG, a TLS proxy, and Ollama.
 | `caddy` | TLS reverse proxy, self-signed via its internal CA | `https://localhost/searxng` |
 | `ollama` *(optional)* | Local LLM for AI summaries and chat | `http://127.0.0.1:11434` |
 
-Ollama is also accessible from your WLAN at `http://<host-LAN-IP>:11434` when
-the AI service is running. `OLLAMA_BIND_ADDRESS` defaults to `0.0.0.0` (all
-IPv4 host interfaces). To restrict access to this computer instead, set it to
-`127.0.0.1` in `.env`. Apply a changed binding with
+Ollama listens on this computer only: `OLLAMA_BIND_ADDRESS` defaults to
+`127.0.0.1`. Its API has no authentication, so anyone who can reach it can use,
+pull, or delete models. To reach it from other devices at
+`http://<host-LAN-IP>:11434`, set `OLLAMA_BIND_ADDRESS=0.0.0.0` in `.env` (only
+on a network you trust). Apply a changed binding with
 `docker compose --profile ai up -d ollama` from this directory.
 
 Vodou trusts `localhost` certificates, so Caddy's self-signed cert needs **no**
@@ -33,7 +34,7 @@ cd docker
 cp .env.example .env          # once
 
 # Windows (PowerShell):  ./setup.ps1
-./setup.sh                    # generates a unique SearXNG secret key
+./setup.sh                    # SearXNG secret key + viewer LAN password
 
 # Search only:
 docker compose up -d
@@ -105,47 +106,59 @@ purpose: LAN access is gated one layer up, by **HTTP Basic Auth on the reverse
 proxy** that fronts the viewer (nginx `auth_basic` → a `vodou.htpasswd` file).
 That htpasswd entry is the credential that actually protects LAN access.
 
-**Bootstrap credential (fresh install).** When no credential has been configured
-yet, seed the default:
+**How the password is created.** There is no shared default password. The
+first time you run `setup.sh` / `setup.ps1`, it generates a random password
+for the user `vodou` **on your machine** (never at image build time, so it is
+never baked into an image layer) and prints it **once**, in a clearly labeled
+box. Save it in a password manager: only its salted hash is stored, so it
+can't be shown again.
 
-```
-username: vodou
-password: vodou-lan-2026
-```
+The hash lives in a host file, so it survives `docker compose down/up` and image
+rebuilds and isn't regenerated on restart. The file is `VODOU_VIEWER_HTPASSWD`
+from the environment or `.env` (point it at your nginx's `vodou.htpasswd`), or
+`viewer-auth/vodou.htpasswd` in this folder if that's unset (gitignored).
 
-`manage_viewer_password.py` manages this file. It **never overwrites** an entry
-that already exists, so upgrading or re-running is safe and an installation that
-already set its own password keeps it.
+**Upgrading an older install.** Older versions seeded every install with the
+same password, which was published in these docs. Re-running `setup` (or
+`manage_viewer_password.py seed`) detects that the old default is still active,
+replaces it with a new random password, and prints the new one with a warning.
+A password you chose yourself is never touched.
+
+`manage_viewer_password.py` manages the file directly:
 
 ```sh
 # Point it at your proxy's htpasswd (or export VODOU_VIEWER_HTPASSWD):
 export VODOU_VIEWER_HTPASSWD=/etc/nginx/vodou.htpasswd   # e.g. on Windows:
 #   set VODOU_VIEWER_HTPASSWD=C:\nginx-1.27.4\conf\vodou.htpasswd
 
-# Fresh install: install the bootstrap credential (no-op if one exists)
+# Create the login, or replace the old published default; prints the new
+# password once (no-op when you already have your own password)
 python manage_viewer_password.py seed
 
-# Change it before normal use (prompts; nothing is echoed or logged)
+# Pick your own password instead (prompts; nothing is echoed or logged).
+# The old published default is refused.
 python manage_viewer_password.py change
 
-# Report whether the default is still in use (exit != 0 with --fail-if-default,
-# so a setup script can refuse to finish until it's changed)
+# Warn if the old published default is still active (exit != 0 with
+# --fail-if-default, so a script can refuse to continue)
 python manage_viewer_password.py status --fail-if-default
 ```
 
 Passwords are stored only as salted Apache-MD5 (`$apr1$`) hashes — the format
 nginx accepts on every platform, including Windows — never in plaintext, and are
-never logged or echoed. Whether the bootstrap password is still in use is
-derived from the stored hash itself (no separate flag to drift out of sync).
+never logged; the only plaintext output is the one-time display of a newly
+generated password. Whether the old default is still in use is derived from the
+stored hash itself (no separate flag to drift out of sync). nginx re-reads the
+htpasswd file on each request, so a new password takes effect without a reload.
 
 **Limitation (by design).** There is **no "force a password change at first VNC
 login."** The RFB/VNC protocol has no password-change-on-login mechanism, and
 HTTP Basic Auth is stateless (it has no login event to intercept). Enforcement
-is therefore at **provisioning time**: `seed` installs the default, `status
---fail-if-default` lets your setup step block until it's changed, and `change`
-replaces it. Adding a stateful web login purely to simulate a first-login prompt
-would mean standing up a second authentication system, which this deliberately
-avoids.
+is therefore at **provisioning time**: `setup` / `seed` generate a random
+password (or replace the old default), and `status --fail-if-default` lets
+other scripts check for it. Adding a stateful web login purely to simulate a
+first-login prompt would mean standing up a second authentication system, which
+this deliberately avoids.
 
 ## Notes & gotchas
 

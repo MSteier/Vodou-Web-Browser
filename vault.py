@@ -397,10 +397,7 @@ class Vault:
         Rekeying uses a fresh random salt and today's recommended scrypt
         parameters, so an old vault is also upgraded in passing.
         """
-        self._require_unlocked()
-        if not secrets.compare_digest(
-                _scrypt_raw(current, self._salt, *self._kdf), self._pw_raw):
-            raise WrongMasterPassword()
+        self._verify_master(current)
         self._salt = secrets.token_bytes(16)
         self._kdf = (SCRYPT_N, SCRYPT_R, SCRYPT_P)
         # Changing the password only re-derives the scrypt half; the security
@@ -411,18 +408,29 @@ class Vault:
         self._fernet = Fernet(self._key)
         self._save()
 
+    def _verify_master(self, master: str) -> None:
+        """Re-check the master password (constant-time) against the key the
+        vault was unlocked with. Guards changes that alter how the vault is
+        opened, so a walk-up attacker at an unlocked vault can't make them."""
+        self._require_unlocked()
+        if not secrets.compare_digest(
+                _scrypt_raw(master, self._salt, *self._kdf), self._pw_raw):
+            raise WrongMasterPassword()
+
     # -- second factor (security keys) -----------------------------------
 
     def enroll_authenticator(self, authenticator: Authenticator,
-                             label: str = "") -> None:
+                             label: str = "", *, master: str) -> None:
         """Register a security key as a second factor for this vault.
 
         The first key enrolled generates the shared factor secret and re-keys
         the vault so the file now needs password + key; each further key adds
         another wrapped copy of that secret (a backup). The user is prompted
-        to tap their key during make_credential().
+        to tap their key during make_credential(). The master password must
+        be re-entered, or someone at an unlocked vault could enroll their own
+        key and lock the owner out.
         """
-        self._require_unlocked()
+        self._verify_master(master)
         first = self._factor_secret is None
         if first:
             self._factor_secret = secrets.token_bytes(32)
@@ -442,13 +450,15 @@ class Vault:
         self._fernet = Fernet(self._key)
         self._save()
 
-    def remove_authenticator(self, cred_id: bytes) -> None:
+    def remove_authenticator(self, cred_id: bytes, *, master: str) -> None:
         """Un-enroll one security key. Removing the last one disables 2FA.
 
         When the last key goes, the vault re-keys back to password-only so the
-        user isn't locked out with no key left to present.
+        user isn't locked out with no key left to present. The master password
+        must be re-entered, or someone at an unlocked vault could silently
+        strip the second factor.
         """
-        self._require_unlocked()
+        self._verify_master(master)
         before = len(self._authenticators)
         self._authenticators = [r for r in self._authenticators
                                 if r["cred_id"] != cred_id]

@@ -88,7 +88,7 @@ services:
     restart: unless-stopped
     networks: [vodou]
     ports:
-      - "${OLLAMA_BIND_ADDRESS:-0.0.0.0}:11434:11434"   # host and WLAN access
+      - "${OLLAMA_BIND_ADDRESS:-127.0.0.1}:11434:11434"   # this computer only by default
     volumes:
       - ollama-data:/root/.ollama
     logging:
