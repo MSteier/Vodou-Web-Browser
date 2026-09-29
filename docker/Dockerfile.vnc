@@ -125,7 +125,7 @@ done
 # its default isn't installed; 6x13 is built into Xvfb, so no font package is
 # needed either (without -fn it exits at once: "couldn't find a font to use").
 evilwm -fn 6x13 >/dev/null 2>&1 &
-x11vnc -display :0 -forever -shared -nopw -rfbport 5900 -bg -quiet
+x11vnc -display :0 -forever -shared -nopw -localhost -rfbport 5900 -bg -quiet
 websockify --web=/usr/share/novnc 8080 localhost:5900 >/dev/null 2>&1 &
 if [ "${QTWEBENGINE_DISABLE_SANDBOX:-1}" = "1" ]; then
     export QTWEBENGINE_DISABLE_SANDBOX=1

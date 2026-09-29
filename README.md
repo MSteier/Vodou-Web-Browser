@@ -92,7 +92,7 @@ virtual display and a noVNC web client, so there's nothing to install but
 Docker:
 
 ```bash
-docker run -p 8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
+docker run -p 127.0.0.1:8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
 ```
 
 Then open <http://localhost:8080/>. The volume keeps your profile (bookmarks,

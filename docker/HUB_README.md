@@ -8,14 +8,17 @@ to run in a container and viewed in your web browser — no host X server needed
 ## Quick start
 
 ```bash
-docker run -p 8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
+docker run -p 127.0.0.1:8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
 ```
 
 Then open **http://localhost:8080/** in any browser. Vodou appears there,
 running inside the container. Works the same on Windows, macOS, and Linux.
 
-- `-p 8080:8080` — serves the noVNC web viewer. Change the left number to use a
-  different local port (e.g. `-p 9000:8080` → http://localhost:9000/).
+- `-p 127.0.0.1:8080:8080` — serves the noVNC web viewer on this computer only.
+  The viewer has no password of its own, so keep the `127.0.0.1:` prefix unless
+  an authenticating reverse proxy sits in front of it (see the full docs). Change
+  the middle number to use a different local port (e.g.
+  `-p 127.0.0.1:9000:8080` → http://localhost:9000/).
 - `-v vodou-data:/home/vodou/.vodou` — persists your profile (bookmarks, vault,
   plugins) across runs. Drop it for a fully disposable session.
 - `-e VNC_GEOMETRY=1920x1080` — optional, sets the virtual screen size.
@@ -164,7 +167,7 @@ To run with **no special flags**, this image starts with Chromium's sandbox
 so at startup. To keep the sandbox on, run with:
 
 ```bash
-docker run -p 8080:8080 --cap-add SYS_ADMIN \
+docker run -p 127.0.0.1:8080:8080 --cap-add SYS_ADMIN \
   -e QTWEBENGINE_DISABLE_SANDBOX=0 \
   -v vodou-data:/home/vodou/.vodou msteier/vodou
 ```

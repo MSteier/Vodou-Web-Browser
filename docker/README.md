@@ -11,10 +11,11 @@ same on any machine without hand-configuring SearXNG, a TLS proxy, and Ollama.
 | `caddy` | TLS reverse proxy, self-signed via its internal CA | `https://localhost/searxng` |
 | `ollama` *(optional)* | Local LLM for AI summaries and chat | `http://127.0.0.1:11434` |
 
-Ollama is also accessible from your WLAN at `http://<host-LAN-IP>:11434` when
-the AI service is running. `OLLAMA_BIND_ADDRESS` defaults to `0.0.0.0` (all
-IPv4 host interfaces). To restrict access to this computer instead, set it to
-`127.0.0.1` in `.env`. Apply a changed binding with
+Ollama listens on this computer only: `OLLAMA_BIND_ADDRESS` defaults to
+`127.0.0.1`. Its API has no authentication, so anyone who can reach it can use,
+pull, or delete models. To reach it from other devices at
+`http://<host-LAN-IP>:11434`, set `OLLAMA_BIND_ADDRESS=0.0.0.0` in `.env` (only
+on a network you trust). Apply a changed binding with
 `docker compose --profile ai up -d ollama` from this directory.
 
 Vodou trusts `localhost` certificates, so Caddy's self-signed cert needs **no**
