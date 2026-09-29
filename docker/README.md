@@ -107,12 +107,9 @@ proxy** that fronts the viewer (nginx `auth_basic` → a `vodou.htpasswd` file).
 That htpasswd entry is the credential that actually protects LAN access.
 
 **Bootstrap credential (fresh install).** When no credential has been configured
-yet, seed the default:
-
-```
-username: vodou
-password: vodou-lan-2026
-```
+yet, `seed` creates the user `vodou` with a random password generated for this
+install. The password is printed **once** — save it in a password manager.
+There is no shared default password.
 
 `manage_viewer_password.py` manages this file. It **never overwrites** an entry
 that already exists, so upgrading or re-running is safe and an installation that
@@ -123,21 +120,27 @@ already set its own password keeps it.
 export VODOU_VIEWER_HTPASSWD=/etc/nginx/vodou.htpasswd   # e.g. on Windows:
 #   set VODOU_VIEWER_HTPASSWD=C:\nginx-1.27.4\conf\vodou.htpasswd
 
-# Fresh install: install the bootstrap credential (no-op if one exists)
+# Fresh install: create the login with a generated password, printed once
+# (no-op if one exists)
 python manage_viewer_password.py seed
 
-# Change it before normal use (prompts; nothing is echoed or logged)
+# Pick your own password instead (prompts; nothing is echoed or logged)
 python manage_viewer_password.py change
 
-# Report whether the default is still in use (exit != 0 with --fail-if-default,
-# so a setup script can refuse to finish until it's changed)
+# Report whether the old published default is still in use (exit != 0 with
+# --fail-if-default, so a setup script can refuse to finish until it's changed)
 python manage_viewer_password.py status --fail-if-default
 ```
 
+**Upgrading from an older install?** Versions before per-install passwords
+seeded everyone with the same published password, `vodou-lan-2026`. If
+`status` reports it, run `change` right away — anyone can look that password up.
+
 Passwords are stored only as salted Apache-MD5 (`$apr1$`) hashes — the format
 nginx accepts on every platform, including Windows — never in plaintext, and are
-never logged or echoed. Whether the bootstrap password is still in use is
-derived from the stored hash itself (no separate flag to drift out of sync).
+never logged; the only plaintext output is `seed`'s one-time display. Whether
+the published default is still in use is derived from the stored hash itself
+(no separate flag to drift out of sync).
 
 **Limitation (by design).** There is **no "force a password change at first VNC
 login."** The RFB/VNC protocol has no password-change-on-login mechanism, and

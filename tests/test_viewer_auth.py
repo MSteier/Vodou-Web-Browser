@@ -47,9 +47,9 @@ print("apr1 hashing")
 check("apr1 matches openssl reference vector",
       va.apr1("vodou", "abcd1234")
       == "$apr1$abcd1234$dRT61VkljDby0iStGz/4i/")
-h = va.apr1("vodou-lan-2026")
+h = va.apr1(va.PUBLISHED_DEFAULT_PASSWORD)
 check("hash carries the $apr1$ prefix", h.startswith("$apr1$"))
-check("verify accepts the right password", va.verify("vodou-lan-2026", h))
+check("verify accepts the right password", va.verify(va.PUBLISHED_DEFAULT_PASSWORD, h))
 check("verify rejects the wrong password", not va.verify("nope", h))
 check("random salt -> different hashes for same password",
       va.apr1("x") != va.apr1("x"))
@@ -58,91 +58,98 @@ check("random salt -> different hashes for same password",
 try:
     salt = h.split("$", 3)[2]
     ref = subprocess.run(
-        ["openssl", "passwd", "-apr1", "-salt", salt, "vodou-lan-2026"],
+        ["openssl", "passwd", "-apr1", "-salt", salt, va.PUBLISHED_DEFAULT_PASSWORD],
         capture_output=True, text=True, timeout=10).stdout.strip()
     check("our hash equals openssl's for the same salt", ref == h)
 except (OSError, subprocess.SubprocessError):
     print("  --  (openssl not available; skipped cross-check)")
 
 # ---------------------------------------------------------------------------
-print("\nfresh install seeds the bootstrap credential")
+print("\nfresh install seeds a random per-install password")
 
 p = fresh()
-check("seed writes on a fresh install", va.seed_default(p) is True)
+pw = va.seed_default(p)
+check("seed returns the generated password on a fresh install",
+      isinstance(pw, str) and len(pw) >= 24)
 entries = va.read_htpasswd(p)
 check("default username present", va.DEFAULT_USERNAME in entries)
-check("default password authenticates",
-      va.verify(va.DEFAULT_PASSWORD, entries[va.DEFAULT_USERNAME]))
-check("bootstrap default is vodou / vodou-lan-2026",
-      va.DEFAULT_USERNAME == "vodou"
-      and va.DEFAULT_PASSWORD == "vodou-lan-2026")
-check("is_default_unchanged True right after seeding",
-      va.is_default_unchanged(p))
+check("generated password authenticates",
+      va.verify(pw, entries[va.DEFAULT_USERNAME]))
+check("seeded password is not the published default",
+      pw != va.PUBLISHED_DEFAULT_PASSWORD
+      and not va.uses_published_default(p))
+check("each install gets a different password",
+      va.seed_default(fresh()) != pw)
 
 # ---------------------------------------------------------------------------
 print("\nexisting credentials are never overwritten")
 
 p2 = fresh()
 va.write_htpasswd(p2, {"vodou": va.apr1("already-strong-secret")})
-check("seed is a no-op when an entry exists", va.seed_default(p2) is False)
+check("seed is a no-op when an entry exists", va.seed_default(p2) is None)
 check("the pre-existing password is preserved",
       va.verify("already-strong-secret", va.read_htpasswd(p2)["vodou"]))
-check("a preserved non-default is NOT flagged as default",
-      not va.is_default_unchanged(p2))
+check("a preserved non-default is NOT flagged as published default",
+      not va.uses_published_default(p2))
+
+# An install seeded by an older version still holds the published default.
+p_old = fresh()
+va.write_htpasswd(p_old, {"vodou": va.apr1(va.PUBLISHED_DEFAULT_PASSWORD)})
+check("legacy install on the published default is flagged",
+      va.uses_published_default(p_old))
+check("seed leaves the legacy entry alone", va.seed_default(p_old) is None)
 
 # ---------------------------------------------------------------------------
 print("\nchanging the password")
 
 p3 = fresh()
-va.seed_default(p3)
+pw3 = va.seed_default(p3)
 check("wrong current password is rejected",
       raises(va.PasswordChangeError,
              lambda: va.change_password(p3, "vodou", "WRONG",
                                         "brand-new-pass", "brand-new-pass")))
 check("mismatched confirmation is rejected",
       raises(va.PasswordChangeError,
-             lambda: va.change_password(p3, "vodou", va.DEFAULT_PASSWORD,
-                                        "new-a", "new-b")))
+             lambda: va.change_password(p3, "vodou", pw3, "new-a", "new-b")))
 check("empty new password is rejected",
       raises(va.PasswordChangeError,
-             lambda: va.change_password(p3, "vodou", va.DEFAULT_PASSWORD,
-                                        "", "")))
-check("reusing the default password is rejected",
+             lambda: va.change_password(p3, "vodou", pw3, "", "")))
+check("switching to the published default is rejected",
       raises(va.PasswordChangeError,
-             lambda: va.change_password(p3, "vodou", va.DEFAULT_PASSWORD,
-                                        va.DEFAULT_PASSWORD,
-                                        va.DEFAULT_PASSWORD)))
+             lambda: va.change_password(p3, "vodou", pw3,
+                                        va.PUBLISHED_DEFAULT_PASSWORD,
+                                        va.PUBLISHED_DEFAULT_PASSWORD)))
+check("reusing the current password is rejected",
+      raises(va.PasswordChangeError,
+             lambda: va.change_password(p3, "vodou", pw3, pw3, pw3)))
 # All rejections above left the credential untouched.
-check("still on the default after every rejected change",
-      va.is_default_unchanged(p3))
+check("seeded password still works after every rejected change",
+      va.verify(pw3, va.read_htpasswd(p3)["vodou"]))
 
 # A valid change goes through and persists.
-va.change_password(p3, "vodou", va.DEFAULT_PASSWORD,
+va.change_password(p3, "vodou", pw3,
                    "a-strong-new-password", "a-strong-new-password")
 check("new password authenticates after change",
       va.verify("a-strong-new-password", va.read_htpasswd(p3)["vodou"]))
-check("old default no longer authenticates",
-      not va.verify(va.DEFAULT_PASSWORD, va.read_htpasswd(p3)["vodou"]))
-check("is_default_unchanged False after a successful change",
-      not va.is_default_unchanged(p3))
+check("seeded password no longer authenticates",
+      not va.verify(pw3, va.read_htpasswd(p3)["vodou"]))
 
-# The change state persists across a re-read (the stored hash IS the state).
-check("changed state persists on re-read",
-      not va.is_default_unchanged(p3))
-# And the (now non-default) login still works — existing auth keeps working.
-check("changed credential still authenticates normally",
-      va.verify("a-strong-new-password", va.read_htpasswd(p3)["vodou"]))
+# Moving a legacy install off the published default clears the flag.
+va.change_password(p_old, "vodou", va.PUBLISHED_DEFAULT_PASSWORD,
+                   "legacy-now-changed", "legacy-now-changed")
+check("published-default flag clears after change",
+      not va.uses_published_default(p_old))
 
 # ---------------------------------------------------------------------------
 print("\nno plaintext password is ever written to disk")
 
 p4 = fresh()
-va.seed_default(p4)
-va.change_password(p4, "vodou", va.DEFAULT_PASSWORD,
+pw4 = va.seed_default(p4)
+check("seeded password plaintext absent from the file",
+      pw4 not in p4.read_text(encoding="utf-8"))
+va.change_password(p4, "vodou", pw4,
                    "another-secret-value", "another-secret-value")
 blob = p4.read_text(encoding="utf-8")
-check("default password plaintext absent from the file",
-      va.DEFAULT_PASSWORD not in blob)
 check("new password plaintext absent from the file",
       "another-secret-value" not in blob)
 check("file only stores $apr1$ hashes",
@@ -158,10 +165,9 @@ except va.PasswordChangeError as exc:
           "the-wrong-current-secret" not in str(exc))
 
 # ---------------------------------------------------------------------------
-print("\nCLI status reports and can fail a setup script")
+print("\nCLI seed shows the password once; status can fail a setup script")
 
 p5 = fresh()
-va.seed_default(p5)
 
 
 def _cli(*args):
@@ -170,15 +176,24 @@ def _cli(*args):
          "--file", str(p5), *args],
         capture_output=True, text=True, timeout=30)
 
+r = _cli("seed")
+shown = [line.split("password:", 1)[1].strip()
+         for line in r.stdout.splitlines() if "password:" in line]
+check("CLI seed prints the generated password",
+      len(shown) == 1 and va.verify(shown[0], va.read_htpasswd(p5)["vodou"]))
+r = _cli("seed")
+check("CLI re-seed does not print a password",
+      r.returncode == 0 and "password:" not in r.stdout)
 r = _cli("status", "--fail-if-default")
-check("status --fail-if-default exits nonzero while default in use",
+check("status --fail-if-default exits zero for a generated password",
+      r.returncode == 0)
+
+va.write_htpasswd(p5, {"vodou": va.apr1(va.PUBLISHED_DEFAULT_PASSWORD)})
+r = _cli("status", "--fail-if-default")
+check("status --fail-if-default exits nonzero on the published default",
       r.returncode != 0)
 check("CLI status output does not print the password",
-      va.DEFAULT_PASSWORD not in (r.stdout + r.stderr))
-
-va.change_password(p5, "vodou", va.DEFAULT_PASSWORD, "cli-new-pw", "cli-new-pw")
-r = _cli("status", "--fail-if-default")
-check("status --fail-if-default exits zero once changed", r.returncode == 0)
+      va.PUBLISHED_DEFAULT_PASSWORD not in (r.stdout + r.stderr))
 
 # ---------------------------------------------------------------------------
 print()

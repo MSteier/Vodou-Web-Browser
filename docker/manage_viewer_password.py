@@ -9,23 +9,27 @@ docker/README.md for the security model.
 
 There is deliberately NO "force change at first VNC login": the RFB protocol has
 no such hook and HTTP Basic Auth is stateless. Enforcement is therefore at
-provisioning time — `seed` installs the bootstrap credential on a fresh install,
-`status` reports (and can fail a setup script) while the default is still in
-use, and `change` replaces it.
+provisioning time — `seed` installs a bootstrap credential with a password
+generated for this install (shown once), `status` reports (and can fail a setup
+script) while the old published default is still in use, and `change`
+replaces it.
 
 Examples
 --------
-    # Seed the bootstrap credential on a fresh install (no-op if one exists):
+    # Seed a bootstrap credential with a random password, printed once
+    # (no-op if one exists):
     python manage_viewer_password.py seed --file /path/to/vodou.htpasswd
 
-    # In a setup script: stop with a nonzero exit while the default is unchanged
+    # In a setup script: stop with a nonzero exit while the old published
+    # default password is still in use
     python manage_viewer_password.py status --file ... --fail-if-default
 
     # Change the password (prompts, never echoes):
     python manage_viewer_password.py change --file ...
 
 The htpasswd path comes from --file or the VODOU_VIEWER_HTPASSWD environment
-variable. Passwords are never echoed, logged, or written except as $apr1$ hashes.
+variable. Passwords are never logged or written except as $apr1$ hashes; the
+only plaintext output is the one-time display of a freshly seeded password.
 """
 
 from __future__ import annotations
@@ -48,10 +52,13 @@ def _resolve_path(args) -> str:
 
 def _cmd_seed(args) -> int:
     path = _resolve_path(args)
-    if va.seed_default(path, args.username):
+    password = va.seed_default(path, args.username)
+    if password is not None:
         print(f"Seeded bootstrap credential for “{args.username}” at {path}.")
-        print("IMPORTANT: this is the default LAN password. Change it before "
-              "normal use:")
+        print(f"    username: {args.username}")
+        print(f"    password: {password}")
+        print("This password was generated for this install and is shown "
+              "ONLY now —\nsave it in a password manager. To pick your own:")
         print(f"    python {os.path.basename(__file__)} change --file {path}")
         return 0
     print(f"A credential for “{args.username}” already exists at {path}; "
@@ -65,11 +72,11 @@ def _cmd_status(args) -> int:
     if args.username not in entries:
         print(f"No credential configured for “{args.username}” at {path}.")
         return 2
-    if va.is_default_unchanged(path, args.username):
-        print(f"“{args.username}” is still using the DEFAULT bootstrap "
-              f"password — change it before normal use.")
+    if va.uses_published_default(path, args.username):
+        print(f"“{args.username}” is still using the old PUBLISHED default "
+              f"password, which anyone can look up — change it now.")
         return 1 if args.fail_if_default else 0
-    print(f"“{args.username}” is using a changed (non-default) password.")
+    print(f"“{args.username}” is not using the published default password.")
     return 0
 
 
@@ -98,14 +105,14 @@ def main(argv: list[str] | None = None) -> int:
                              f"{va.DEFAULT_USERNAME}).")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("seed", help="Install the bootstrap credential if none "
-                   "exists (never overwrites).")
+    sub.add_parser("seed", help="Install a bootstrap credential with a "
+                   "generated password, shown once (never overwrites).")
 
-    p_status = sub.add_parser("status", help="Report whether the default "
-                              "password is still in use.")
+    p_status = sub.add_parser("status", help="Report whether the old "
+                              "published default password is still in use.")
     p_status.add_argument("--fail-if-default", action="store_true",
-                          help="Exit nonzero while the default is unchanged "
-                               "(for setup scripts).")
+                          help="Exit nonzero while the published default is "
+                               "in use (for setup scripts).")
 
     sub.add_parser("change", help="Change the password (prompts; no echo).")
 
