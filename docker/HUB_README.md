@@ -28,13 +28,16 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.10` — pinned version
+- `1.54.11` — pinned version
 
 Tags match Vodou's own version. A rebuild of the same Vodou version (a newer base
 image or security-patched system packages) gets a revision suffix instead:
 `1.54.10-r1`, `1.54.10-r2`, and so on. Same browser, updated image.
 
 ## Changelog
+- **1.54.11** — Automatically applies the glass-blur workaround on my.replika.ai
+  to address flickering chat inputs and messages. Panels remain translucent
+  without the blur. Removes the Graphics submenu.
 - **1.54.10** — **Check Bookmarks** now shows a progress bar ("9 / 20 checked
   (45%)") and clearly reports when the scan is complete, with how many
   bookmarks failed. While a scan runs, Stop scan is the only active button;
