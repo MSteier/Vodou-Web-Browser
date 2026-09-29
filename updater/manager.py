@@ -109,6 +109,20 @@ class UpdateManager:
                 reason=msg,
                 allow_prerelease=allow_prerelease)
 
+        if in_docker_image():
+            msg = ("This is the Vodou Docker image. Its Qt and Chromium ship "
+                   "with the image, so the in-app updater doesn't change "
+                   "them. To update, pull the newest image and recreate the "
+                   "container:\n\n    docker pull msteier/vodou:latest\n\n"
+                   "(Watchtower does this for you if you run it.) No changes "
+                   "have been made.")
+            return UpdatePlan(
+                current=cur,
+                compatibility=_empty_compat(msg),
+                possible=False,
+                reason=msg,
+                allow_prerelease=allow_prerelease)
+
         compat = resolve_compatible_versions(
             cur, allow_prerelease=allow_prerelease, fetch=self._fetch)
 
@@ -401,6 +415,14 @@ def _plan_dict(plan: UpdatePlan) -> dict:
         "install_specs": target_specs(t),
         "restart_required": True,
     }
+
+
+def in_docker_image() -> bool:
+    """True inside the Vodou Docker image, where updates come from a newer
+    image rather than pip. VODOU_DOCKER_IMAGE is set by Dockerfile.vnc;
+    /.dockerenv covers images built before that marker existed."""
+    return bool(os.environ.get("VODOU_DOCKER_IMAGE")) or \
+        Path("/.dockerenv").exists()
 
 
 def _empty_compat(reason: str):
