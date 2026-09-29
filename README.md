@@ -1,5 +1,9 @@
 # Vodou Browser
 
+Version **1.54.11** automatically applies the glass-blur workaround on
+my.replika.ai to address flickering chat inputs and messages, and removes the
+Graphics submenu. Replika panels keep their transparency without the blur.
+
 Version **1.54.10** gives Check Bookmarks a progress bar and a clear "scan
 complete" report, and greys out every button but Stop scan while a scan runs.
 1.54.9 trimmed the Docker image (GTK 3 and CUPS removed: 5 High / 7 Medium /
