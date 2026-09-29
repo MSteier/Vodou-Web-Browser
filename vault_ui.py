@@ -431,9 +431,17 @@ class SecurityKeysDialog(QDialog):
             box.setDefaultButton(QMessageBox.StandardButton.No)
             if box.exec() != QMessageBox.StandardButton.Yes:
                 return
+        master = ask_master_password(self, "Add security key")
+        if master is None:
+            return
         authenticator = WindowsWebAuthnAuthenticator(int(self.winId()))
         try:
-            self.vault.enroll_authenticator(authenticator, label.strip())
+            self.vault.enroll_authenticator(authenticator, label.strip(),
+                                            master=master)
+        except WrongMasterPassword:
+            QMessageBox.warning(self, "Couldn't add the key",
+                                "That master password is incorrect.")
+            return
         except AuthenticatorError as error:
             QMessageBox.warning(
                 self, "Couldn't add the key",
@@ -466,12 +474,28 @@ class SecurityKeysDialog(QDialog):
         box.setDefaultButton(QMessageBox.StandardButton.No)
         if box.exec() != QMessageBox.StandardButton.Yes:
             return
+        master = ask_master_password(self, "Remove security key")
+        if master is None:
+            return
         try:
-            self.vault.remove_authenticator(cred_id)
+            self.vault.remove_authenticator(cred_id, master=master)
+        except WrongMasterPassword:
+            QMessageBox.warning(self, "Couldn't remove the key",
+                                "That master password is incorrect.")
+            return
         except (ValueError, OSError) as error:
             QMessageBox.warning(self, "Couldn't remove the key", str(error))
             return
         self._refresh()
+
+
+def ask_master_password(parent: QWidget | None, title: str) -> str | None:
+    """Prompt (masked) for the master password to confirm a sensitive change.
+    None if the user cancels or enters nothing."""
+    text, ok = QInputDialog.getText(
+        parent, title, "Enter your master password to confirm:",
+        QLineEdit.EchoMode.Password)
+    return text if ok and text else None
 
 
 def ensure_unlocked(vault: Vault, parent: QWidget | None = None) -> bool:
@@ -1196,7 +1220,9 @@ class VaultDialog(QDialog):
         if not self.vault.factor_enrolled:
             SecurityKeysDialog(self.vault, self).exec()
         elif self._confirm_disable_two_factor():
-            self._disable_two_factor()
+            master = ask_master_password(self, "Turn off two-factor")
+            if master is not None:
+                self._disable_two_factor(master)
         self._sync_two_factor_action()
 
     def _confirm_disable_two_factor(self) -> bool:
@@ -1213,12 +1239,16 @@ class VaultDialog(QDialog):
         box.setDefaultButton(QMessageBox.StandardButton.No)
         return box.exec() == QMessageBox.StandardButton.Yes
 
-    def _disable_two_factor(self) -> None:
+    def _disable_two_factor(self, master: str) -> None:
         """Remove all enrolled keys. Reuses vault.remove_authenticator (removing
         the last key reverts the vault to password-only) — no new crypto here."""
         try:
             for record in self.vault.list_authenticators():
-                self.vault.remove_authenticator(record["cred_id"])
+                self.vault.remove_authenticator(record["cred_id"],
+                                                master=master)
+        except WrongMasterPassword:
+            QMessageBox.warning(self, "Couldn't turn off two-factor",
+                                "That master password is incorrect.")
         except (ValueError, OSError) as error:
             QMessageBox.warning(self, "Couldn't turn off two-factor",
                                 str(error))

@@ -77,7 +77,7 @@ class FakeVault:
     def list_authenticators(self):
         return [dict(k) for k in self._keys]
 
-    def remove_authenticator(self, cred_id):
+    def remove_authenticator(self, cred_id, *, master):
         before = len(self._keys)
         self._keys = [k for k in self._keys if k["cred_id"] != cred_id]
         if len(self._keys) == before:
@@ -106,7 +106,7 @@ try:
     check("switch is enabled when enrolled", action.isEnabled())
 
     # --- turning it off removes every key ---------------------------------
-    dlg._disable_two_factor()
+    dlg._disable_two_factor("master-pw")
     check("disable removes all enrolled keys", not vault.factor_enrolled)
     dlg._sync_two_factor_action()
     check("switch re-syncs to OFF after disable", not action.isChecked())
