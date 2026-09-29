@@ -18,7 +18,7 @@ Flow the dialog drives (see updater/__init__.py for the guarantees):
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -209,8 +209,13 @@ class UpdatesDialog(QDialog):
             "Could not check for updates: " + message
             + "\nNo changes have been made.")
         self._status.setStyleSheet("color: #b00; padding: 8px 0;")
+        self._fit_to_contents()
 
     def _on_check_done(self, plan) -> None:
+        self._show_plan(plan)
+        self._fit_to_contents()
+
+    def _show_plan(self, plan) -> None:
         self._plan = plan
         self._recheck_btn.setEnabled(True)
         self._render_current(plan.current)
@@ -300,6 +305,7 @@ class UpdatesDialog(QDialog):
         self._stage_worker.done.connect(self._on_stage_done)
         self._stage_worker.failed.connect(self._on_stage_failed)
         self._stage_worker.start()
+        self._fit_to_contents()
 
     def _append_log(self, line: str) -> None:
         self._log.appendPlainText(line)
@@ -312,6 +318,7 @@ class UpdatesDialog(QDialog):
         self._append_log("\n" + message)
         self._status.setText("Update not applied. " + message.splitlines()[0])
         self._status.setStyleSheet("color: #b00; padding: 8px 0;")
+        self._fit_to_contents()
         QMessageBox.warning(
             self, "Update not applied",
             message + "\n\nNothing on your system was changed.")
@@ -327,6 +334,32 @@ class UpdatesDialog(QDialog):
                                    " font-weight: 600;")
         self._update_btn.setText("Restart && finish")
         self._update_btn.setEnabled(True)
+        self._fit_to_contents()
+
+    def _fit_to_contents(self) -> None:
+        """Grow the window to fit text that appeared after it opened.
+
+        The dialog is sized when it opens, while it only says "Checking…".
+        Word-wrapped labels only know their height for a given width, which a
+        window's minimum size doesn't account for, so a long result (e.g. the
+        Docker image's "Update unavailable" reason) used to be squeezed into
+        the original height, drawing rows on top of each other.
+
+        Deferred one event-loop turn: newly shown or added widgets aren't laid
+        out yet at the moment their text changes.
+        """
+        QTimer.singleShot(0, self._apply_fit)
+
+    def _apply_fit(self) -> None:
+        layout = self.layout()
+        layout.activate()
+        need = max(layout.totalHeightForWidth(self.width()),
+                   self.minimumSizeHint().height())
+        if need <= 0:
+            return
+        self.setMinimumHeight(need)
+        if self.height() < need:
+            self.resize(self.width(), need)
 
     @property
     def outcome(self) -> str:

@@ -22,7 +22,13 @@ from updater import apply as apply_mod  # noqa: E402
 from updater import backup as backup_mod  # noqa: E402
 from updater import compatibility, diagnostics, pypi, versions  # noqa: E402
 from updater.manager import StageError, UpdateManager, target_specs  # noqa: E402
+from updater import manager as manager_mod  # noqa: E402
 from updater.models import CurrentVersions  # noqa: E402
+
+# These tests model a normal source checkout; don't let the machine running
+# them (e.g. a Docker container) change the outcome.
+_real_in_docker_image = manager_mod.in_docker_image
+manager_mod.in_docker_image = lambda: False
 
 _failures: list[str] = []
 
@@ -282,6 +288,37 @@ def test_frozen_build_refused() -> None:
     check("frozen: not possible", plan.possible is False)
     check("frozen: reason says rebuild",
           "rebuild" in plan.reason.lower())
+
+
+def test_docker_image_points_to_image_pull() -> None:
+    # In the Docker image the updater can't (and shouldn't) pip-upgrade Qt;
+    # it must say to pull a newer image instead of suggesting a venv.
+    table = {"PyQt6": _project("PyQt6", {"6.11.0": ">=3.10"}),
+             "PyQt6-WebEngine": _project(
+                 "PyQt6-WebEngine", {"6.11.0": ">=3.10"})}
+    manager_mod.in_docker_image = lambda: True
+    try:
+        plan = _mgr(table).check_for_updates(
+            current=base_current(site_packages_writable=False))
+    finally:
+        manager_mod.in_docker_image = lambda: False
+    check("docker: not possible", plan.possible is False)
+    check("docker: reason says docker pull",
+          "docker pull msteier/vodou" in plan.reason)
+    check("docker: no venv advice",
+          "virtual environment" not in plan.reason)
+
+    import os as _os
+    saved = _os.environ.get("VODOU_DOCKER_IMAGE")
+    _os.environ["VODOU_DOCKER_IMAGE"] = "1"
+    try:
+        check("docker: image marker env var detected",
+              _real_in_docker_image())
+    finally:
+        if saved is None:
+            _os.environ.pop("VODOU_DOCKER_IMAGE", None)
+        else:
+            _os.environ["VODOU_DOCKER_IMAGE"] = saved
 
 
 def test_readonly_site_packages_refused() -> None:
@@ -659,6 +696,7 @@ ALL = [
     test_python_incompatibility_blocks_newer_only,
     test_no_release_supports_this_python, test_lockstep_no_version_mixing,
     test_prerelease_gate, test_frozen_build_refused,
+    test_docker_image_points_to_image_pull,
     test_readonly_site_packages_refused,
     test_stage_download_failure_leaves_nothing,
     test_stage_hash_mismatch_aborts,
