@@ -1600,7 +1600,12 @@ class DraggableTabBar(QTabBar):
 # Chromium vetoes anything unsafe (an audible tab, an active download, WebRTC,
 # recent input); pinned and not-yet-loaded tabs are never touched. This is the
 # single biggest RAM lever in a multi-tab Chromium browser.
-TAB_FREEZE_AFTER_S = 60
+#
+# 60s was too eager: unfreezing a tab isn't free (paused timers/polling all
+# catch up at once), so switching back to almost any background tab in
+# ordinary browsing paid that cost. 15 minutes keeps the RAM win for tabs
+# genuinely left idle while no longer penalizing normal tab-switching.
+TAB_FREEZE_AFTER_S = 15 * 60
 TAB_LIFECYCLE_SWEEP_MS = 30_000
 
 # The discard timeout is user-configurable (☰ → Settings → Idle tab memory):
