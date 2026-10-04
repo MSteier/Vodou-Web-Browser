@@ -96,6 +96,13 @@ jobs:
           PYTHONUTF8: "1"
         run: python tests/test_ai_websearch.py
 
+      # Pure-Python ExtensionStore persistence only -- deliberately NOT
+      # tests/manual_verify_extensions.py, which exercises the real
+      # QWebEngineExtensionManager and has been observed to crash under
+      # this kind of automated invocation; see that file's docstring.
+      - name: Extension store checks
+        run: python tests/test_extensions.py
+
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer
         if: runner.os == 'Linux'
