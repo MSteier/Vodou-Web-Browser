@@ -20,6 +20,10 @@ class BookmarkHealthDialog(QDialog):
         self.checked = self.total = 0
         self.scan_error = ''
         self.setWindowTitle('Check Bookmarks')
+        # Non-modal (see main.py's check_bookmarks()) so a scan can run in
+        # the background while browsing continues; the minimize button only
+        # does anything useful because of that.
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinimizeButtonHint)
         self.resize(940, 600)
         layout = QVBoxLayout(self)
         label = QLabel('Check bookmarked links with HEAD, then retry failures with GET. '

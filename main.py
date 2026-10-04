@@ -1947,6 +1947,7 @@ class BrowserWindow(QMainWindow):
 
         self.vault = Vault()
         self.bookmarks = Bookmarks()
+        self._bookmark_health_dialog = None
         self._vault_autolock_minutes = load_vault_autolock_minutes()
         self._vault_lock_timer = QTimer(self)
         self._vault_lock_timer.setSingleShot(True)
@@ -4651,9 +4652,24 @@ class BrowserWindow(QMainWindow):
         menu.addAction("Import bookmarks (.html)…", self.import_bookmarks)
 
     def check_bookmarks(self) -> None:
+        # Non-modal: a scan runs on its own thread already, so there's no
+        # reason browsing has to stop while it runs. Kept to one instance --
+        # two concurrent scans would just contend over the same hosts.
+        existing = self._bookmark_health_dialog
+        if existing is not None:
+            existing.showNormal()  # un-minimizes if it was minimized
+            existing.raise_()
+            existing.activateWindow()
+            return
         from bookmark_health_ui import BookmarkHealthDialog
-        BookmarkHealthDialog(self.bookmarks, self,
-            open_url=lambda url: self._open_in_current_or_new(QUrl(url))).exec()
+        dialog = BookmarkHealthDialog(self.bookmarks, self,
+            open_url=lambda url: self._open_in_current_or_new(QUrl(url)))
+        self._bookmark_health_dialog = dialog
+        dialog.finished.connect(self._on_bookmark_health_closed)
+        dialog.show()
+
+    def _on_bookmark_health_closed(self, _result: int) -> None:
+        self._bookmark_health_dialog = None
         view = self.current_view()
         if view is not None:
             self._update_star(view.url())
