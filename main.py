@@ -373,6 +373,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWebEngineCore import (
     QWebEngineContextMenuRequest,
     QWebEngineDownloadRequest,
+    QWebEngineExtensionInfo,
     QWebEnginePage,
     QWebEnginePermission,
     QWebEngineProfile,
@@ -428,6 +429,8 @@ from favicons import FaviconStore
 from icons import icon_set, make_icon
 from bookmarks_ui import BookmarksManagerDialog
 from downloads_ui import DownloadsDialog
+from extensions import ExtensionStore
+from extensions_ui import ExtensionsDialog
 from plugins import PluginManager, REPLIKA_DEFLICKER, wrap_plugin_source
 from plugins_ui import PluginsDialog
 from importers import parse_bookmarks_html, parse_password_csv
@@ -1934,6 +1937,17 @@ class BrowserWindow(QMainWindow):
         self._plugin_scripts: list[QWebEngineScript] = []
         self._apply_plugins()
 
+        # Real third-party Chrome (Manifest V3) extensions -- unlike the
+        # reviewed plugin catalog above, Vodou does not review this code.
+        # loadExtension() is explicitly temporary (not Qt's "permanent"
+        # installExtension(), which would persist into the profile directory
+        # that gets shredded every session anyway) -- so Vodou remembers the
+        # paths itself and reloads them here on every startup.
+        self.extensions = ExtensionStore()
+        self.profile.extensionManager().loadFinished.connect(
+            self._on_extension_load_finished)
+        self._apply_extensions()
+
         self._fill_offer_dismissed: set[str] = set()        # hosts
         self._capture_dismissed: set[tuple[str, str]] = set()  # (host, user)
         # Last zoom the user chose; new tabs inherit it so zooming once
@@ -2393,6 +2407,7 @@ class BrowserWindow(QMainWindow):
         # --- Extend --------------------------------------------------------
         settings_menu.addSeparator()
         settings_menu.addAction("Plugins…", self.open_plugins)
+        settings_menu.addAction("Extensions…", self.open_extensions)
 
         # --- Data & diagnostics ---
         menu.addSeparator()
@@ -4960,6 +4975,46 @@ class BrowserWindow(QMainWindow):
 
     def open_plugins(self) -> None:
         PluginsDialog(self.plugins, self, on_change=self._apply_plugins).exec()
+
+    # -- extensions ---------------------------------------------------------
+
+    def _apply_extensions(self) -> None:
+        """Reconcile the live QWebEngineExtensionManager with the single
+        enabled ExtensionRecord (see the one-active-extension limit in
+        extensions.py's module docstring: loading a second extension into
+        the same manager was found to reliably crash). Unloads anything
+        live that isn't the current enabled one, then loads the enabled
+        one if it isn't already. Called once at startup (so each session
+        re-earns its own load, matching the profile's shred-on-exit
+        privacy guarantee) and again after the dialog adds/enables one."""
+        manager = self.profile.extensionManager()
+        enabled = self.extensions.enabled_records()
+        enabled_path = enabled[0].source_path if enabled else None
+
+        for info in manager.extensions():
+            if info.path() != enabled_path:
+                manager.unloadExtension(info)
+
+        if enabled_path is not None:
+            live_paths = {info.path() for info in manager.extensions()}
+            if enabled_path not in live_paths:
+                manager.loadExtension(enabled_path)
+
+    def _on_extension_load_finished(self, info: QWebEngineExtensionInfo) -> None:
+        error = info.error()
+        for record in self.extensions.records():
+            if record.source_path == info.path():
+                self.extensions.set_error(record.id, error or "")
+                break
+        if error:
+            self.statusBar().showMessage(
+                f"Extension “{info.name()}” failed to load: {error}", 6000)
+
+    def open_extensions(self) -> None:
+        ExtensionsDialog(
+            self.extensions, self.profile.extensionManager(), self,
+            on_change=self._apply_extensions,
+        ).exec()
 
     def _ensure_devtools(self) -> None:
         """Build the docked DevTools panel (header with a close button + the
