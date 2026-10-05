@@ -2231,6 +2231,8 @@ class BrowserWindow(QMainWindow):
             "Lock the password vault now, clearing its key from memory. "
             "You'll need the master password to open it again.")
         menu.addAction("Import passwords (.csv)…", self.import_passwords)
+        if sys.platform == "win32":
+            menu.addAction("Import from Chrome/Edge…", self.import_from_browser)
 
         # --- View & configuration ---
         menu.addSeparator()
@@ -4653,6 +4655,16 @@ class BrowserWindow(QMainWindow):
             f"Skipped {len(entries) - added} duplicate(s) and {skipped} "
             f"unusable row(s).\n\nRemember to delete the CSV file now — it "
             f"still contains your passwords in plain text.")
+
+    def import_from_browser(self) -> None:
+        from browser_import_ui import BrowserImportDialog
+        BrowserImportDialog(
+            self.vault, self.bookmarks, self._unlock_vault, self,
+            on_imported=self._bookmarks_changed,
+        ).exec()
+        view = self.current_view()
+        if view is not None:
+            self._update_star(view.url())
 
     def _build_appearance_menu(self, appearance: QMenu) -> None:
         """Theme picker + dark/light toggle, reflecting the saved choice."""
