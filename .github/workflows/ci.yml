@@ -101,6 +101,9 @@ jobs:
       - name: Browser import checks
         run: python tests/test_browser_import.py
 
+      - name: Onboarding checks
+        run: python tests/test_onboarding.py
+
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer
         if: runner.os == 'Linux'

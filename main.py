@@ -452,6 +452,7 @@ from ai_search import (
 import celebrate
 import content_credentials
 import setting_protection
+from onboarding import OnboardingDialog, is_first_run, mark_onboarding_done
 from remote_control import ControlServer, control_enabled
 from browser_instance import BrowserInstance
 from safebrowsing import SafeBrowsing
@@ -1975,10 +1976,20 @@ class BrowserWindow(QMainWindow):
         elif not self._offer_crash_restore():
             self.add_tab(QUrl(STARTUP_URL))   # launch page (may differ from HOME_URL)
 
+        # First-run onboarding wizard takes priority over the update
+        # celebration below: celebrate.due() is also true on a fresh
+        # install (there's no prior version on record), and a confetti
+        # "look what's new" tab makes no sense to someone who has never
+        # used Vodou before. mark_onboarding_done() runs unconditionally
+        # once the dialog closes, whether finished or skipped, so this is
+        # strictly a once-ever prompt.
+        if is_first_run():
+            OnboardingDialog(self).exec()
+            mark_onboarding_done()
         # First launch after an update: a one-time confetti/fireworks page.
         # Checked after the normal tabs are in place so it opens as an extra
         # foreground tab, and only once per version (celebrate.mark_seen).
-        if celebrate.due(APP_VERSION):
+        elif celebrate.due(APP_VERSION):
             self._show_update_celebration()
 
         # Quiet startup update check (GitHub + PyPI, anonymous GETs of public
