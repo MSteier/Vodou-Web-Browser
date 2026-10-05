@@ -1980,12 +1980,18 @@ class BrowserWindow(QMainWindow):
         # celebration below: celebrate.due() is also true on a fresh
         # install (there's no prior version on record), and a confetti
         # "look what's new" tab makes no sense to someone who has never
-        # used Vodou before. mark_onboarding_done() runs unconditionally
-        # once the dialog closes, whether finished or skipped, so this is
-        # strictly a once-ever prompt.
+        # used Vodou before. Deferred to the next event-loop tick (0ms
+        # singleShot, the same idiom the update checker below uses with a
+        # longer delay) rather than exec()'d right here: this point is
+        # still inside __init__, before main()'s window.show() has ever
+        # run, and a modal dialog parented to a window that has never
+        # been shown is untested territory -- celebrate's own tab below
+        # avoids this entirely by being a normal tab, not a modal dialog.
+        # mark_onboarding_done() runs unconditionally once the dialog
+        # closes, whether finished or skipped, so this is strictly a
+        # once-ever prompt.
         if is_first_run():
-            OnboardingDialog(self).exec()
-            mark_onboarding_done()
+            QTimer.singleShot(0, self._show_onboarding)
         # First launch after an update: a one-time confetti/fireworks page.
         # Checked after the normal tabs are in place so it opens as an extra
         # foreground tab, and only once per version (celebrate.mark_seen).
@@ -3369,6 +3375,13 @@ class BrowserWindow(QMainWindow):
         if 0 <= current < len(self._views):
             self.tab_bar.setCurrentIndex(current)
             self._on_tab_changed(current)
+
+    def _show_onboarding(self) -> None:
+        """Deferred from __init__ (see the comment at its call site) until
+        the window actually exists on screen, so the wizard shows as a
+        normal modal dialog over a real, visible window."""
+        OnboardingDialog(self).exec()
+        mark_onboarding_done()
 
     def _show_update_celebration(self) -> None:
         """Open the one-time confetti/fireworks 'latest version' page in a fresh
