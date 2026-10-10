@@ -449,6 +449,10 @@ from ai_search import (
     results_script,
     save_config as save_ai_config,
 )
+TRANSLATE_LANGUAGES = (
+    "English", "Spanish", "French", "German", "Portuguese", "Chinese",
+    "Japanese", "Russian", "Arabic",
+)
 import celebrate
 import content_credentials
 import setting_protection
@@ -2238,6 +2242,12 @@ class BrowserWindow(QMainWindow):
         check_site_action.setToolTip(
             "Ask local AI to explain Vodou's own deceptive-address, "
             "malicious-site, and certificate checks for the current page.")
+        translate_action = menu.addAction(
+            "Translate this page…", self.translate_page)
+        translate_action.setToolTip(
+            "Ask local AI to translate this page's text — runs entirely on "
+            "your device. Pick the target language in ☰ → Settings → "
+            "Local AI → Translate into.")
 
         # --- Passwords ---
         menu.addSeparator()
@@ -2374,6 +2384,7 @@ class BrowserWindow(QMainWindow):
         self.ai_search_action.toggled.connect(self._set_ai_search)
         ai_menu.addAction("Local AI options…", self.show_ai_options)
         ai_menu.addAction("Set up Local AI…", self.show_ollama_setup)
+        self._build_translate_language_menu(ai_menu.addMenu("Translate into"))
 
         # --- Extend --------------------------------------------------------
         settings_menu.addSeparator()
@@ -3304,6 +3315,33 @@ class BrowserWindow(QMainWindow):
         _save_pref("search_engine", template)
         self._sync_engine_check()
         self.statusBar().showMessage("Custom search engine set.", 5000)
+
+    def _build_translate_language_menu(self, menu) -> None:
+        """Populate Settings ▸ Local AI ▸ Translate into: one exclusive
+        radio per language "Translate this page…" can target."""
+        menu.setToolTip(
+            "Target language for ☰ → \"Translate this page…\". Translation "
+            "runs on your local Ollama model, same as Ask/Summarize.")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        current = self.ai_cfg.get("translate_language", "English")
+        self._translate_language_actions = {}
+        for name in TRANSLATE_LANGUAGES:
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(name == current)
+            act.triggered.connect(
+                lambda _checked, n=name: self._set_translate_language(n))
+            group.addAction(act)
+            self._translate_language_actions[name] = act
+
+    def _set_translate_language(self, language: str) -> None:
+        self.ai_cfg["translate_language"] = language
+        save_ai_config(self.ai_cfg)
+        for name, act in self._translate_language_actions.items():
+            act.setChecked(name == language)
+        self.statusBar().showMessage(
+            f"\"Translate this page…\" now targets {language}.", 5000)
 
     def show_safe_browsing_status(self) -> None:
         sb = self.safe_browsing
@@ -5312,6 +5350,49 @@ class BrowserWindow(QMainWindow):
         self._ai_stop.setEnabled(True)
         self._ai_send.setEnabled(False)
         self.ai_client.chat(self._ai_chat, self.ai_cfg)
+
+    # -- page translation -----------------------------------------------------
+
+    def translate_page(self) -> None:
+        """"Translate this page…": grab the page's visible text and ask local
+        AI to translate it into the configured target language (☰ → Settings
+        → Local AI → Translate into). Always starts a fresh conversation, the
+        same reasoning as check_site_safety: a stale translation from a
+        previous page must never be mistaken for this one's."""
+        if not self._ai_enabled():
+            return
+        view = self.current_view()
+        if view is None:
+            self.statusBar().showMessage("No page open to translate.", 4000)
+            return
+        self._show_ai_panel()
+        self.ai_client.cancel()
+        self._ai_chat = []
+        self._ai_stream = ""
+        self._set_ai_mode("ask")
+        self._set_ai_status("Reading the page…")
+        self._ai_stop.setEnabled(True)
+        self._ai_send.setEnabled(False)
+        view.page().runJavaScript(
+            "document.body ? document.body.innerText : ''", APP_WORLD,
+            self._on_translate_page_text)
+
+    def _on_translate_page_text(self, text) -> None:
+        text = (text or "").strip()
+        if not text:
+            self._set_ai_status(
+                "Couldn't find any text on this page to translate.")
+            self._ai_stop.setEnabled(False)
+            self._ai_send.setEnabled(True)
+            return
+        target = self.ai_cfg.get("translate_language", "English")
+        self._ai_chat.append(
+            {"role": "user", "content": f"Translate this page into {target}."})
+        self._render_ai_chat()
+        self._set_ai_status(
+            f"Translating into {target} with {self.ai_cfg.get('model', '')} "
+            f"— on your device…")
+        self.ai_client.translate(text, target, self.ai_cfg)
 
     # -- ask mode ----------------------------------------------------------
 

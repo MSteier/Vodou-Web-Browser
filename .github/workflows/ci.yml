@@ -96,6 +96,9 @@ jobs:
           PYTHONUTF8: "1"
         run: python tests/test_ai_websearch.py
 
+      - name: Translate prompt checks
+        run: python tests/test_translate_prompt.py
+
       # Bookmark/password parsing runs on every OS; the DPAPI round-trip
       # self-skips off Windows (see the test file's own WINDOWS gating).
       - name: Browser import checks
