@@ -28,13 +28,23 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.11` — pinned version
+- `1.54.12` — pinned version
 
 Tags match Vodou's own version. A rebuild of the same Vodou version (a newer base
 image or security-patched system packages) gets a revision suffix instead:
 `1.54.10-r1`, `1.54.10-r2`, and so on. Same browser, updated image.
 
 ## Changelog
+- **1.54.12** — One-click import of bookmarks/passwords from Chrome or Edge;
+  a first-run onboarding wizard; multi-language spell check with offline
+  dictionaries bundled for 7 languages (nothing is ever downloaded); and
+  local-AI page translation into 8 languages. Starts full UI localization:
+  the ☰ menu, password vault, and About/update dialog are now available in
+  Spanish, French, German, Portuguese, Chinese, Japanese, Russian, and Arabic
+  (machine-translated so far; more dialogs follow in later releases).
+  Background tabs now freeze after 15 minutes (up from 60 seconds), and the
+  old discard-timeout setting is gone — tabs are always frozen, never
+  discarded.
 - **1.54.11** — Automatically applies the glass-blur workaround on my.replika.ai
   to address flickering chat inputs and messages. Panels remain translucent
   without the blur. Removes the Graphics submenu.
