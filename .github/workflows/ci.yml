@@ -104,6 +104,9 @@ jobs:
       - name: Onboarding checks
         run: python tests/test_onboarding.py
 
+      - name: Spell check checks
+        run: python tests/test_spellcheck.py
+
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer
         if: runner.os == 'Linux'
