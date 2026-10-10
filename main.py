@@ -373,8 +373,8 @@ import secrets
 from urllib.parse import quote
 
 from PyQt6.QtCore import (
-    QEvent, QMimeData, QPoint, QProcess, QSize, Qt, QTimer, QUrl,
-    QVariantAnimation, pyqtSignal, pyqtSlot,
+    QEvent, QLibraryInfo, QMimeData, QPoint, QProcess, QSize, Qt, QTimer,
+    QTranslator, QUrl, QVariantAnimation, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtGui import (
     QAction, QActionGroup, QColor, QCursor, QDrag, QIcon, QKeySequence,
@@ -501,6 +501,8 @@ from theme import (
     save_prefs,
 )
 import spellcheck
+import i18n
+from i18n import tr
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
 from vault_autolock import (
     autolock_interval_ms,
@@ -671,6 +673,11 @@ if _has_overrides:
     STARTUP_URL = _saved_startup or HOME_URL
     setting_protection.save_snapshot(
         {k: str(_prefs.get(k, "")) for k in _SIGNED_KEYS})
+
+# UI language (☰ → Settings → Language). Read once at startup; changing it
+# always goes through _prompt_restart()/_restart_app() rather than live
+# retranslation -- see i18n.py's module docstring.
+i18n.set_language(i18n.load_prefs())
 
 # Hosts allowed to use a self-signed/invalid TLS certificate (the local
 # SearXNG instance). Certificate errors anywhere else are still fatal.
@@ -1738,7 +1745,7 @@ class BrowserWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Vodou Browser — private")
+        self.setWindowTitle(tr("Vodou Browser — private"))
         self.resize(1280, 830)
         self.setAcceptDrops(True)   # open links dragged in from other apps
 
@@ -2103,7 +2110,7 @@ class BrowserWindow(QMainWindow):
         self.plus_button.setObjectName("newTabButton")
         self.plus_button.setIcon(self._icons["plus"])
         self.plus_button.setIconSize(QSize(18, 18))
-        self.plus_button.setToolTip("New tab (Ctrl+T)")
+        self.plus_button.setToolTip(tr("New tab (Ctrl+T)"))
         self.plus_button.clicked.connect(lambda: self.add_tab(QUrl(HOME_URL)))
         self._icon_targets.append((self.plus_button, "plus"))
 
@@ -2171,16 +2178,16 @@ class BrowserWindow(QMainWindow):
             self._icon_targets.append((act, icon_name))
             return act
 
-        action("back", "Back (Alt+Left)", self._go_back)
-        action("forward", "Forward (Alt+Right)", self._go_forward)
-        action("reload", "Reload (Ctrl+R)", self.reload_page)
-        action("home", "Home",
+        action("back", tr("Back (Alt+Left)"), self._go_back)
+        action("forward", tr("Forward (Alt+Right)"), self._go_forward)
+        action("reload", tr("Reload (Ctrl+R)"), self.reload_page)
+        action("home", tr("Home"),
                lambda: self._open_in_current_or_new(QUrl(HOME_URL)))
 
         self.url_bar = QLineEdit()
         self.url_bar.setObjectName("urlBar")
         self.url_bar.setPlaceholderText(
-            "Search SearXNG or enter address (HTTPS-first)")
+            tr("Search SearXNG or enter address (HTTPS-first)"))
         self.url_bar.returnPressed.connect(self._navigate)
         # Security pill: the lock lives inside the address bar as a leading,
         # clickable icon whose colour carries the state (green closed / red
@@ -2188,7 +2195,7 @@ class BrowserWindow(QMainWindow):
         self.lock_action = self.url_bar.addAction(
             self._lock_icons["neutral"],
             QLineEdit.ActionPosition.LeadingPosition)
-        self.lock_action.setToolTip("Internal page")
+        self.lock_action.setToolTip(tr("Internal page"))
         self.lock_action.triggered.connect(self.show_certificate)
         self._lock_state = "neutral"
         toolbar.addWidget(self.url_bar)
@@ -2199,21 +2206,21 @@ class BrowserWindow(QMainWindow):
         # switch repaints it in _refresh_chrome_icons.
         self.ai_action = QAction(self)
         self.ai_action.setIcon(self._ai_icon)
-        self.ai_action.setToolTip(
+        self.ai_action.setToolTip(tr(
             "Local AI (Ctrl+Shift+A) — summarize these search results, or "
-            "ask anything. On-device; nothing sent out.")
+            "ask anything. On-device; nothing sent out."))
         self.ai_action.triggered.connect(self.open_ai_panel)
         toolbar.addAction(self.ai_action)
 
         self.star_button = QToolButton()
         self.star_button.setObjectName("starButton")
         self.star_button.setIcon(self._star_off)
-        self.star_button.setToolTip("Bookmark this page (Ctrl+D)")
+        self.star_button.setToolTip(tr("Bookmark this page (Ctrl+D)"))
         self.star_button.clicked.connect(self.toggle_bookmark)
         toolbar.addWidget(self.star_button)
 
         self.bookmarks_button = QToolButton()
-        self.bookmarks_button.setToolTip("Bookmarks")
+        self.bookmarks_button.setToolTip(tr("Bookmarks"))
         self.bookmarks_button.setPopupMode(
             QToolButton.ToolButtonPopupMode.InstantPopup)
         self._bookmarks_menu = QMenu(self.bookmarks_button)
@@ -2224,11 +2231,11 @@ class BrowserWindow(QMainWindow):
         self._icon_targets.append((self.bookmarks_button, "bookmarks"))
 
         self.key_action = action(
-            "key", "Fill saved login on this page (Ctrl+Shift+F)",
+            "key", tr("Fill saved login on this page (Ctrl+Shift+F)"),
             self.fill_login)
-        action("save", "Save a login for this site", self.save_login_for_site)
+        action("save", tr("Save a login for this site"), self.save_login_for_site)
         self.vault_action = action(
-            "vault", "Open password vault (Ctrl+Shift+V)", self.open_vault)
+            "vault", tr("Open password vault (Ctrl+Shift+V)"), self.open_vault)
         # The toolbar renders each QAction as a QToolButton; grab the key and
         # vault widgets so detected login forms can pulse them (key = a saved
         # login is here to fill; vault = unlock first), and so the vault button
@@ -2238,194 +2245,195 @@ class BrowserWindow(QMainWindow):
         self._setup_button_pulsers()
 
         menu_button = QToolButton()
-        menu_button.setToolTip("Menu")
+        menu_button.setToolTip(tr("Menu"))
         menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._icon_targets.append((menu_button, "menu"))
         menu = QMenu(menu_button)
 
         # --- Content & tools you reach often ---
-        hamburger_bookmarks = menu.addMenu("Bookmarks")
+        hamburger_bookmarks = menu.addMenu(tr("Bookmarks"))
         hamburger_bookmarks.aboutToShow.connect(
             lambda: self._populate_bookmarks_menu(hamburger_bookmarks))
-        menu.addAction("Downloads…\tCtrl+J", self.show_downloads)
-        menu.addAction("Ask local AI…\tCtrl+Shift+A", self.ask_ai)
+        menu.addAction(tr("Downloads…") + "\tCtrl+J", self.show_downloads)
+        menu.addAction(tr("Ask local AI…") + "\tCtrl+Shift+A", self.ask_ai)
         check_site_action = menu.addAction(
-            "Check this site's safety…", self.check_site_safety)
-        check_site_action.setToolTip(
+            tr("Check this site's safety…"), self.check_site_safety)
+        check_site_action.setToolTip(tr(
             "Ask local AI to explain Vodou's own deceptive-address, "
-            "malicious-site, and certificate checks for the current page.")
+            "malicious-site, and certificate checks for the current page."))
         translate_action = menu.addAction(
-            "Translate this page…", self.translate_page)
-        translate_action.setToolTip(
+            tr("Translate this page…"), self.translate_page)
+        translate_action.setToolTip(tr(
             "Ask local AI to translate this page's text — runs entirely on "
             "your device. Pick the target language in ☰ → Settings → "
-            "Local AI → Translate into.")
+            "Local AI → Translate into."))
 
         # --- Passwords ---
         menu.addSeparator()
-        menu.addAction("Password vault…\tCtrl+Shift+V", self.open_vault)
-        lock_action = menu.addAction("Lock vault (log out)\tCtrl+Shift+L",
+        menu.addAction(tr("Password vault…") + "\tCtrl+Shift+V", self.open_vault)
+        lock_action = menu.addAction(tr("Lock vault (log out)") + "\tCtrl+Shift+L",
                                      self.lock_vault_now)
-        lock_action.setToolTip(
+        lock_action.setToolTip(tr(
             "Lock the password vault now, clearing its key from memory. "
-            "You'll need the master password to open it again.")
-        menu.addAction("Import passwords (.csv)…", self.import_passwords)
+            "You'll need the master password to open it again."))
+        menu.addAction(tr("Import passwords (.csv)…"), self.import_passwords)
         if sys.platform == "win32":
-            menu.addAction("Import from Chrome/Edge…", self.import_from_browser)
+            menu.addAction(tr("Import from Chrome/Edge…"), self.import_from_browser)
 
         # --- View & configuration ---
         menu.addSeparator()
-        self._build_appearance_menu(menu.addMenu("Appearance"))
-        zoom_menu = menu.addMenu("Zoom")
-        zoom_menu.addAction("Zoom in\tCtrl++", self.zoom_in)
-        zoom_menu.addAction("Zoom out\tCtrl+-", self.zoom_out)
-        zoom_menu.addAction("Reset zoom\tCtrl+0", self.zoom_reset)
+        self._build_appearance_menu(menu.addMenu(tr("Appearance")))
+        zoom_menu = menu.addMenu(tr("Zoom"))
+        zoom_menu.addAction(tr("Zoom in") + "\tCtrl++", self.zoom_in)
+        zoom_menu.addAction(tr("Zoom out") + "\tCtrl+-", self.zoom_out)
+        zoom_menu.addAction(tr("Reset zoom") + "\tCtrl+0", self.zoom_reset)
 
-        settings_menu = menu.addMenu("Settings")
+        settings_menu = menu.addMenu(tr("Settings"))
 
         # --- General ---------------------------------------------------
         default_browser_action = settings_menu.addAction(
-            "Set as default browser…", self.set_default_browser)
-        default_browser_action.setToolTip(
+            tr("Set as default browser…"), self.set_default_browser)
+        default_browser_action.setToolTip(tr(
             "Register Vodou with Windows/Linux so links from other apps "
             "open here, then hand off to the system's own default-apps "
-            "picker — neither OS lets an app flip this switch silently.")
+            "picker — neither OS lets an app flip this switch silently."))
+        self._build_language_menu(settings_menu.addMenu(tr("Language")))
         settings_menu.addSeparator()
 
         # --- Privacy & security -------------------------------------------
         # The browser's headline concern, so it leads. Internally grouped by
         # separators: tracker blocking, then deceptive-site protection, then
         # per-site permissions.
-        privacy_menu = settings_menu.addMenu("Privacy & security")
+        privacy_menu = settings_menu.addMenu(tr("Privacy & security"))
         self.pause_blocking_action = privacy_menu.addAction(
-            "Pause tracker blocking")
+            tr("Pause tracker blocking"))
         self.pause_blocking_action.setCheckable(True)
-        self.pause_blocking_action.setToolTip(
+        self.pause_blocking_action.setToolTip(tr(
             "Let tracker/ad requests through until resumed — for sites "
-            "that break with blocking on. Blocking resumes on restart.")
+            "that break with blocking on. Blocking resumes on restart."))
         self.pause_blocking_action.toggled.connect(self._set_blocking_paused)
         blocking_report = privacy_menu.addAction(
-            "Blocking report…", self.show_blocking_report)
-        blocking_report.setToolTip(
+            tr("Blocking report…"), self.show_blocking_report)
+        blocking_report.setToolTip(tr(
             "Charts of how many trackers and ads were blocked per day, "
-            "and which ones came up most")
+            "and which ones came up most"))
         privacy_menu.addSeparator()
-        self.safe_browsing_action = privacy_menu.addAction("Safe Browsing")
+        self.safe_browsing_action = privacy_menu.addAction(tr("Safe Browsing"))
         self.safe_browsing_action.setCheckable(True)
         self.safe_browsing_action.setChecked(self.safe_browsing.enabled)
-        self.safe_browsing_action.setToolTip(
+        self.safe_browsing_action.setToolTip(tr(
             "Warn before opening sites on public phishing/malware lists. "
             "Checked entirely on your device — nothing about your browsing "
-            "is ever sent out.")
+            "is ever sent out."))
         self.safe_browsing_action.toggled.connect(self._set_safe_browsing)
-        privacy_menu.addAction("Safe Browsing status…",
+        privacy_menu.addAction(tr("Safe Browsing status…"),
                                self.show_safe_browsing_status)
         sp_action = privacy_menu.addAction(
-            "Browser Setting Protection…", self._show_setting_protection)
-        sp_action.setToolTip(
+            tr("Browser Setting Protection…"), self._show_setting_protection)
+        sp_action.setToolTip(tr(
             "Your home page, startup page and search engine are signed and "
-            "restored if anything changes them on disk. Review what was blocked.")
+            "restored if anything changes them on disk. Review what was blocked."))
         privacy_menu.addSeparator()
-        privacy_menu.addAction("Cookie exceptions…", self.manage_cookie_sites)
-        self.location_guard_action = privacy_menu.addAction("Location Guard")
+        privacy_menu.addAction(tr("Cookie exceptions…"), self.manage_cookie_sites)
+        self.location_guard_action = privacy_menu.addAction(tr("Location Guard"))
         self.location_guard_action.setCheckable(True)
         self.location_guard_action.setChecked(self._location_guard_on)
-        self.location_guard_action.setToolTip(
+        self.location_guard_action.setToolTip(tr(
             "Block websites from reading your precise (GPS/Wi-Fi) location. "
             "Sites can at most estimate your area from your IP address. "
-            "Reload open pages after changing this.")
+            "Reload open pages after changing this."))
         self.location_guard_action.toggled.connect(self._set_location_guard)
-        self.block_webcam_action = privacy_menu.addAction("Block Webcam")
+        self.block_webcam_action = privacy_menu.addAction(tr("Block Webcam"))
         self.block_webcam_action.setCheckable(True)
         self.block_webcam_action.setChecked(self._block_webcam)
-        self.block_webcam_action.setToolTip(
+        self.block_webcam_action.setToolTip(tr(
             "Stop websites from using your camera. Denied automatically while "
             "on; turn off to be asked for each site instead. Takes effect on "
-            "the next camera request — no reload needed.")
+            "the next camera request — no reload needed."))
         self.block_webcam_action.toggled.connect(self._set_block_webcam)
         self.block_microphone_action = privacy_menu.addAction(
-            "Block Microphone")
+            tr("Block Microphone"))
         self.block_microphone_action.setCheckable(True)
         self.block_microphone_action.setChecked(self._block_microphone)
-        self.block_microphone_action.setToolTip(
+        self.block_microphone_action.setToolTip(tr(
             "Stop websites from using your microphone. Denied automatically "
             "while on; turn off to be asked for each site instead. Takes "
-            "effect on the next microphone request — no reload needed.")
+            "effect on the next microphone request — no reload needed."))
         self.block_microphone_action.toggled.connect(
             self._set_block_microphone)
 
         privacy_menu.addSeparator()
         loc_action = privacy_menu.addAction(
-            "Location & region…", self._show_location_dialog)
-        loc_action.setToolTip(
+            tr("Location & region…"), self._show_location_dialog)
+        loc_action.setToolTip(tr(
             "Make sites see a chosen region's browser language and locale "
             "(navigator.language, Accept-Language, Intl formatting). Emulates "
-            "language/locale only — not your timezone, geolocation, or IP.")
+            "language/locale only — not your timezone, geolocation, or IP."))
 
         # --- Start page & search ------------------------------------------
-        search_menu = settings_menu.addMenu("Start page & search")
+        search_menu = settings_menu.addMenu(tr("Start page & search"))
         start_action = search_menu.addAction(
-            "Set start page…", self.set_start_page)
-        start_action.setToolTip(
+            tr("Set start page…"), self.set_start_page)
+        start_action.setToolTip(tr(
             "Choose the page new tabs and the Home button open. Leave it "
-            "blank to restore the private SearXNG start page.")
+            "blank to restore the private SearXNG start page."))
         startup_action = search_menu.addAction(
-            "Set startup page…", self.set_startup_page)
-        startup_action.setToolTip(
+            tr("Set startup page…"), self.set_startup_page)
+        startup_action.setToolTip(tr(
             "Choose the page Vodou opens when it launches — separately from "
-            "new tabs. Leave it blank to open your start page on launch too.")
-        self._build_search_engine_menu(search_menu.addMenu("Search engine"))
+            "new tabs. Leave it blank to open your start page on launch too."))
+        self._build_search_engine_menu(search_menu.addMenu(tr("Search engine")))
 
         # --- Spell check -----------------------------------------------------
-        self._build_spellcheck_menu(settings_menu.addMenu("Spell check"))
+        self._build_spellcheck_menu(settings_menu.addMenu(tr("Spell check")))
 
         # --- Network -------------------------------------------------------
-        network_menu = settings_menu.addMenu("Network")
-        proxy_action = network_menu.addAction("Proxy…", self._show_proxy_dialog)
-        proxy_action.setToolTip(
+        network_menu = settings_menu.addMenu(tr("Network"))
+        proxy_action = network_menu.addAction(tr("Proxy…"), self._show_proxy_dialog)
+        proxy_action.setToolTip(tr(
             "Route Vodou's traffic through an HTTP or SOCKS5 proxy. SOCKS5 can "
             "resolve DNS at the proxy. Any username/password is kept in your "
-            "encrypted vault.")
+            "encrypted vault."))
 
         # --- Local AI ------------------------------------------------------
-        ai_menu = settings_menu.addMenu("Local AI")
-        self.ai_search_action = ai_menu.addAction("Local AI (Ollama)")
+        ai_menu = settings_menu.addMenu(tr("Local AI"))
+        self.ai_search_action = ai_menu.addAction(tr("Local AI (Ollama)"))
         self.ai_search_action.setCheckable(True)
         self.ai_search_action.setChecked(bool(self.ai_cfg.get("enabled")))
-        self.ai_search_action.setToolTip(
+        self.ai_search_action.setToolTip(tr(
             "Enable the ✨ button: summarize search results, and ask your "
             "local Ollama model anything. Runs entirely on your device; "
-            "nothing is ever sent out.")
+            "nothing is ever sent out."))
         self.ai_search_action.toggled.connect(self._set_ai_search)
-        ai_menu.addAction("Local AI options…", self.show_ai_options)
-        ai_menu.addAction("Set up Local AI…", self.show_ollama_setup)
-        self._build_translate_language_menu(ai_menu.addMenu("Translate into"))
+        ai_menu.addAction(tr("Local AI options…"), self.show_ai_options)
+        ai_menu.addAction(tr("Set up Local AI…"), self.show_ollama_setup)
+        self._build_translate_language_menu(ai_menu.addMenu(tr("Translate into")))
 
         # --- Extend --------------------------------------------------------
         settings_menu.addSeparator()
-        settings_menu.addAction("Plugins…", self.open_plugins)
+        settings_menu.addAction(tr("Plugins…"), self.open_plugins)
 
         # --- Data & diagnostics ---
         menu.addSeparator()
-        clear_action = menu.addAction("Clear history & memory\tCtrl+Shift+Del",
+        clear_action = menu.addAction(tr("Clear history & memory") + "\tCtrl+Shift+Del",
                                       self.clear_browsing_data)
-        clear_action.setToolTip(
+        clear_action.setToolTip(tr(
             "Erase visited-link history, the HTTP cache, cookies (including "
             "the saved ones for allowlisted sites), the recorded blocking "
-            "statistics, and each tab's back/forward navigation memory")
-        menu.addAction("Developer tools\tF12", self.open_dev_tools)
+            "statistics, and each tab's back/forward navigation memory"))
+        menu.addAction(tr("Developer tools") + "\tF12", self.open_dev_tools)
 
         # --- Help ---
         menu.addSeparator()
-        help_menu = menu.addMenu("Help")
-        report = help_menu.addAction("Report an issue…", self.report_issue)
-        report.setToolTip(
+        help_menu = menu.addMenu(tr("Help"))
+        report = help_menu.addAction(tr("Report an issue…"), self.report_issue)
+        report.setToolTip(tr(
             "Open a new GitHub issue with the version, commit, and "
-            "platform details pre-filled")
-        help_menu.addAction("View on GitHub",
+            "platform details pre-filled"))
+        help_menu.addAction(tr("View on GitHub"),
                             lambda: self.add_tab(QUrl(REPO_URL)))
         help_menu.addSeparator()
-        help_menu.addAction("About Vodou…", self.show_about)
+        help_menu.addAction(tr("About Vodou…"), self.show_about)
         menu_button.setMenu(menu)
         toolbar.addWidget(menu_button)
         self._apply_static_icons()
@@ -3269,21 +3277,21 @@ class BrowserWindow(QMainWindow):
     def _build_search_engine_menu(self, menu) -> None:
         """Populate the Settings ▸ Search engine submenu: one exclusive radio
         per built-in engine, plus a Custom option."""
-        menu.setToolTip(
+        menu.setToolTip(tr(
             "Where address-bar searches go. SearXNG (local) keeps queries on "
-            "your machine; the others are external services.")
+            "your machine; the others are external services."))
         group = QActionGroup(self)
         group.setExclusive(True)
         self._engine_actions = {}
         for name, template in SEARCH_ENGINES.items():
-            act = menu.addAction(name)
+            act = menu.addAction(tr(name))
             act.setCheckable(True)
             act.triggered.connect(
                 lambda _checked, t=template: self._set_search_engine(t))
             group.addAction(act)
             self._engine_actions[template] = act
         menu.addSeparator()
-        self._custom_engine_action = menu.addAction("Custom…")
+        self._custom_engine_action = menu.addAction(tr("Custom…"))
         self._custom_engine_action.setCheckable(True)
         self._custom_engine_action.triggered.connect(self._set_custom_engine)
         group.addAction(self._custom_engine_action)
@@ -3334,15 +3342,15 @@ class BrowserWindow(QMainWindow):
     def _build_translate_language_menu(self, menu) -> None:
         """Populate Settings ▸ Local AI ▸ Translate into: one exclusive
         radio per language "Translate this page…" can target."""
-        menu.setToolTip(
+        menu.setToolTip(tr(
             "Target language for ☰ → \"Translate this page…\". Translation "
-            "runs on your local Ollama model, same as Ask/Summarize.")
+            "runs on your local Ollama model, same as Ask/Summarize."))
         group = QActionGroup(self)
         group.setExclusive(True)
         current = self.ai_cfg.get("translate_language", "English")
         self._translate_language_actions = {}
         for name in TRANSLATE_LANGUAGES:
-            act = menu.addAction(name)
+            act = menu.addAction(tr(name))
             act.setCheckable(True)
             act.setChecked(name == current)
             act.triggered.connect(
@@ -3358,19 +3366,47 @@ class BrowserWindow(QMainWindow):
         self.statusBar().showMessage(
             f"\"Translate this page…\" now targets {language}.", 5000)
 
+    def _build_language_menu(self, menu) -> None:
+        """Populate Settings ▸ Language: one exclusive radio per supported
+        UI language. Changing it takes effect after a restart (see
+        _set_ui_language) -- i18n.py has no live retranslation."""
+        menu.setToolTip(tr(
+            "Vodou's own menus and dialogs. Translations are "
+            "machine-translated and not yet reviewed by a native speaker "
+            "of each language."))
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        current = i18n.current_language()
+        self._language_actions: dict[str, object] = {}
+        for name, code in i18n.LANGUAGES.items():
+            act = menu.addAction(tr(name))
+            act.setCheckable(True)
+            act.setChecked(code == current)
+            act.triggered.connect(
+                lambda _checked, c=code, n=name: self._set_ui_language(c, n))
+            group.addAction(act)
+            self._language_actions[code] = act
+
+    def _set_ui_language(self, code: str, name: str) -> None:
+        if code == i18n.current_language():
+            return
+        i18n.save_prefs(code)
+        self._prompt_restart(
+            tr("Vodou's language will change to {name}.").format(name=tr(name)))
+
     def _build_spellcheck_menu(self, menu) -> None:
         """Populate the Settings ▸ Spell check submenu: a master enable
         toggle, then one checkable (multi-select, not exclusive) action per
         bundled dictionary language — see dictionaries/README.md for why
         only these languages are offered."""
-        menu.setToolTip(
+        menu.setToolTip(tr(
             "Underline misspelled words while typing in pages. Dictionaries "
-            "are bundled with Vodou; nothing is ever downloaded.")
+            "are bundled with Vodou; nothing is ever downloaded."))
         enabled, languages = spellcheck.load_prefs()
         self._spellcheck_enabled = enabled
         self._spellcheck_languages = set(languages)
 
-        self._spellcheck_enable_action = menu.addAction("Enable spell check")
+        self._spellcheck_enable_action = menu.addAction(tr("Enable spell check"))
         self._spellcheck_enable_action.setCheckable(True)
         self._spellcheck_enable_action.setChecked(enabled)
         self._spellcheck_enable_action.toggled.connect(self._set_spellcheck_enabled)
@@ -3378,7 +3414,7 @@ class BrowserWindow(QMainWindow):
 
         self._spellcheck_language_actions: dict[str, object] = {}
         for name, code in spellcheck.AVAILABLE_LANGUAGES.items():
-            act = menu.addAction(name)
+            act = menu.addAction(tr(name))
             act.setCheckable(True)
             act.setChecked(code in self._spellcheck_languages)
             act.toggled.connect(
@@ -3588,7 +3624,7 @@ class BrowserWindow(QMainWindow):
         self._active_view = None
         self.page_area.setCurrentWidget(self.empty_tabs_page)
         self.url_bar.clear()
-        self.setWindowTitle("Vodou (private)")
+        self.setWindowTitle(tr("Vodou (private)"))
         self.lock_action.setIcon(self._lock_icons["neutral"])
         self.lock_action.setToolTip("No page open")
         self.star_button.setIcon(self._star_off)
@@ -4796,7 +4832,7 @@ class BrowserWindow(QMainWindow):
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
         for name in THEMES:
-            act = appearance.addAction(name)
+            act = appearance.addAction(tr(name))
             act.setCheckable(True)
             act.setChecked(name == self._theme_name)
             act.setActionGroup(theme_group)
@@ -4807,7 +4843,7 @@ class BrowserWindow(QMainWindow):
         mode_group.setExclusive(True)
         for label, mode in (("🌙  Dark mode", "dark"),
                             ("☀  Light mode", "light")):
-            act = appearance.addAction(label)
+            act = appearance.addAction(tr(label))
             act.setCheckable(True)
             act.setChecked(mode == self._mode)
             act.setActionGroup(mode_group)
@@ -6397,6 +6433,21 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Vodou Browser")
     app.setDesktopFileName("vodou")
+
+    # Qt ships its own standard-dialog translations (OK/Cancel/Yes/No/Save)
+    # already compiled -- no lrelease needed, unlike Vodou's own i18n.py
+    # catalogs (see that module's docstring). Installing one makes native
+    # QMessageBox buttons read in the chosen language even before every
+    # dialog's own text is wrapped in tr() (a later phase).
+    _qtbase_suffix = {"es": "es", "fr": "fr", "de": "de", "pt": "pt_BR",
+                      "zh": "zh_CN", "ja": "ja", "ru": "ru",
+                      "ar": "ar"}.get(i18n.current_language())
+    if _qtbase_suffix:
+        _qt_translator = QTranslator(app)
+        if _qt_translator.load(
+                f"qtbase_{_qtbase_suffix}",
+                QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+            app.installTranslator(_qt_translator)
     instance = BrowserInstance(VAULT_DIR, app)
     relaunch = None
     code = 0
