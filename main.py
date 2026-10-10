@@ -358,6 +358,16 @@ os.environ.setdefault(
     "--disable-features=HttpsUpgrades "
     + _gfx_flags() + location_profile.chromium_lang_flag())
 
+# Spell check (☰ → Settings → Spell check) uses Chromium's built-in Hunspell
+# checker. Left to its own default, Chromium downloads a missing dictionary
+# from Google's component-update servers on first use -- a network call that
+# would contradict the no-phone-home design the moment someone turns a
+# language on. Pointing this at the bundled dictionaries/ directory instead
+# means spell check never touches the network. See dictionaries/README.md.
+os.environ.setdefault(
+    "QTWEBENGINE_DICTIONARIES_PATH",
+    str(Path(__file__).resolve().parent / "dictionaries"))
+
 import platform
 import secrets
 from urllib.parse import quote
@@ -490,6 +500,7 @@ from theme import (
     THEMES, apply_theme, build_palette, draw_muted_brand_mark, load_prefs,
     save_prefs,
 )
+import spellcheck
 from vault import LEGACY_VAULT_DIR, VAULT_DIR, Entry, Vault, normalize_site
 from vault_autolock import (
     autolock_interval_ms,
@@ -1755,6 +1766,7 @@ class BrowserWindow(QMainWindow):
         self.profile.setPersistentCookiesPolicy(
             QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
         self.profile.setHttpUserAgent(GENERIC_USER_AGENT)
+        spellcheck.apply(self.profile, *spellcheck.load_prefs())
 
         # Location & region emulation (☰ → Settings → Privacy & security →
         # Location & region…). The saved profile's language/locale is applied
@@ -2363,6 +2375,9 @@ class BrowserWindow(QMainWindow):
             "Choose the page Vodou opens when it launches — separately from "
             "new tabs. Leave it blank to open your start page on launch too.")
         self._build_search_engine_menu(search_menu.addMenu("Search engine"))
+
+        # --- Spell check -----------------------------------------------------
+        self._build_spellcheck_menu(settings_menu.addMenu("Spell check"))
 
         # --- Network -------------------------------------------------------
         network_menu = settings_menu.addMenu("Network")
@@ -3342,6 +3357,52 @@ class BrowserWindow(QMainWindow):
             act.setChecked(name == language)
         self.statusBar().showMessage(
             f"\"Translate this page…\" now targets {language}.", 5000)
+
+    def _build_spellcheck_menu(self, menu) -> None:
+        """Populate the Settings ▸ Spell check submenu: a master enable
+        toggle, then one checkable (multi-select, not exclusive) action per
+        bundled dictionary language — see dictionaries/README.md for why
+        only these languages are offered."""
+        menu.setToolTip(
+            "Underline misspelled words while typing in pages. Dictionaries "
+            "are bundled with Vodou; nothing is ever downloaded.")
+        enabled, languages = spellcheck.load_prefs()
+        self._spellcheck_enabled = enabled
+        self._spellcheck_languages = set(languages)
+
+        self._spellcheck_enable_action = menu.addAction("Enable spell check")
+        self._spellcheck_enable_action.setCheckable(True)
+        self._spellcheck_enable_action.setChecked(enabled)
+        self._spellcheck_enable_action.toggled.connect(self._set_spellcheck_enabled)
+        menu.addSeparator()
+
+        self._spellcheck_language_actions: dict[str, object] = {}
+        for name, code in spellcheck.AVAILABLE_LANGUAGES.items():
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(code in self._spellcheck_languages)
+            act.toggled.connect(
+                lambda checked, c=code: self._set_spellcheck_language(c, checked))
+            self._spellcheck_language_actions[code] = act
+
+    def _apply_spellcheck(self) -> None:
+        spellcheck.apply(self.profile, self._spellcheck_enabled,
+                          list(self._spellcheck_languages))
+        spellcheck.save_prefs(self._spellcheck_enabled,
+                               list(self._spellcheck_languages))
+
+    def _set_spellcheck_enabled(self, enabled: bool) -> None:
+        self._spellcheck_enabled = enabled
+        self._apply_spellcheck()
+        self.statusBar().showMessage(
+            f"Spell check {'enabled' if enabled else 'disabled'}.", 4000)
+
+    def _set_spellcheck_language(self, code: str, checked: bool) -> None:
+        if checked:
+            self._spellcheck_languages.add(code)
+        else:
+            self._spellcheck_languages.discard(code)
+        self._apply_spellcheck()
 
     def show_safe_browsing_status(self) -> None:
         sb = self.safe_browsing
