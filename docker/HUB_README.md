@@ -1,11 +1,3 @@
-<!--
-  This file is NOT auto-synced to Docker Hub. After editing it, manually
-  paste the full contents into Docker Hub's "Full Description" field
-  (msteier/vodou repo -> General tab -> edit description) or the changelog
-  on the live page goes stale. See CLAUDE.md's "Docker Hub release
-  checklist" for the full release steps.
--->
-
 # Vodou (containerized)
 
 A privacy-first desktop web browser built on **PyQt6 / QtWebEngine**, packaged
@@ -16,23 +8,46 @@ to run in a container and viewed in your web browser — no host X server needed
 ## Quick start
 
 ```bash
-docker run -p 8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
+docker run -p 127.0.0.1:8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
 ```
 
 Then open **http://localhost:8080/** in any browser. Vodou appears there,
 running inside the container. Works the same on Windows, macOS, and Linux.
 
-- `-p 8080:8080` — serves the noVNC web viewer. Change the left number to use a
-  different local port (e.g. `-p 9000:8080` → http://localhost:9000/).
+- `-p 127.0.0.1:8080:8080` — serves the noVNC web viewer on this computer only.
+  The viewer has no password of its own, so keep the `127.0.0.1:` prefix unless
+  an authenticating reverse proxy sits in front of it. For LAN access, the
+  repo's `docker/setup` script generates that proxy's password on your machine
+  (random per install, shown once; never baked into the image). See the full
+  docs. Change
+  the middle number to use a different local port (e.g.
+  `-p 127.0.0.1:9000:8080` → http://localhost:9000/).
 - `-v vodou-data:/home/vodou/.vodou` — persists your profile (bookmarks, vault,
   plugins) across runs. Drop it for a fully disposable session.
 - `-e VNC_GEOMETRY=1920x1080` — optional, sets the virtual screen size.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.10` — pinned version
+- `1.54.12` — pinned version
+
+Tags match Vodou's own version. A rebuild of the same Vodou version (a newer base
+image or security-patched system packages) gets a revision suffix instead:
+`1.54.10-r1`, `1.54.10-r2`, and so on. Same browser, updated image.
 
 ## Changelog
+- **1.54.12** — One-click import of bookmarks/passwords from Chrome or Edge;
+  a first-run onboarding wizard; multi-language spell check with offline
+  dictionaries bundled for 7 languages (nothing is ever downloaded); and
+  local-AI page translation into 8 languages. Starts full UI localization:
+  the ☰ menu, password vault, and About/update dialog are now available in
+  Spanish, French, German, Portuguese, Chinese, Japanese, Russian, and Arabic
+  (machine-translated so far; more dialogs follow in later releases).
+  Background tabs now freeze after 15 minutes (up from 60 seconds), and the
+  old discard-timeout setting is gone — tabs are always frozen, never
+  discarded.
+- **1.54.11** — Automatically applies the glass-blur workaround on my.replika.ai
+  to address flickering chat inputs and messages. Panels remain translucent
+  without the blur. Removes the Graphics submenu.
 - **1.54.10** — **Check Bookmarks** now shows a progress bar ("9 / 20 checked
   (45%)") and clearly reports when the scan is complete, with how many
   bookmarks failed. While a scan runs, Stop scan is the only active button;
@@ -168,7 +183,7 @@ To run with **no special flags**, this image starts with Chromium's sandbox
 so at startup. To keep the sandbox on, run with:
 
 ```bash
-docker run -p 8080:8080 --cap-add SYS_ADMIN \
+docker run -p 127.0.0.1:8080:8080 --cap-add SYS_ADMIN \
   -e QTWEBENGINE_DISABLE_SANDBOX=0 \
   -v vodou-data:/home/vodou/.vodou msteier/vodou
 ```

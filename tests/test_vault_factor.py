@@ -73,7 +73,7 @@ check("entry survived", v.reveal(0) == "hunter2")
 print("\nenrolling a key migrates the vault to 2FA")
 
 auth = FakeAuthenticator()
-v.enroll_authenticator(auth, label="YubiKey 5C")
+v.enroll_authenticator(auth, label="YubiKey 5C", master=PW)
 check("factor now enrolled", v.factor_enrolled)
 check("file_has_factor() is True", v.file_has_factor())
 check("one authenticator listed", len(v.list_authenticators()) == 1)
@@ -117,7 +117,7 @@ print("\nbackup key: a SECOND key opens the same vault independently")
 
 v.unlock(PW, auth)
 backup = FakeAuthenticator()
-v.enroll_authenticator(backup, label="Backup key")
+v.enroll_authenticator(backup, label="Backup key", master=PW)
 check("two authenticators listed", len(v.list_authenticators()) == 2)
 v.lock()
 v.unlock(PW, backup)  # only the backup present
@@ -125,6 +125,20 @@ check("backup key alone unlocks", v.unlocked and v.reveal(0) == "hunter2")
 v.lock()
 v.unlock(PW, auth)  # original still works too
 check("original key still unlocks", v.unlocked)
+
+# ---------------------------------------------------------------------------
+print("\nadding/removing a key needs the master password re-entered")
+
+intruder = FakeAuthenticator()
+check("enroll with wrong master raises WrongMasterPassword",
+      raises(WrongMasterPassword,
+             lambda: v.enroll_authenticator(intruder, master="nope")))
+check("remove with wrong master raises WrongMasterPassword",
+      raises(WrongMasterPassword,
+             lambda: v.remove_authenticator(
+                 v.list_authenticators()[0]["cred_id"], master="nope")))
+check("keys unchanged after rejected attempts",
+      len(v.list_authenticators()) == 2)
 
 # ---------------------------------------------------------------------------
 print("\nchanging the master password keeps the keys")
@@ -140,7 +154,8 @@ check("still 2FA after pw change", v.factor_enrolled)
 # ---------------------------------------------------------------------------
 print("\nremoving one of two keys leaves 2FA on")
 
-v.remove_authenticator(auth_records_first := v.list_authenticators()[0]["cred_id"])
+v.remove_authenticator(auth_records_first := v.list_authenticators()[0]["cred_id"],
+                       master=NEWPW)
 check("one key left", len(v.list_authenticators()) == 1)
 check("still requires a factor", v.factor_enrolled)
 v.lock()
@@ -152,7 +167,7 @@ check("remaining key still works", v.unlocked)
 # ---------------------------------------------------------------------------
 print("\nremoving the LAST key disables 2FA (back to password-only)")
 
-v.remove_authenticator(v.list_authenticators()[0]["cred_id"])
+v.remove_authenticator(v.list_authenticators()[0]["cred_id"], master=NEWPW)
 check("no keys left", len(v.list_authenticators()) == 0)
 check("factor disabled", not v.factor_enrolled)
 check("file_has_factor() False again", not v.file_has_factor())
