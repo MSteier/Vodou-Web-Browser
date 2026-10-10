@@ -5,15 +5,18 @@ Vodou's browser-viewable container (docker/Dockerfile.vnc) runs x11vnc with
 of the viewer as HTTP Basic Auth (nginx ``auth_basic`` / ``auth_basic_user_file``
 -> a ``vodou.htpasswd`` file). This module manages that htpasswd file:
 
-  * seed a bootstrap login (``vodou`` / ``vodou``) ONLY when none exists yet,
-  * detect that the bootstrap password is still in use (so setup can insist it
-    be changed before finishing), and
+  * seed a bootstrap login ONLY when none exists yet, with a password randomly
+    generated for this install (returned once so it can be shown to the
+    administrator -- it is never stored in plaintext),
+  * detect that the old, publicly documented default password is still in use
+    (installs seeded before per-install passwords existed), and
   * change the password with the usual current/new/confirm validation.
 
 Passwords are stored only as salted Apache-MD5 (``$apr1$``) hashes -- the format
 nginx accepts on every platform (including Windows, where bcrypt/system-crypt
-hashes are not supported). Nothing here logs, echoes, or persists a plaintext
-password, and validation errors never contain the password value.
+hashes are not supported). A random 144-bit bootstrap password keeps that weak
+hash out of reach of offline cracking. Nothing here logs or persists a
+plaintext password, and validation errors never contain the password value.
 """
 
 from __future__ import annotations
@@ -23,12 +26,14 @@ import os
 import secrets
 from pathlib import Path
 
-# Bootstrap credentials for a fresh install's LAN gate. These are applied ONLY
-# when no credential has been configured yet (seed_default never overwrites an
-# existing one), and the management flow flags them as "still the default" until
-# the administrator changes them (see is_default_unchanged / change_password).
+# Bootstrap username for a fresh install's LAN gate. The password is generated
+# per install by seed_default(), which never overwrites an existing credential.
 DEFAULT_USERNAME = "vodou"
-DEFAULT_PASSWORD = "vodou-lan-2026"
+
+# The fixed default earlier versions seeded. It was published in the docs, so
+# an install still using it is effectively unprotected: status flags it and
+# change_password refuses it (see uses_published_default).
+PUBLISHED_DEFAULT_PASSWORD = "vodou-lan-2026"
 
 # The custom base64 alphabet md5crypt/apr1 use for their output encoding.
 _ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -151,49 +156,83 @@ def write_htpasswd(path: str | os.PathLike, entries: dict[str, str]) -> None:
 
 # -- bootstrap / status / change --------------------------------------------
 
-def seed_default(path: str | os.PathLike,
-                 username: str = DEFAULT_USERNAME,
-                 password: str = DEFAULT_PASSWORD) -> bool:
-    """Create the htpasswd entry with the bootstrap credentials, but only if it
-    doesn't exist yet.
+def generate_password() -> str:
+    """A random bootstrap password: 24 URL-safe characters (144 bits)."""
+    return secrets.token_urlsafe(18)
 
-    Returns True if it wrote the default, False if an entry for ``username``
-    already existed (in which case the existing credential is left untouched --
-    an upgrade or re-run never clobbers a password the user already set).
+
+def seed_default(path: str | os.PathLike,
+                 username: str = DEFAULT_USERNAME) -> str | None:
+    """Create the htpasswd entry with a freshly generated password, but only if
+    it doesn't exist yet.
+
+    Returns the generated password -- the ONLY time it is available in
+    plaintext, so the caller must show it to the administrator -- or None if an
+    entry for ``username`` already existed (in which case the existing
+    credential is left untouched -- an upgrade or re-run never clobbers a
+    password the user already set).
     """
     entries = read_htpasswd(path)
     if username in entries:
-        return False
+        return None
+    password = generate_password()
     entries[username] = apr1(password)
     write_htpasswd(path, entries)
-    return True
+    return password
 
 
-def is_default_unchanged(path: str | os.PathLike,
-                         username: str = DEFAULT_USERNAME,
-                         default: str = DEFAULT_PASSWORD) -> bool:
-    """True if ``username`` still authenticates with the bootstrap password.
+def uses_published_default(path: str | os.PathLike,
+                           username: str = DEFAULT_USERNAME) -> bool:
+    """True if ``username`` still authenticates with the old published default.
 
-    This is the persisted "hasn't been changed yet" signal: once the password is
-    changed, the stored hash no longer verifies against the default, so no
-    separate flag (which could drift out of sync with the file) is needed.
+    Derived from the stored hash itself, so no separate flag (which could drift
+    out of sync with the file) is needed.
     """
     entries = read_htpasswd(path)
     h = entries.get(username)
-    return bool(h) and verify(default, h)
+    return bool(h) and verify(PUBLISHED_DEFAULT_PASSWORD, h)
+
+
+def ensure_credential(path: str | os.PathLike,
+                      username: str = DEFAULT_USERNAME
+                      ) -> tuple[str, str | None]:
+    """Make sure ``username`` has a credential that isn't publicly known.
+
+    Returns ``(outcome, password)``:
+      * ``("created", pw)`` -- no entry existed; one was seeded with a random
+        password.
+      * ``("rotated", pw)`` -- the entry still used the published default
+        (an install seeded by an older version); it was replaced with a random
+        password. Any other user's entry in the file is left untouched.
+      * ``("kept", None)`` -- the entry already had its own password; nothing
+        was changed.
+
+    ``pw`` is the only time the new password exists in plaintext, so the
+    caller must show it to the administrator.
+    """
+    created = seed_default(path, username)
+    if created is not None:
+        return "created", created
+    if not uses_published_default(path, username):
+        return "kept", None
+    entries = read_htpasswd(path)
+    password = generate_password()
+    entries[username] = apr1(password)
+    write_htpasswd(path, entries)
+    return "rotated", password
 
 
 def change_password(path: str | os.PathLike,
                     username: str,
                     current: str,
                     new: str,
-                    confirm: str,
-                    default: str = DEFAULT_PASSWORD) -> None:
+                    confirm: str) -> None:
     """Validate and apply a password change for ``username``.
 
     Raises PasswordChangeError (with a password-free message) if the current
     password is wrong, the new password and confirmation differ, the new
-    password is empty, or the new password is the default or unchanged.
+    password is empty, or the new password is the published default or
+    unchanged.
     """
     entries = read_htpasswd(path)
     h = entries.get(username)
@@ -207,9 +246,9 @@ def change_password(path: str | os.PathLike,
                                   "not match.")
     if not new:
         raise PasswordChangeError("The new password must not be empty.")
-    if new == default:
-        raise PasswordChangeError("The new password must be different from the "
-                                  "default password.")
+    if new == PUBLISHED_DEFAULT_PASSWORD:
+        raise PasswordChangeError("The new password must not be the old "
+                                  "published default password.")
     if verify(new, h):
         raise PasswordChangeError("The new password must be different from the "
                                   "current password.")

@@ -96,6 +96,23 @@ jobs:
           PYTHONUTF8: "1"
         run: python tests/test_ai_websearch.py
 
+      - name: Translate prompt checks
+        run: python tests/test_translate_prompt.py
+
+      # Bookmark/password parsing runs on every OS; the DPAPI round-trip
+      # self-skips off Windows (see the test file's own WINDOWS gating).
+      - name: Browser import checks
+        run: python tests/test_browser_import.py
+
+      - name: Onboarding checks
+        run: python tests/test_onboarding.py
+
+      - name: Spell check checks
+        run: python tests/test_spellcheck.py
+
+      - name: UI localization checks
+        run: python tests/test_i18n.py
+
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer
         if: runner.os == 'Linux'

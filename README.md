@@ -1,7 +1,21 @@
 # Vodou Browser
 
-Version **1.54.10** gives Check Bookmarks a progress bar and a clear "scan
-complete" report, and greys out every button but Stop scan while a scan runs.
+Version **1.54.12** adds one-click import of bookmarks/passwords from Chrome
+or Edge, a first-run onboarding wizard, multi-language spell check (offline
+dictionaries bundled for 7 languages — nothing is ever downloaded), and
+local-AI page translation into 8 languages. It also starts full UI
+localization: the ☰ menu, password vault, and About/update dialog are now
+available in Spanish, French, German, Portuguese, Chinese, Japanese, Russian,
+and Arabic (machine-translated so far; more dialogs follow in later
+releases). Background tabs now freeze after 15 minutes (up from 60 seconds)
+and the old discard-timeout setting is gone — tabs are always frozen, never
+discarded.
+
+Version **1.54.11** automatically applies the glass-blur workaround on
+my.replika.ai to address flickering chat inputs and messages, and removes the
+Graphics submenu. Replika panels keep their transparency without the blur.
+1.54.10 gives Check Bookmarks a progress bar and a clear "scan complete"
+report, and greys out every button but Stop scan while a scan runs.
 1.54.9 trimmed the Docker image (GTK 3 and CUPS removed: 5 High / 7 Medium /
 66 Low in Docker Scout, nothing fixable), 1.54.8 removed the AI bookmark
 review, and 1.54.7 removed pip and fluxbox from the image. 1.54.6 fixed an
@@ -92,7 +106,7 @@ virtual display and a noVNC web client, so there's nothing to install but
 Docker:
 
 ```bash
-docker run -p 8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
+docker run -p 127.0.0.1:8080:8080 -v vodou-data:/home/vodou/.vodou msteier/vodou
 ```
 
 Then open <http://localhost:8080/>. The volume keeps your profile (bookmarks,

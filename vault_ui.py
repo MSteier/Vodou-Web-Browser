@@ -39,6 +39,7 @@ from PyQt6.QtWidgets import (
 )
 
 import password_strength
+from i18n import tr
 from authenticator import (
     AuthenticatorError,
     WindowsWebAuthnAuthenticator,
@@ -130,14 +131,14 @@ def add_reveal_toggle(edit: QLineEdit) -> None:
     eye = make_icon("eye", color)          # open eye  -> currently visible
     eye_off = make_icon("eye-off", color)  # slashed   -> currently hidden
     action = edit.addAction(eye_off, QLineEdit.ActionPosition.TrailingPosition)
-    action.setToolTip("Show password")
+    action.setToolTip(tr("Show password"))
     action.setCheckable(True)
 
     def toggle(shown: bool) -> None:
         edit.setEchoMode(QLineEdit.EchoMode.Normal if shown
                          else QLineEdit.EchoMode.Password)
         action.setIcon(eye if shown else eye_off)
-        action.setToolTip("Hide password" if shown else "Show password")
+        action.setToolTip(tr("Hide password") if shown else tr("Show password"))
         edit.setFocus()  # a click on the icon must not steal typing focus
 
     action.toggled.connect(toggle)
@@ -152,20 +153,20 @@ class UnlockDialog(QDialog):
         self.creating = not vault.exists()
         self.reset_requested = False
         self.needs_key = (not self.creating) and vault.file_has_factor()
-        self.setWindowTitle("Create Vault" if self.creating else "Unlock Vault")
+        self.setWindowTitle(tr("Create Vault") if self.creating else tr("Unlock Vault"))
         self.setMinimumWidth(380)
 
         layout = QVBoxLayout(self)
         if self.creating:
-            layout.addWidget(QLabel(
+            layout.addWidget(QLabel(tr(
                 "No vault exists yet. Choose a master password.\n"
                 "It encrypts everything — if you forget it, the vault\n"
-                "cannot be recovered."))
+                "cannot be recovered.")))
         elif self.needs_key:
-            key_hint = QLabel(
+            key_hint = QLabel(tr(
                 "🔑 This vault also needs a registered security key.\n"
                 "Have it ready — you'll be prompted to tap it after you "
-                "enter your password.")
+                "enter your password."))
             key_hint.setWordWrap(True)
             layout.addWidget(key_hint)
 
@@ -173,14 +174,14 @@ class UnlockDialog(QDialog):
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         add_reveal_toggle(self.password_edit)
-        form.addRow("Master password:", self.password_edit)
+        form.addRow(tr("Master password:"), self.password_edit)
 
         self.confirm_edit = None
         if self.creating:
             self.confirm_edit = QLineEdit()
             self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
             add_reveal_toggle(self.confirm_edit)
-            form.addRow("Confirm:", self.confirm_edit)
+            form.addRow(tr("Confirm:"), self.confirm_edit)
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(
@@ -194,27 +195,27 @@ class UnlockDialog(QDialog):
             # the saved logins (they're encrypted under that password), it
             # only deletes the vault so a fresh one can be created.
             reset_btn = buttons.addButton(
-                "Forgot? Start over…", QDialogButtonBox.ButtonRole.ResetRole)
+                tr("Forgot? Start over…"), QDialogButtonBox.ButtonRole.ResetRole)
             reset_btn.clicked.connect(self._start_over)
         layout.addWidget(buttons)
         self.password_edit.setFocus()
 
     def _start_over(self) -> None:
         text, ok = QInputDialog.getText(
-            self, "Erase vault and start over",
-            "This permanently erases EVERY saved login in the vault.\n\n"
-            "Your passwords are encrypted with the master password you've\n"
-            "forgotten, so they cannot be recovered — starting over only\n"
-            "lets you create a new, empty vault. This cannot be undone.\n\n"
-            "Type RESET to confirm:")
+            self, tr("Erase vault and start over"),
+            tr("This permanently erases EVERY saved login in the vault.\n\n"
+               "Your passwords are encrypted with the master password you've\n"
+               "forgotten, so they cannot be recovered — starting over only\n"
+               "lets you create a new, empty vault. This cannot be undone.\n\n"
+               "Type RESET to confirm:"))
         if not ok or text.strip() != "RESET":
             return
         try:
             self.vault.destroy()
         except OSError as error:
             QMessageBox.critical(
-                self, "Could not reset",
-                f"The vault file could not be deleted:\n{error}")
+                self, tr("Could not reset"),
+                tr("The vault file could not be deleted:\n{error}").format(error=error))
             return
         self.reset_requested = True
         self.reject()
@@ -223,18 +224,18 @@ class UnlockDialog(QDialog):
         master = self.password_edit.text()
         if self.creating:
             if len(master) < 8:
-                QMessageBox.warning(self, "Too short",
-                                    "Use at least 8 characters (a long "
-                                    "passphrase is best).")
+                QMessageBox.warning(self, tr("Too short"),
+                                    tr("Use at least 8 characters (a long "
+                                       "passphrase is best)."))
                 return
             if master != self.confirm_edit.text():
-                QMessageBox.warning(self, "Mismatch", "Passwords don't match.")
+                QMessageBox.warning(self, tr("Mismatch"), tr("Passwords don't match."))
                 return
             try:
                 self.vault.create(master)
             except (FileExistsError, OSError) as error:
-                QMessageBox.critical(self, "Vault error",
-                                     f"Could not create the vault:\n{error}")
+                QMessageBox.critical(self, tr("Vault error"),
+                                     tr("Could not create the vault:\n{error}").format(error=error))
                 return
             self.accept()
             return
@@ -243,34 +244,34 @@ class UnlockDialog(QDialog):
             ok, why = webauthn_supported()
             if not ok:
                 QMessageBox.critical(
-                    self, "Security key required",
-                    "This vault needs a registered security key to unlock, "
-                    "but that isn't available right now:\n\n" + why)
+                    self, tr("Security key required"),
+                    tr("This vault needs a registered security key to unlock, "
+                       "but that isn't available right now:\n\n{why}").format(why=why))
                 return
             authenticator = WindowsWebAuthnAuthenticator(int(self.winId()))
         try:
             self.vault.unlock(master, authenticator)
         except WrongMasterPassword:
-            QMessageBox.warning(self, "Wrong password",
-                                "That master password is incorrect.")
+            QMessageBox.warning(self, tr("Wrong password"),
+                                tr("That master password is incorrect."))
             self.password_edit.clear()
             return
         except SecondFactorRequired:
             QMessageBox.critical(
-                self, "Security key required",
-                "This vault needs a registered security key to unlock.")
+                self, tr("Security key required"),
+                tr("This vault needs a registered security key to unlock."))
             return
         except SecondFactorFailed as error:
             QMessageBox.warning(
-                self, "Security key",
-                f"Couldn't verify your security key:\n\n{error}\n\n"
-                f"Make sure the right key is plugged in, then try again.")
+                self, tr("Security key"),
+                tr("Couldn't verify your security key:\n\n{error}\n\n"
+                   "Make sure the right key is plugged in, then try again.").format(error=error))
             return
         except (VaultCorrupted, OSError) as error:
             QMessageBox.critical(
-                self, "Vault error",
-                f"The vault could not be opened:\n{error}\n\n"
-                f"The file has not been modified.")
+                self, tr("Vault error"),
+                tr("The vault could not be opened:\n{error}\n\n"
+                   "The file has not been modified.").format(error=error))
             return
         self.accept()
 
@@ -281,13 +282,13 @@ class ChangeMasterDialog(QDialog):
     def __init__(self, vault: Vault, parent: QWidget | None = None):
         super().__init__(parent)
         self.vault = vault
-        self.setWindowTitle("Change master password")
+        self.setWindowTitle(tr("Change master password"))
         self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
+        layout.addWidget(QLabel(tr(
             "The new master password re-encrypts the whole vault.\n"
-            "If you forget it, the vault cannot be recovered."))
+            "If you forget it, the vault cannot be recovered.")))
 
         form = QFormLayout()
         self.current_edit = QLineEdit()
@@ -295,12 +296,12 @@ class ChangeMasterDialog(QDialog):
         self.confirm_edit = QLineEdit()
         for edit in (self.current_edit, self.new_edit, self.confirm_edit):
             edit.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("Current master password:", self.current_edit)
-        form.addRow("New master password:", self.new_edit)
-        form.addRow("Confirm new:", self.confirm_edit)
+        form.addRow(tr("Current master password:"), self.current_edit)
+        form.addRow(tr("New master password:"), self.new_edit)
+        form.addRow(tr("Confirm new:"), self.confirm_edit)
         layout.addLayout(form)
 
-        show = QCheckBox("Show passwords")
+        show = QCheckBox(tr("Show passwords"))
         show.toggled.connect(lambda on: [
             edit.setEchoMode(QLineEdit.EchoMode.Normal if on
                              else QLineEdit.EchoMode.Password)
@@ -318,29 +319,29 @@ class ChangeMasterDialog(QDialog):
     def _submit(self) -> None:
         new = self.new_edit.text()
         if len(new) < 8:
-            QMessageBox.warning(self, "Too short",
-                                "Use at least 8 characters (a long "
-                                "passphrase is best).")
+            QMessageBox.warning(self, tr("Too short"),
+                                tr("Use at least 8 characters (a long "
+                                   "passphrase is best)."))
             return
         if new != self.confirm_edit.text():
-            QMessageBox.warning(self, "Mismatch",
-                                "New passwords don't match.")
+            QMessageBox.warning(self, tr("Mismatch"),
+                                tr("New passwords don't match."))
             return
         try:
             self.vault.change_master_password(self.current_edit.text(), new)
         except WrongMasterPassword:
-            QMessageBox.warning(self, "Wrong password",
-                                "The current master password is incorrect.")
+            QMessageBox.warning(self, tr("Wrong password"),
+                                tr("The current master password is incorrect."))
             self.current_edit.clear()
             self.current_edit.setFocus()
             return
         except OSError as error:
-            QMessageBox.critical(self, "Vault error",
-                                 f"Could not save the vault:\n{error}")
+            QMessageBox.critical(self, tr("Vault error"),
+                                 tr("Could not save the vault:\n{error}").format(error=error))
             return
         QMessageBox.information(
-            self, "Master password changed",
-            "The vault was re-encrypted under your new master password.")
+            self, tr("Master password changed"),
+            tr("The vault was re-encrypted under your new master password."))
         self.accept()
 
 
@@ -355,32 +356,35 @@ class SecurityKeysDialog(QDialog):
     def __init__(self, vault: Vault, parent: QWidget | None = None):
         super().__init__(parent)
         self.vault = vault
-        self.setWindowTitle("Security keys")
+        self.setWindowTitle(tr("Security keys"))
         self.setMinimumWidth(440)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
+        layout.addWidget(QLabel(tr(
             "A security key adds a second factor: the vault then needs BOTH "
             "your master password AND a registered key to open.\n\n"
             "Enroll at least two — a spare kept somewhere safe. If you lose "
-            "the only key, the vault cannot be opened (there is no bypass)."))
+            "the only key, the vault cannot be opened (there is no bypass).")))
 
         self.list = QListWidget()
         layout.addWidget(self.list)
 
         row = QHBoxLayout()
-        self.add_btn = QPushButton("Add key…")
+        self.add_btn = QPushButton(tr("Add key…"))
         self.add_btn.clicked.connect(self._add)
-        self.remove_btn = QPushButton("Remove")
+        self.remove_btn = QPushButton(tr("Remove"))
         self.remove_btn.clicked.connect(self._remove)
         row.addWidget(self.add_btn)
         row.addWidget(self.remove_btn)
         row.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(tr("Close"))
         close_btn.clicked.connect(self.accept)
         row.addWidget(close_btn)
         layout.addLayout(row)
 
+        # `why` is a diagnostic string from authenticator.py (a backend
+        # module, out of this feature's scope -- see main.py's own
+        # ai_search.py precedent), so it's shown as-is, untranslated.
         available, why = webauthn_supported()
         if not available:
             self.add_btn.setEnabled(False)
@@ -395,56 +399,66 @@ class SecurityKeysDialog(QDialog):
         self.list.clear()
         keys = self.vault.list_authenticators()
         for rec in keys:
-            label = rec["label"] or "Security key"
-            item = QListWidgetItem(f"{label}   (added {rec['added']})")
+            label = rec["label"] or tr("Security key")
+            item = QListWidgetItem(
+                tr("{label}   (added {added})").format(
+                    label=label, added=rec["added"]))
             # QListWidgetItem is plain text, so a user-typed label can't inject
             # markup. Store the raw credential id for removal.
             item.setData(Qt.ItemDataRole.UserRole, rec["cred_id"])
             self.list.addItem(item)
         self.remove_btn.setEnabled(bool(keys))
         if not keys:
-            placeholder = QListWidgetItem(
+            placeholder = QListWidgetItem(tr(
                 "No security keys enrolled — this vault opens with the "
-                "master password alone.")
+                "master password alone."))
             placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             self.list.addItem(placeholder)
 
     def _add(self) -> None:
         label, ok = QInputDialog.getText(
-            self, "Add security key",
-            "Name this key so you can tell it apart later\n"
-            "(e.g. 'YubiKey 5C', 'Backup in drawer'):")
+            self, tr("Add security key"),
+            tr("Name this key so you can tell it apart later\n"
+               "(e.g. 'YubiKey 5C', 'Backup in drawer'):"))
         if not ok:
             return
         if not self.vault.factor_enrolled:
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
-            box.setWindowTitle("Turn on security-key unlock")
-            box.setText(
+            box.setWindowTitle(tr("Turn on security-key unlock"))
+            box.setText(tr(
                 "This makes a security key REQUIRED to open the vault, "
                 "alongside your master password.\n\n"
                 "If you later lose every enrolled key, the saved logins "
                 "cannot be recovered. Enroll a backup key right after this "
-                "one.\n\nContinue?")
+                "one.\n\nContinue?"))
             box.setStandardButtons(QMessageBox.StandardButton.Yes
                                    | QMessageBox.StandardButton.No)
             box.setDefaultButton(QMessageBox.StandardButton.No)
             if box.exec() != QMessageBox.StandardButton.Yes:
                 return
+        master = ask_master_password(self, tr("Add security key"))
+        if master is None:
+            return
         authenticator = WindowsWebAuthnAuthenticator(int(self.winId()))
         try:
-            self.vault.enroll_authenticator(authenticator, label.strip())
+            self.vault.enroll_authenticator(authenticator, label.strip(),
+                                            master=master)
+        except WrongMasterPassword:
+            QMessageBox.warning(self, tr("Couldn't add the key"),
+                                tr("That master password is incorrect."))
+            return
         except AuthenticatorError as error:
             QMessageBox.warning(
-                self, "Couldn't add the key",
-                f"{error}\n\nMake sure your security key is plugged in.")
+                self, tr("Couldn't add the key"),
+                tr("{error}\n\nMake sure your security key is plugged in.").format(error=error))
             return
         except ValueError as error:  # already enrolled
-            QMessageBox.warning(self, "Already enrolled", str(error))
+            QMessageBox.warning(self, tr("Already enrolled"), str(error))
             return
         except OSError as error:
-            QMessageBox.critical(self, "Vault error",
-                                 f"Could not save the vault:\n{error}")
+            QMessageBox.critical(self, tr("Vault error"),
+                                 tr("Could not save the vault:\n{error}").format(error=error))
             return
         self._refresh()
 
@@ -456,22 +470,38 @@ class SecurityKeysDialog(QDialog):
         last = len(self.vault.list_authenticators()) == 1
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Remove security key")
-        box.setText(
+        box.setWindowTitle(tr("Remove security key"))
+        box.setText(tr(
             "Remove the LAST security key? The vault will go back to "
-            "opening with just the master password (no second factor)."
-            if last else "Remove this security key from the vault?")
+            "opening with just the master password (no second factor).")
+            if last else tr("Remove this security key from the vault?"))
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         if box.exec() != QMessageBox.StandardButton.Yes:
             return
+        master = ask_master_password(self, tr("Remove security key"))
+        if master is None:
+            return
         try:
-            self.vault.remove_authenticator(cred_id)
+            self.vault.remove_authenticator(cred_id, master=master)
+        except WrongMasterPassword:
+            QMessageBox.warning(self, tr("Couldn't remove the key"),
+                                tr("That master password is incorrect."))
+            return
         except (ValueError, OSError) as error:
-            QMessageBox.warning(self, "Couldn't remove the key", str(error))
+            QMessageBox.warning(self, tr("Couldn't remove the key"), str(error))
             return
         self._refresh()
+
+
+def ask_master_password(parent: QWidget | None, title: str) -> str | None:
+    """Prompt (masked) for the master password to confirm a sensitive change.
+    None if the user cancels or enters nothing."""
+    text, ok = QInputDialog.getText(
+        parent, title, tr("Enter your master password to confirm:"),
+        QLineEdit.EchoMode.Password)
+    return text if ok and text else None
 
 
 def ensure_unlocked(vault: Vault, parent: QWidget | None = None) -> bool:
@@ -502,18 +532,18 @@ class GeneratePasswordDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None, length: int = 16):
         super().__init__(parent)
-        self.setWindowTitle("Generate Password")
+        self.setWindowTitle(tr("Generate Password"))
         self.setMinimumWidth(420)
         self._password = ""
 
         layout = QVBoxLayout(self)
 
         length_row = QHBoxLayout()
-        length_label = QLabel("Length:")
+        length_label = QLabel(tr("Length:"))
         self.length_spin = QSpinBox()
         self.length_spin.setRange(4, 64)
         self.length_spin.setValue(length)
-        self.length_spin.setAccessibleName("Password length")
+        self.length_spin.setAccessibleName(tr("Password length"))
         length_label.setBuddy(self.length_spin)
         length_row.addWidget(length_label)
         length_row.addWidget(self.length_spin)
@@ -522,9 +552,9 @@ class GeneratePasswordDialog(QDialog):
 
         # Matches the reference generator's three character-type toggles
         # exactly (mixed-case letters / numbers / punctuation).
-        self.letters_check = QCheckBox("Letters (a–z, A–Z)")
-        self.numbers_check = QCheckBox("Numbers (0–9)")
-        self.symbols_check = QCheckBox("Punctuation (symbols)")
+        self.letters_check = QCheckBox(tr("Letters (a–z, A–Z)"))
+        self.numbers_check = QCheckBox(tr("Numbers (0–9)"))
+        self.symbols_check = QCheckBox(tr("Punctuation (symbols)"))
         for box in (self.letters_check, self.numbers_check,
                     self.symbols_check):
             box.setChecked(True)
@@ -534,20 +564,20 @@ class GeneratePasswordDialog(QDialog):
         out_row = QHBoxLayout()
         self.pass_edit = QLineEdit()
         self.pass_edit.setReadOnly(True)
-        self.pass_edit.setAccessibleName("Generated password")
+        self.pass_edit.setAccessibleName(tr("Generated password"))
         add_reveal_toggle(self.pass_edit)
         out_row.addWidget(self.pass_edit)
-        self.copy_btn = QPushButton("Copy")
+        self.copy_btn = QPushButton(tr("Copy"))
         self.copy_btn.clicked.connect(self._copy)
         out_row.addWidget(self.copy_btn)
         layout.addLayout(out_row)
 
         self.strength_label = QLabel()
         self.strength_label.setWordWrap(True)
-        self.strength_label.setAccessibleName("Generated password strength")
+        self.strength_label.setAccessibleName(tr("Generated password strength"))
         layout.addWidget(self.strength_label)
 
-        gen_btn = QPushButton("Generate password")
+        gen_btn = QPushButton(tr("Generate password"))
         gen_btn.clicked.connect(self._generate)
         layout.addWidget(gen_btn)
 
@@ -555,7 +585,7 @@ class GeneratePasswordDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel)
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        self.ok_button.setText("Use this password")
+        self.ok_button.setText(tr("Use this password"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -583,8 +613,9 @@ class GeneratePasswordDialog(QDialog):
         result = password_strength.analyze(pw)
         color = _STRENGTH_COLORS[result.label]
         self.strength_label.setText(
-            f'<b style="color:{color}">{result.label}</b> '
-            f'— about {result.bits:.0f} bits')
+            tr('<b style="color:{color}">{label}</b> '
+               '— about {bits:.0f} bits').format(
+                   color=color, label=tr(result.label), bits=result.bits))
 
     def _copy(self) -> None:
         if self._password:
@@ -606,7 +637,7 @@ class EntryDialog(QDialog):
                  entry: Entry | None = None, site: str = "",
                  other_entries: list[Entry] | None = None):
         super().__init__(parent)
-        self.setWindowTitle("Edit Entry" if entry else "Add Entry")
+        self.setWindowTitle(tr("Edit Entry") if entry else tr("Add Entry"))
         self.setMinimumWidth(440)
         # Every OTHER saved entry, password already revealed by the caller
         # (VaultDialog._reveal_all) — used only to check this field against
@@ -618,29 +649,29 @@ class EntryDialog(QDialog):
         self.user_edit = QLineEdit(entry.username if entry else "")
         self.pass_edit = QLineEdit(entry.password if entry else "")
         self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pass_edit.setAccessibleName("Password")
+        self.pass_edit.setAccessibleName(tr("Password"))
         add_reveal_toggle(self.pass_edit)
         self.pass_edit.textChanged.connect(self._update_strength)
         self.notes_edit = QLineEdit(entry.notes if entry else "")
 
-        form.addRow("Site (domain):", self.site_edit)
-        form.addRow("Username:", self.user_edit)
-        form.addRow("Password:", self.pass_edit)
+        form.addRow(tr("Site (domain):"), self.site_edit)
+        form.addRow(tr("Username:"), self.user_edit)
+        form.addRow(tr("Password:"), self.pass_edit)
 
         self.strength_label = QLabel()
         self.strength_label.setWordWrap(True)
-        self.strength_label.setAccessibleName("Password strength")
+        self.strength_label.setAccessibleName(tr("Password strength"))
         form.addRow(self.strength_label)
 
-        gen_btn = QPushButton("Generate Strong Password…")
-        gen_btn.setToolTip(
+        gen_btn = QPushButton(tr("Generate Strong Password…"))
+        gen_btn.setToolTip(tr(
             "Open the password generator and replace this password with a "
             "freshly generated one — it only fills the field below; Save "
-            "still has to be pressed to keep it.")
+            "still has to be pressed to keep it."))
         gen_btn.clicked.connect(self._open_generator)
         form.addRow(gen_btn)
 
-        form.addRow("Notes:", self.notes_edit)
+        form.addRow(tr("Notes:"), self.notes_edit)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -675,15 +706,17 @@ class EntryDialog(QDialog):
         # site sharing it) that a high bit-count doesn't cancel out.
         color = _STRENGTH_COLORS["Weak"] if reused_sites \
             else _STRENGTH_COLORS[result.label]
-        text = f'<b style="color:{color}">{result.label}</b>'
+        text = tr('<b style="color:{color}">{label}</b>').format(
+            color=color, label=tr(result.label))
         if result.bits:
-            text += f" — about {result.bits:.0f} bits"
+            text += tr(" — about {bits:.0f} bits").format(bits=result.bits)
         reasons = list(result.reasons)
         if reused_sites:
             shown = ", ".join(html.escape(s) for s in reused_sites[:5])
             if len(reused_sites) > 5:
-                shown += f", and {len(reused_sites) - 5} more"
-            reasons.append(f"Also the password for: {shown}.")
+                shown += tr(", and {more} more").format(
+                    more=len(reused_sites) - 5)
+            reasons.append(tr("Also the password for: {shown}.").format(shown=shown))
         if reasons:
             text += "<br>" + "<br>".join(reasons)
         self.strength_label.setText(text)
@@ -696,8 +729,8 @@ class EntryDialog(QDialog):
 
     def _submit(self) -> None:
         if not self.site_edit.text().strip() or not self.pass_edit.text():
-            QMessageBox.warning(self, "Missing fields",
-                                "Site and password are required.")
+            QMessageBox.warning(self, tr("Missing fields"),
+                                tr("Site and password are required."))
             return
         self.accept()
 
@@ -763,14 +796,14 @@ def two_factor_state(factor_enrolled: bool, webauthn_available: bool) -> dict:
     checked = bool(factor_enrolled)
     enabled = bool(factor_enrolled or webauthn_available)
     if checked:
-        tooltip = ("On — the vault needs your master password AND a registered "
-                   "security key. Click to turn off (removes all keys).")
+        tooltip = tr("On — the vault needs your master password AND a registered "
+                     "security key. Click to turn off (removes all keys).")
     elif webauthn_available:
-        tooltip = ("Off — click to also require a security key alongside your "
-                   "master password.")
+        tooltip = tr("Off — click to also require a security key alongside your "
+                     "master password.")
     else:
-        tooltip = ("Off — turning this on needs a FIDO2 security key, and none "
-                   "can be used here.")
+        tooltip = tr("Off — turning this on needs a FIDO2 security key, and none "
+                     "can be used here.")
     return {"checked": checked, "enabled": enabled, "tooltip": tooltip}
 
 
@@ -808,7 +841,7 @@ class VaultDialog(QDialog):
         # None (e.g. in a caller that hasn't wired it up) just means that
         # column falls back to the spoof-only verdict.
         self._safe_browsing = safe_browsing
-        self.setWindowTitle("Password Vault")
+        self.setWindowTitle(tr("Password Vault"))
         # Wider than the old 4-column layout's default — seven columns need
         # the room, and only Website stretches (see below). 980px (the old
         # width) left Duplicated and Last Changed past the edge even with no
@@ -821,8 +854,8 @@ class VaultDialog(QDialog):
         layout.setSpacing(10)
 
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText(
-            "Search logins — site, username or notes  (Ctrl+F)")
+        self.search_edit.setPlaceholderText(tr(
+            "Search logins — site, username or notes  (Ctrl+F)"))
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(lambda _: self._refresh())
         QShortcut(QKeySequence.StandardKey.Find, self,
@@ -832,8 +865,8 @@ class VaultDialog(QDialog):
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels([
-            "Website", "Website Safety", "Username/Email", "Password",
-            "Strength", "Duplicated", "Last Changed"])
+            tr("Website"), tr("Website Safety"), tr("Username/Email"), tr("Password"),
+            tr("Strength"), tr("Duplicated"), tr("Last Changed")])
         # Only Website stretches to fill leftover space; every other column
         # sizes to its own content. Two stretch columns (the old Site +
         # Username split) fought each other for space once there were seven
@@ -860,16 +893,16 @@ class VaultDialog(QDialog):
         # right, so the two kinds of action read as distinct groups.
         actions = QHBoxLayout()
         actions.setSpacing(6)
-        for label, handler in (("Add", self._add),
-                               ("Edit", self._edit),
-                               ("Delete", self._delete)):
+        for label, handler in ((tr("Add"), self._add),
+                               (tr("Edit"), self._edit),
+                               (tr("Delete"), self._delete)):
             btn = QPushButton(label)
             btn.clicked.connect(handler)
             actions.addWidget(btn)
         actions.addStretch()
-        for label, handler in (("Go to site", self._go_to_site),
-                               ("Copy username", self._copy_username),
-                               ("Copy password", self._copy_password)):
+        for label, handler in ((tr("Go to site"), self._go_to_site),
+                               (tr("Copy username"), self._copy_username),
+                               (tr("Copy password"), self._copy_password)):
             btn = QPushButton(label)
             btn.clicked.connect(handler)
             actions.addWidget(btn)
@@ -886,75 +919,75 @@ class VaultDialog(QDialog):
         footer = QHBoxLayout()
         footer.setSpacing(8)
 
-        manage_btn = QPushButton("Manage")
-        manage_btn.setToolTip("Vault security, auto-lock, and CSV "
-                              "import/export.")
+        manage_btn = QPushButton(tr("Manage"))
+        manage_btn.setToolTip(tr("Vault security, auto-lock, and CSV "
+                                 "import/export."))
         manage_menu = QMenu(manage_btn)
         # Grouped into three labelled sections — Security, Auto-lock, Data — so
         # the occasional vault-wide actions read as an organised settings menu
         # rather than a flat list.
 
         # --- Security -----------------------------------------------------
-        security_header = manage_menu.addAction("Security")
+        security_header = manage_menu.addAction(tr("Security"))
         security_header.setEnabled(False)  # non-clickable section caption
 
         self._two_factor_action = manage_menu.addAction(
-            "Two-factor (security key)")
+            tr("Two-factor (security key)"))
         self._two_factor_action.setCheckable(True)
         self._two_factor_action.triggered.connect(self._on_two_factor_triggered)
 
         keys_action = manage_menu.addAction(
-            "Security keys…", self._manage_security_keys)
-        keys_action.setToolTip(
+            tr("Security keys…"), self._manage_security_keys)
+        keys_action.setToolTip(tr(
             "Add a backup key or remove an individual key. The two-factor "
-            "switch above is the quick way to turn it all on or off.")
+            "switch above is the quick way to turn it all on or off."))
         manage_menu.addAction(
-            "Change master password…",
+            tr("Change master password…"),
             lambda: ChangeMasterDialog(self.vault, self).exec())
 
         # --- Auto-lock ----------------------------------------------------
         manage_menu.addSeparator()
-        autolock_menu = manage_menu.addMenu("Auto-lock vault")
-        autolock_menu.setToolTip(
-            "How long the unlocked vault waits, idle, before it re-locks.")
+        autolock_menu = manage_menu.addMenu(tr("Auto-lock vault"))
+        autolock_menu.setToolTip(tr(
+            "How long the unlocked vault waits, idle, before it re-locks."))
         self._autolock_group = QActionGroup(autolock_menu)
         self._autolock_group.setExclusive(True)
         for minutes, label in VAULT_AUTOLOCK_OPTIONS:
-            option = autolock_menu.addAction(label)
+            option = autolock_menu.addAction(tr(label))
             option.setCheckable(True)
             option.setChecked(minutes == self._autolock_minutes)
             self._autolock_group.addAction(option)
             option.triggered.connect(
                 lambda _checked, m=minutes: self._choose_autolock(m))
         autolock_menu.addSeparator()
-        caution = autolock_menu.addAction(
-            "⚠  Longer windows keep the vault key in memory longer")
+        caution = autolock_menu.addAction(tr(
+            "⚠  Longer windows keep the vault key in memory longer"))
         caution.setEnabled(False)  # inline caution, not an action
 
         # --- Data ---------------------------------------------------------
         manage_menu.addSeparator()
-        manage_menu.addAction("Import from CSV…", self._import_csv)
-        manage_menu.addAction("Export to CSV…", self._export_csv)
+        manage_menu.addAction(tr("Import from CSV…"), self._import_csv)
+        manage_menu.addAction(tr("Export to CSV…"), self._export_csv)
         dedup_action = manage_menu.addAction(
-            "Remove duplicate logins…", self._remove_duplicates)
-        dedup_action.setToolTip(
+            tr("Remove duplicate logins…"), self._remove_duplicates)
+        dedup_action.setToolTip(tr(
             "Find logins saved more than once (same site, username, and "
-            "password) and remove the extra copies, keeping the oldest.")
+            "password) and remove the extra copies, keeping the oldest."))
 
         manage_btn.setMenu(manage_menu)
         footer.addWidget(manage_btn)
         self._sync_two_factor_action()  # reflect the real 2FA state on open
 
-        hint = QLabel(f"Copied passwords clear after "
-                      f"{CLIPBOARD_CLEAR_SECONDS}s")
+        hint = QLabel(tr("Copied passwords clear after {seconds}s").format(
+            seconds=CLIPBOARD_CLEAR_SECONDS))
         hint.setStyleSheet("color: gray;")
         footer.addWidget(hint)
 
         footer.addStretch()
 
-        logout_btn = QPushButton("🔒  Log out")
-        logout_btn.setToolTip(
-            "Lock the vault now and close this window (Ctrl+Shift+L).")
+        logout_btn = QPushButton(tr("🔒  Log out"))
+        logout_btn.setToolTip(tr(
+            "Lock the vault now and close this window (Ctrl+Shift+L)."))
         logout_btn.clicked.connect(lambda: self.logout_requested.emit())
         footer.addWidget(logout_btn)
 
@@ -1040,7 +1073,7 @@ class VaultDialog(QDialog):
                 row, self.COL_USERNAME, QTableWidgetItem(e.username))
 
             password_item = QTableWidgetItem(self._MASKED_PASSWORD)
-            password_item.setToolTip("Click to show or hide this password.")
+            password_item.setToolTip(tr("Click to show or hide this password."))
             password_item.setData(Qt.ItemDataRole.UserRole + 1, False)
             self.table.setItem(row, self.COL_PASSWORD, password_item)
 
@@ -1068,22 +1101,25 @@ class VaultDialog(QDialog):
         `result` is None only when that entry's reveal() failed."""
         if result is None:
             return QTableWidgetItem("—")
-        text = result.label
+        text = tr(result.label)
         tooltip_lines = list(result.reasons)
         color = _STRENGTH_COLORS[result.label]
         if reused_count:
-            text += f" · Reused ({reused_count}×)"
+            text += tr(" · Reused ({count}×)").format(count=reused_count)
             color = _STRENGTH_COLORS["Weak"]
             # Name the actual other logins sharing this password, not just a
             # count — lets the user verify the flag against what's really
             # saved instead of taking it on faith.
             shown = ", ".join(html.escape(s) for s in (reused_sites or [])[:5])
             if reused_sites and len(reused_sites) > 5:
-                shown += f", and {len(reused_sites) - 5} more"
+                shown += tr(", and {more} more").format(
+                    more=len(reused_sites) - 5)
             tooltip_lines.append(
-                (f"Same password also saved for: {shown}." if shown else
-                 f"The same password is used for {reused_count} saved "
-                 f"logins") + " — give each site its own password.")
+                (tr("Same password also saved for: {shown}.").format(shown=shown)
+                 if shown else
+                 tr("The same password is used for {count} saved "
+                    "logins").format(count=reused_count))
+                + " " + tr("— give each site its own password."))
         item = QTableWidgetItem(text)
         item.setForeground(QColor(color))
         if tooltip_lines:
@@ -1103,23 +1139,25 @@ class VaultDialog(QDialog):
             return QTableWidgetItem("—")
         if self._safe_browsing is not None \
                 and self._safe_browsing.is_dangerous(host) is not None:
-            item = QTableWidgetItem("🛑 Malicious")
+            item = QTableWidgetItem(tr("🛑 Malicious"))
             item.setForeground(QColor(_STRENGTH_COLORS["Weak"]))
-            item.setToolTip(
+            item.setToolTip(tr(
                 "This address matches Vodou's local list of known "
-                "malicious/phishing sites.")
+                "malicious/phishing sites."))
             return item
+        # verdict.detail comes from spoofcheck.py (a backend module, out of
+        # this feature's scope), so it's shown as-is, untranslated.
         verdict = spoof_inspect(host)
         if verdict is not None:
-            item = QTableWidgetItem("⚠ Possible spoof")
+            item = QTableWidgetItem(tr("⚠ Possible spoof"))
             item.setForeground(QColor(_STRENGTH_COLORS["Moderate"]))
             item.setToolTip(verdict.detail)
             return item
-        item = QTableWidgetItem("OK")
+        item = QTableWidgetItem(tr("OK"))
         item.setForeground(QColor(_STRENGTH_COLORS["Strong"]))
-        item.setToolTip(
+        item.setToolTip(tr(
             "No look-alike-address or malicious-list match found. This is a "
-            "local heuristic check, not a live scan or antivirus lookup.")
+            "local heuristic check, not a live scan or antivirus lookup."))
         return item
 
     def _duplicate_item(self, is_duplicate: bool) -> QTableWidgetItem:
@@ -1129,11 +1167,11 @@ class VaultDialog(QDialog):
         cross-site reuse badge. See "Remove duplicate logins…" in Manage."""
         if not is_duplicate:
             return QTableWidgetItem("—")
-        item = QTableWidgetItem("Duplicate")
+        item = QTableWidgetItem(tr("Duplicate"))
         item.setForeground(QColor(_STRENGTH_COLORS["Weak"]))
-        item.setToolTip(
+        item.setToolTip(tr(
             "Another saved login has the exact same site, username, and "
-            "password. Manage → Remove duplicate logins… cleans these up.")
+            "password. Manage → Remove duplicate logins… cleans these up."))
         return item
 
     def _on_cell_clicked(self, row: int, column: int) -> None:
@@ -1196,31 +1234,37 @@ class VaultDialog(QDialog):
         if not self.vault.factor_enrolled:
             SecurityKeysDialog(self.vault, self).exec()
         elif self._confirm_disable_two_factor():
-            self._disable_two_factor()
+            master = ask_master_password(self, tr("Turn off two-factor"))
+            if master is not None:
+                self._disable_two_factor(master)
         self._sync_two_factor_action()
 
     def _confirm_disable_two_factor(self) -> bool:
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Turn off two-factor")
-        box.setText(
+        box.setWindowTitle(tr("Turn off two-factor"))
+        box.setText(tr(
             "Remove every enrolled security key and go back to opening the "
             "vault with just the master password?\n\n"
             "You can turn two-factor back on later, but you'll need to "
-            "re-enroll your keys.")
+            "re-enroll your keys."))
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         return box.exec() == QMessageBox.StandardButton.Yes
 
-    def _disable_two_factor(self) -> None:
+    def _disable_two_factor(self, master: str) -> None:
         """Remove all enrolled keys. Reuses vault.remove_authenticator (removing
         the last key reverts the vault to password-only) — no new crypto here."""
         try:
             for record in self.vault.list_authenticators():
-                self.vault.remove_authenticator(record["cred_id"])
+                self.vault.remove_authenticator(record["cred_id"],
+                                                master=master)
+        except WrongMasterPassword:
+            QMessageBox.warning(self, tr("Couldn't turn off two-factor"),
+                                tr("That master password is incorrect."))
         except (ValueError, OSError) as error:
-            QMessageBox.warning(self, "Couldn't turn off two-factor",
+            QMessageBox.warning(self, tr("Couldn't turn off two-factor"),
                                 str(error))
 
     def _sync_two_factor_action(self) -> None:
@@ -1268,8 +1312,9 @@ class VaultDialog(QDialog):
         entry = self.vault.entries()[index]
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Delete entry")
-        box.setText(f"Delete the login for {entry.site} ({entry.username})?")
+        box.setWindowTitle(tr("Delete entry"))
+        box.setText(tr("Delete the login for {site} ({username})?").format(
+            site=entry.site, username=entry.username))
         box.setTextFormat(Qt.TextFormat.PlainText)  # site/username untrusted
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
@@ -1281,8 +1326,8 @@ class VaultDialog(QDialog):
     def _go_to_site(self) -> None:
         index = self._selected_index()
         if index is None:
-            QMessageBox.information(self, "No login selected",
-                                    "Select a saved login first.")
+            QMessageBox.information(self, tr("No login selected"),
+                                    tr("Select a saved login first."))
             return
         site = self.vault.entries()[index].site.strip()
         if site:
@@ -1302,20 +1347,25 @@ class VaultDialog(QDialog):
         groups = self.vault.find_duplicate_groups()
         if not groups:
             QMessageBox.information(
-                self, "No duplicates found",
-                "Every saved login is unique — there's nothing to remove.")
+                self, tr("No duplicates found"),
+                tr("Every saved login is unique — there's nothing to remove."))
             return
         extra = sum(len(group) - 1 for group in groups)
+        # Plural forms are approximated (not a full plural-rules engine), the
+        # same known limitation as this feature's RTL-mirroring gap -- see
+        # i18n.py's module docstring.
+        login_word = tr("login") if len(groups) == 1 else tr("logins")
+        copy_word = tr("copy") if extra == 1 else tr("copies")
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Remove duplicate logins")
-        box.setText(
-            f"Found {len(groups)} login{'s' if len(groups) != 1 else ''} "
-            f"saved more than once (same site, username, and password) — "
-            f"{extra} extra cop{'y' if extra == 1 else 'ies'} in total.\n\n"
-            f"Keep one copy of each and remove the rest? Notes on a "
-            f"removed copy are kept by merging them into the copy that "
-            f"stays.")
+        box.setWindowTitle(tr("Remove duplicate logins"))
+        box.setText(tr(
+            "Found {n} {login_word} saved more than once (same site, "
+            "username, and password) — {extra} extra {copy_word} in "
+            "total.\n\nKeep one copy of each and remove the rest? Notes on "
+            "a removed copy are kept by merging them into the copy that "
+            "stays.").format(n=len(groups), login_word=login_word,
+                             extra=extra, copy_word=copy_word))
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
@@ -1324,28 +1374,29 @@ class VaultDialog(QDialog):
             return
         removed = self.vault.remove_duplicates()
         self._refresh()
+        removed_word = tr("duplicate login") if removed == 1 else tr("duplicate logins")
         QMessageBox.information(
-            self, "Duplicates removed",
-            f"Removed {removed} duplicate login{'s' if removed != 1 else ''}.")
+            self, tr("Duplicates removed"),
+            tr("Removed {n} {word}.").format(n=removed, word=removed_word))
 
     def _import_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import passwords (CSV)", str(Path.home()),
-            "CSV files (*.csv);;All files (*)")
+            self, tr("Import passwords (CSV)"), str(Path.home()),
+            tr("CSV files") + " (*.csv);;" + tr("All files") + " (*)")
         if not path:
             return
         try:
             entries, skipped = parse_password_csv(Path(path))
         except OSError as error:
-            _plain_warning(self, "Import failed",
-                           f"Could not read the file:\n{error}")
+            _plain_warning(self, tr("Import failed"),
+                           tr("Could not read the file:\n{error}").format(error=error))
             return
         if not entries:
             QMessageBox.warning(
-                self, "Nothing imported",
-                "No usable rows found. The CSV needs at least a password "
-                "column plus a url or name column (Chrome, Edge, Firefox, "
-                "Brave and Bitwarden exports all work).")
+                self, tr("Nothing imported"),
+                tr("No usable rows found. The CSV needs at least a password "
+                   "column plus a url or name column (Chrome, Edge, Firefox, "
+                   "Brave and Bitwarden exports all work)."))
             return
 
         # Skip logins already present (same site + username).
@@ -1361,30 +1412,31 @@ class VaultDialog(QDialog):
         added = self.vault.add_many(to_add)
         self._refresh()
         QMessageBox.information(
-            self, "Passwords imported",
-            f"Imported {added} login(s) into the vault.\n"
-            f"Skipped {len(entries) - added} duplicate(s) and {skipped} "
-            f"row(s) without a usable password.\n\n"
-            f"The CSV still holds these passwords in plain text — delete it "
-            f"when you're done.")
+            self, tr("Passwords imported"),
+            tr("Imported {added} login(s) into the vault.\n"
+               "Skipped {dupes} duplicate(s) and {skipped} "
+               "row(s) without a usable password.\n\n"
+               "The CSV still holds these passwords in plain text — delete it "
+               "when you're done.").format(
+                   added=added, dupes=len(entries) - added, skipped=skipped))
 
     def _export_csv(self) -> None:
         count = len(self.vault.entries())
         if count == 0:
-            QMessageBox.information(self, "Nothing to export",
-                                   "The vault has no saved logins.")
+            QMessageBox.information(self, tr("Nothing to export"),
+                                   tr("The vault has no saved logins."))
             return
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Export passwords")
-        box.setText(
-            f"This writes all {count} login(s) to a CSV file with the "
-            f"passwords in PLAIN TEXT — anyone who reads the file can see "
-            f"them. Store it securely and delete it when done.\n\n"
+        box.setWindowTitle(tr("Export passwords"))
+        box.setText(tr(
+            "This writes all {count} login(s) to a CSV file with the "
+            "passwords in PLAIN TEXT — anyone who reads the file can see "
+            "them. Store it securely and delete it when done.\n\n"
             "The export uses reversible spreadsheet escaping. Vodou restores "
             "the exact values on import; other password managers must support "
             "the vodou_encoding column to decode escaped values.\n\n"
-            f"Continue?")
+            "Continue?").format(count=count))
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
@@ -1393,9 +1445,9 @@ class VaultDialog(QDialog):
             return
 
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export passwords (CSV)",
+            self, tr("Export passwords (CSV)"),
             str(Path.home() / "vodou-passwords.csv"),
-            "CSV files (*.csv);;All files (*)")
+            tr("CSV files") + " (*.csv);;" + tr("All files") + " (*)")
         if not path:
             return
 
@@ -1407,17 +1459,17 @@ class VaultDialog(QDialog):
         try:
             write_password_csv(Path(path), full)
         except OSError as error:
-            _plain_warning(self, "Export failed",
-                           f"Could not write the file:\n{error}")
+            _plain_warning(self, tr("Export failed"),
+                           tr("Could not write the file:\n{error}").format(error=error))
             return
         finally:
             for entry in full:  # drop plaintext references promptly
                 entry.password = ""
         QMessageBox.information(
-            self, "Passwords exported",
-            f"Exported {count} login(s).\n\n"
-            f"Remember: the file is unencrypted. Delete it once you've "
-            f"imported it elsewhere.")
+            self, tr("Passwords exported"),
+            tr("Exported {count} login(s).\n\n"
+               "Remember: the file is unencrypted. Delete it once you've "
+               "imported it elsewhere.").format(count=count))
 
 
 class PickEntryDialog(QDialog):
@@ -1433,12 +1485,12 @@ class PickEntryDialog(QDialog):
                  parent: QWidget | None = None,
                  vault: Vault | None = None):
         super().__init__(parent)
-        self.setWindowTitle("Choose login")
+        self.setWindowTitle(tr("Choose login"))
         self.choice: tuple[int, Entry] | None = None
         self.vault = vault
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Multiple saved logins match this site:"))
+        layout.addWidget(QLabel(tr("Multiple saved logins match this site:")))
 
         self.list = QListWidget()
         for index, entry in matches:
@@ -1452,16 +1504,16 @@ class PickEntryDialog(QDialog):
         layout.addWidget(self.list)
 
         buttons = QHBoxLayout()
-        select_btn = QPushButton("Select")
+        select_btn = QPushButton(tr("Select"))
         select_btn.setDefault(True)
         select_btn.clicked.connect(self._select)
         buttons.addWidget(select_btn)
         if vault is not None:
-            delete_btn = QPushButton("Delete login")
+            delete_btn = QPushButton(tr("Delete login"))
             delete_btn.clicked.connect(self._delete)
             buttons.addWidget(delete_btn)
         buttons.addStretch()
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton(tr("Cancel"))
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
         layout.addLayout(buttons)
@@ -1480,8 +1532,9 @@ class PickEntryDialog(QDialog):
         index, entry = item.data(Qt.ItemDataRole.UserRole)
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Delete login")
-        box.setText(f"Delete the login for {entry.site} ({entry.username})?")
+        box.setWindowTitle(tr("Delete login"))
+        box.setText(tr("Delete the login for {site} ({username})?").format(
+            site=entry.site, username=entry.username))
         box.setTextFormat(Qt.TextFormat.PlainText)  # site/username untrusted
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)

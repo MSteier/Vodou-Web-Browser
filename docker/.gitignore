@@ -3,3 +3,5 @@
 # If you run setup here, settings.yml gets a real secret written in; keep the
 # committed copy on its placeholder by not staging that change.
 searxng/settings.yml.bak
+# Viewer LAN password hash created by setup (per machine).
+viewer-auth/

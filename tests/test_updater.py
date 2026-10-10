@@ -22,7 +22,13 @@ from updater import apply as apply_mod  # noqa: E402
 from updater import backup as backup_mod  # noqa: E402
 from updater import compatibility, diagnostics, pypi, versions  # noqa: E402
 from updater.manager import StageError, UpdateManager, target_specs  # noqa: E402
+from updater import manager as manager_mod  # noqa: E402
 from updater.models import CurrentVersions  # noqa: E402
+
+# These tests model a normal source checkout; don't let the machine running
+# them (e.g. a Docker container) change the outcome.
+_real_in_docker_image = manager_mod.in_docker_image
+manager_mod.in_docker_image = lambda: False
 
 _failures: list[str] = []
 
@@ -284,6 +290,37 @@ def test_frozen_build_refused() -> None:
           "rebuild" in plan.reason.lower())
 
 
+def test_docker_image_points_to_image_pull() -> None:
+    # In the Docker image the updater can't (and shouldn't) pip-upgrade Qt;
+    # it must say to pull a newer image instead of suggesting a venv.
+    table = {"PyQt6": _project("PyQt6", {"6.11.0": ">=3.10"}),
+             "PyQt6-WebEngine": _project(
+                 "PyQt6-WebEngine", {"6.11.0": ">=3.10"})}
+    manager_mod.in_docker_image = lambda: True
+    try:
+        plan = _mgr(table).check_for_updates(
+            current=base_current(site_packages_writable=False))
+    finally:
+        manager_mod.in_docker_image = lambda: False
+    check("docker: not possible", plan.possible is False)
+    check("docker: reason says docker pull",
+          "docker pull msteier/vodou" in plan.reason)
+    check("docker: no venv advice",
+          "virtual environment" not in plan.reason)
+
+    import os as _os
+    saved = _os.environ.get("VODOU_DOCKER_IMAGE")
+    _os.environ["VODOU_DOCKER_IMAGE"] = "1"
+    try:
+        check("docker: image marker env var detected",
+              _real_in_docker_image())
+    finally:
+        if saved is None:
+            _os.environ.pop("VODOU_DOCKER_IMAGE", None)
+        else:
+            _os.environ["VODOU_DOCKER_IMAGE"] = saved
+
+
 def test_readonly_site_packages_refused() -> None:
     table = {
         "PyQt6": _project("PyQt6", {"6.10.1": ">=3.9", "6.11.0": ">=3.10"}),
@@ -390,6 +427,38 @@ def test_stage_hash_mismatch_aborts() -> None:
         check("stage-hash: message names SHA-256",
               "SHA-256" in str(exc))
     check("stage-hash: no plan.json", not mgr.plan_path.exists())
+
+
+def test_stage_unverifiable_named_wheel_aborts() -> None:
+    # One named package verifying must not wave the others through: a
+    # PyQt6-WebEngine wheel PyPI publishes no digest for is refused.
+    payload = b"payload"
+    good = _fetch_with_digests(payload)
+
+    def fetch_missing_target(name):
+        j = good(name)
+        if name == "PyQt6-WebEngine":
+            j = {**j, "releases": {v: f for v, f in j["releases"].items()
+                                   if v != "6.11.0"}}
+        return j
+
+    def fetch_down(name):
+        if name == "PyQt6-WebEngine":
+            raise pypi.PyPIError("simulated outage")
+        return good(name)
+
+    for label, fetch in (("no-digest", fetch_missing_target),
+                         ("fetch-fails", fetch_down)):
+        mgr = UpdateManager(state_dir=Path(tempfile.mkdtemp()))
+        plan = _good_plan(mgr)
+        mgr._fetch = fetch
+        try:
+            mgr.stage(plan, pip_download=spec_aware_download(payload))
+            check(f"stage-unverifiable ({label}): raised", False)
+        except (StageError, backup_mod.BackupError):
+            check(f"stage-unverifiable ({label}): raised", True)
+        check(f"stage-unverifiable ({label}): no plan.json",
+              not mgr.plan_path.exists())
 
 
 def test_stage_success_writes_state() -> None:
@@ -627,9 +696,12 @@ ALL = [
     test_python_incompatibility_blocks_newer_only,
     test_no_release_supports_this_python, test_lockstep_no_version_mixing,
     test_prerelease_gate, test_frozen_build_refused,
+    test_docker_image_points_to_image_pull,
     test_readonly_site_packages_refused,
     test_stage_download_failure_leaves_nothing,
-    test_stage_hash_mismatch_aborts, test_stage_success_writes_state,
+    test_stage_hash_mismatch_aborts,
+    test_stage_unverifiable_named_wheel_aborts,
+    test_stage_success_writes_state,
     test_stage_user_cancellation,
     test_apply_success, test_apply_install_failure_rolls_back,
     test_apply_verify_failure_rolls_back, test_apply_resume_repairs,
