@@ -1,6 +1,7 @@
 """i18n.py's tr()/load_prefs()/save_prefs() -- pure Python, no Qt -- plus a
 catalog-consistency check against every wrapped file's actual tr() call
-sites (main.py's ☰ menu tree, Phase 1; vault_ui.py, Phase 2).
+sites (main.py's ☰ menu tree, Phase 1; vault_ui.py, Phase 2; about.py,
+Phase 3).
 
 The consistency check is AST-based rather than constructing the real
 widgets: BrowserWindow.__init__ does a lot of real-world setup
@@ -30,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 import i18n
 
 # Every file whose tr() call sites feed the shipped catalogs so far.
-WRAPPED_FILES = ("main.py", "vault_ui.py")
+WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py")
 
 # Dict/tuple collections whose displayed members are passed to tr() via a
 # loop variable (name/label), not a literal, so the AST scan below can't
@@ -40,6 +41,8 @@ WRAPPED_FILES = ("main.py", "vault_ui.py")
 #   keys, _build_appearance_menu's inline dark/light mode labels.
 #   vault_ui.py: password_strength.analyze()'s result.label values,
 #   vault_autolock.VAULT_AUTOLOCK_OPTIONS labels.
+#   about.py: engine_versions()'s dict keys (iterated via tr(k) when
+#   building the version-rows label).
 EXPECTED_DYNAMIC_VALUES = (
     {"SearXNG (local, private)", "DuckDuckGo", "Startpage", "Brave Search",
      "Google"}
@@ -52,10 +55,14 @@ EXPECTED_DYNAMIC_VALUES = (
     | {"\U0001F319  Dark mode", "☀  Light mode"}
     | {"Weak", "Moderate", "Strong"}
     | {"5 minutes", "2 hours", "1 day", "1 week"}
+    | {"Chromium engine", "Security patches"}
 )
-# Real trademarked product names -- deliberately never translated, so
-# they're excluded from every catalog and left to tr()'s English fallback.
-BRAND_NAMES = {"DuckDuckGo", "Startpage", "Brave Search", "Google"}
+# Real trademarked/technology product names -- deliberately never
+# translated, so they're excluded from every catalog and left to tr()'s
+# English fallback. Includes about.py's engine_versions() dict keys that
+# are pure proper nouns (Vodou itself, Qt, PyQt6, Python, Qt WebEngine).
+BRAND_NAMES = {"DuckDuckGo", "Startpage", "Brave Search", "Google",
+               "Vodou", "Qt", "PyQt6", "Python", "Qt WebEngine"}
 
 _PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*(?::[^}]*)?\}")
 

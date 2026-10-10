@@ -43,6 +43,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from i18n import tr
 from theme import make_app_icon
 
 APP_VERSION = "1.54.11"
@@ -303,7 +304,7 @@ class AboutDialog(QDialog):
 
     def __init__(self, parent=None, safe_browsing=None):
         super().__init__(parent)
-        self.setWindowTitle("About Vodou")
+        self.setWindowTitle(tr("About Vodou"))
         self.setMinimumWidth(420)
         self._proc: QProcess | None = None
         self._output = ""
@@ -325,13 +326,13 @@ class AboutDialog(QDialog):
         title_box = QVBoxLayout()
         name = QLabel("Vodou")
         name.setStyleSheet("font-size: 22pt; font-weight: 700;")
-        company = QLabel("by Mist Technologies")
+        company = QLabel(tr("by Mist Technologies"))
         company.setTextFormat(Qt.TextFormat.PlainText)
         company.setStyleSheet("font-size: 11pt; font-weight: 600;")
-        tagline = QLabel("A privacy-first browser with a built-in vault.")
+        tagline = QLabel(tr("A privacy-first browser with a built-in vault."))
         tagline.setTextFormat(Qt.TextFormat.PlainText)
         tagline.setStyleSheet("color: gray;")
-        credit = QLabel("Co-authored by Claude Fable 5")
+        credit = QLabel(tr("Co-authored by Claude Fable 5"))
         credit.setTextFormat(Qt.TextFormat.PlainText)
         credit.setStyleSheet("color: gray;")
         title_box.addWidget(name)
@@ -343,7 +344,7 @@ class AboutDialog(QDialog):
         outer.addLayout(header)
 
         versions = engine_versions()
-        rows = QLabel("\n".join(f"{k}:  {v}" for k, v in versions.items()))
+        rows = QLabel("\n".join(f"{tr(k)}:  {v}" for k, v in versions.items()))
         rows.setTextFormat(Qt.TextFormat.PlainText)
         rows.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -360,11 +361,11 @@ class AboutDialog(QDialog):
         outer.addWidget(self.status)
 
         buttons = QHBoxLayout()
-        self.update_btn = QPushButton("Update Vodou && engine…")
-        self.update_btn.setToolTip(
+        self.update_btn = QPushButton(tr("Update Vodou && engine…"))
+        self.update_btn.setToolTip(tr(
             "One click updates every part: pulls the latest Vodou from "
             "GitHub, offers a verified engine update on restart, then "
-            "re-downloads the malicious-site definitions")
+            "re-downloads the malicious-site definitions"))
         self.update_btn.clicked.connect(self._update_all)
         buttons.addWidget(self.update_btn)
 
@@ -372,16 +373,16 @@ class AboutDialog(QDialog):
         # set, backs the current one up, stages + verifies the download, and
         # finishes on restart with automatic rollback. Kept as its own dialog
         # (updater_ui.py) -- see updater/ for the guarantees.
-        self.qt_update_btn = QPushButton("Qt & WebEngine…")
-        self.qt_update_btn.setToolTip(
+        self.qt_update_btn = QPushButton(tr("Qt & WebEngine…"))
+        self.qt_update_btn.setToolTip(tr(
             "Check for a compatible Qt / PyQt6 / Qt WebEngine update, with "
             "backup and rollback. Shows current vs. available versions and a "
-            "full diagnostics report.")
+            "full diagnostics report."))
         self.qt_update_btn.clicked.connect(self._open_qt_updater)
         buttons.addWidget(self.qt_update_btn)
 
         buttons.addStretch()
-        self.close_btn = QPushButton("Close")
+        self.close_btn = QPushButton(tr("Close"))
         self.close_btn.setDefault(True)
         self.close_btn.clicked.connect(self.accept)
         buttons.addWidget(self.close_btn)
@@ -395,8 +396,8 @@ class AboutDialog(QDialog):
             from updater_ui import UpdatesDialog
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(
-                self, "Updater unavailable",
-                f"The Qt/WebEngine updater could not be loaded: {exc}")
+                self, tr("Updater unavailable"),
+                tr("The Qt/WebEngine updater could not be loaded: {exc}").format(exc=exc))
             return
         dialog = UpdatesDialog(self)
         dialog.exec()
@@ -407,9 +408,9 @@ class AboutDialog(QDialog):
     def _update_all(self) -> None:
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Update Vodou & engine")
+        box.setWindowTitle(tr("Update Vodou & engine"))
         box.setTextFormat(Qt.TextFormat.PlainText)
-        box.setText(
+        box.setText(tr(
             "This checks each part of the browser for updates:\n\n"
             "1. Vodou itself — pulls the latest version from GitHub\n"
             "2. The engine — opens the compatible-update dialog to back up "
@@ -418,7 +419,7 @@ class AboutDialog(QDialog):
             "malware lists\n\n"
             "An engine update can download a few hundred MB. Vodou stays "
             "usable while it runs; you'll get a summary when it finishes.\n\n"
-            "Update now?")
+            "Update now?"))
         box.setStandardButtons(QMessageBox.StandardButton.Yes
                                | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
@@ -426,11 +427,13 @@ class AboutDialog(QDialog):
             return
 
         self.update_btn.setEnabled(False)
-        self.update_btn.setText("Updating…")
+        self.update_btn.setText(tr("Updating…"))
         self.status.show()
-        # (line, is_already_current) — the flag lets _finish drop "nothing to
-        # do here" notes once some other part did update.
-        self._results: list[tuple[str, bool]] = []
+        # (line, is_already_current, is_trouble) — is_already_current lets
+        # _finish drop "nothing to do here" notes once some other part did
+        # update; is_trouble is how _finish detects a failure without
+        # scanning the (now translatable) text for an English marker word.
+        self._results: list[tuple[str, bool, bool]] = []
         # Real flags, so "was something applied?" never depends on matching the
         # wording of a status string.
         self._app_updated = False
@@ -443,15 +446,17 @@ class AboutDialog(QDialog):
         self._git_old_head = _git_head()
         self._start_git()
 
-    def _note(self, text: str) -> None:
-        """Record a summary line about something that happened."""
-        self._results.append((text, False))
+    def _note(self, text: str, *, trouble: bool = False) -> None:
+        """Record a summary line about something that happened. `trouble`
+        is tracked as an explicit flag rather than scanning the (now
+        translatable) text for an English marker word."""
+        self._results.append((text, False, trouble))
 
     def _note_already_current(self, text: str) -> None:
         """Record a 'this part needed nothing' line. Shown only when no part
         updated at all — after a real update, telling the user they already
         have the current version reads as a contradiction of the headline."""
-        self._results.append((text, True))
+        self._results.append((text, True, False))
 
     def _start_proc(self, on_finished, on_error, program: str,
                     args: list[str], workdir: str | None = None) -> None:
@@ -475,12 +480,12 @@ class AboutDialog(QDialog):
     # step 1: the app itself
     def _start_git(self) -> None:
         if not (_REPO_DIR / ".git").exists():
-            self._note(
+            self._note(tr(
                 "Vodou app: skipped — this copy is not a git checkout. "
-                f"Get updates from {REPO_URL}")
+                "Get updates from {repo}").format(repo=REPO_URL))
             self._start_engine()
             return
-        self.status.setText("Step 1/3: updating Vodou from GitHub…")
+        self.status.setText(tr("Step 1/3: updating Vodou from GitHub…"))
         # --ff-only so a locally modified checkout is never merged or
         # rebased behind the user's back — it fails loudly instead.
         self._start_proc(self._git_finished, self._git_error,
@@ -490,17 +495,18 @@ class AboutDialog(QDialog):
         if self._proc is None:
             return
         self._proc = None
-        self._note(
+        self._note(tr(
             "Vodou app: could not run git — update manually from "
-            f"{REPO_URL}")
+            "{repo}").format(repo=REPO_URL), trouble=True)
         self._start_engine()
 
     def _git_finished(self, exit_code: int, _status) -> None:
         self._read_output()
         out, self._proc = self._output, None
         if exit_code != 0:
-            tail = (out.strip().splitlines() or ["unknown git error"])[-1]
-            self._note(f"Vodou app: update FAILED — {tail}")
+            tail = (out.strip().splitlines() or [tr("unknown git error")])[-1]
+            self._note(tr("Vodou app: update FAILED — {tail}").format(tail=tail),
+                      trouble=True)
             self._start_engine()
             return
         new_head = _git_head()
@@ -508,7 +514,7 @@ class AboutDialog(QDialog):
             self._git_old_head and new_head == self._git_old_head)
         if already:
             self._note_already_current(
-                "Vodou app: already the current version.")
+                tr("Vodou app: already the current version."))
             self._start_engine()
             return
         # A real update landed. Report the version change, then fetch the list
@@ -516,11 +522,11 @@ class AboutDialog(QDialog):
         self._app_updated = True
         new_version = _read_local_app_version()
         if new_version and new_version != APP_VERSION:
-            self._note(
-                f"Vodou app: UPDATED {APP_VERSION} → {new_version} "
-                "(restart to apply).")
+            self._note(tr(
+                "Vodou app: UPDATED {old} → {new} "
+                "(restart to apply).").format(old=APP_VERSION, new=new_version))
         else:
-            self._note("Vodou app: UPDATED (restart to apply).")
+            self._note(tr("Vodou app: UPDATED (restart to apply)."))
         if self._git_old_head and new_head:
             self._start_git_log(self._git_old_head, new_head)
         else:
@@ -528,7 +534,7 @@ class AboutDialog(QDialog):
 
     # step 1b: list the commits the pull brought in ("what changed")
     def _start_git_log(self, old_head: str, new_head: str) -> None:
-        self.status.setText("Reading what changed…")
+        self.status.setText(tr("Reading what changed…"))
         self._start_proc(
             self._git_log_finished, self._git_log_error, "git",
             ["log", "--no-merges", "--pretty=format:%s",
@@ -543,34 +549,39 @@ class AboutDialog(QDialog):
     def _git_log_finished(self, _exit_code: int, _status) -> None:
         self._read_output()
         out, self._proc = self._output, None
+        # Raw commit subjects are external content (whatever the git history
+        # actually says) and stay untranslated, same as any other backend-
+        # sourced text -- only the header and "more changes" suffix below
+        # are this feature's own translatable strings.
         subjects = [s.strip() for s in out.splitlines() if s.strip()]
         if subjects:
             shown = subjects[:8]
             lines = "\n".join(f"   • {s}" for s in shown)
             extra = len(subjects) - len(shown)
             if extra > 0:
-                lines += f"\n   • …and {extra} more change(s)"
-            self._note("What changed:\n" + lines)
+                lines += "\n   • " + tr("…and {extra} more change(s)").format(extra=extra)
+            self._note(tr("What changed:") + "\n" + lines)
         self._start_engine()
 
     # step 2: the engine -- never install into the running Qt process
     def _start_engine(self) -> None:
-        self.status.setText("Step 2/3: checking compatible engine updates…")
+        self.status.setText(tr("Step 2/3: checking compatible engine updates…"))
         dialog = self._open_qt_updater()
         if dialog is None:
             self._engine_status = "unavailable"
-            self._note("Engine: could not open the coordinated updater.")
+            self._note(tr("Engine: could not open the coordinated updater."),
+                      trouble=True)
         else:
             self._engine_status = dialog.outcome
             if self._engine_status == "applying":
                 return  # the helper owns the update; the application is quitting
             if self._engine_status == "current":
-                self._note_already_current("Engine: already the current compatible version.")
+                self._note_already_current(tr("Engine: already the current compatible version."))
             elif self._engine_status == "staged":
-                self._note("Engine: download verified and staged. Use Qt & WebEngine → "
-                           "Restart & finish to install it after Vodou closes.")
+                self._note(tr("Engine: download verified and staged. Use Qt & WebEngine → "
+                              "Restart & finish to install it after Vodou closes."))
             else:
-                self._note("Engine: no update applied; see Qt & WebEngine for details.")
+                self._note(tr("Engine: no update applied; see Qt & WebEngine for details."))
         self._start_definitions()
 
     # step 3: the malicious-site definitions
@@ -587,12 +598,12 @@ class AboutDialog(QDialog):
             self._finish()
             return
         if not sb.enabled:
-            self._note("Malicious-site definitions: skipped — Safe Browsing "
-                       "is turned off.")
+            self._note(tr("Malicious-site definitions: skipped — Safe Browsing "
+                         "is turned off."))
             self._finish()
             return
         self.status.setText(
-            "Step 3/3: refreshing the malicious-site definitions…")
+            tr("Step 3/3: refreshing the malicious-site definitions…"))
         self._defs_before = sb.count()
         self._defs_done = False
         sb.updated.connect(self._on_definitions_updated)
@@ -624,28 +635,28 @@ class AboutDialog(QDialog):
             delta = now - self._defs_before
             if delta:
                 self._defs_updated = True
-                self._note(f"Malicious-site definitions: UPDATED — "
-                           f"{now:,} sites known ({delta:+,}).")
+                self._note(tr(
+                    "Malicious-site definitions: UPDATED — "
+                    "{now:,} sites known ({delta:+,}).").format(now=now, delta=delta))
             else:
-                self._note_already_current(
-                    f"Malicious-site definitions: already current — "
-                    f"{now:,} sites known.")
+                self._note_already_current(tr(
+                    "Malicious-site definitions: already current — "
+                    "{now:,} sites known.").format(now=now))
         else:
-            # Deliberately worded to avoid the FAILED / "could not" markers
-            # _finish scans for. safebrowsing.py's whole design is that a bad
-            # feed keeps the existing cache rather than dropping protection,
-            # so a transient feed outage must not turn a clean app + engine
-            # update into "Update failed".
-            self._note(
+            # Deliberately worded without a trouble=True flag. safebrowsing.py's
+            # whole design is that a bad feed keeps the existing cache rather
+            # than dropping protection, so a transient feed outage must not
+            # turn a clean app + engine update into "Update failed".
+            self._note(tr(
                 "Malicious-site definitions: not refreshed this time — the "
-                f"lists were unreachable. The {self._defs_before:,} sites "
+                "lists were unreachable. The {before:,} sites "
                 "already downloaded stay in effect, and Vodou retries every "
-                "12 hours.")
+                "12 hours.").format(before=self._defs_before))
         self._finish()
 
     def _finish(self) -> None:
         self.update_btn.setEnabled(True)
-        self.update_btn.setText("Update Vodou && engine…")
+        self.update_btn.setText(tr("Update Vodou && engine…"))
         self.status.hide()
         # Only new code needs a restart; refreshed definitions take effect at
         # once, so they must not raise the restart prompt.
@@ -653,44 +664,50 @@ class AboutDialog(QDialog):
         updated = restart_needed or self._defs_updated
         # Once anything did update, drop the "already the current version"
         # notes — they contradict the headline the user is reading.
-        lines = [text for text, is_current in self._results
+        lines = [text for text, is_current, _trouble in self._results
                  if not (updated and is_current)]
         summary = "\n\n".join(lines)
-        trouble = any(("FAILED" in text) or ("could not" in text)
-                      for text, _ in self._results)
+        # Tracked as an explicit flag on each _note() call (see that method)
+        # rather than scanning text for an English marker word, since the
+        # text itself is translatable now.
+        trouble = any(is_trouble for _, _, is_trouble in self._results)
 
-        # Which parts were actually applied, for a plain-language verdict.
-        # Each carries whether it takes a plural verb on its own, so a
-        # definitions-only run doesn't read "the definitions was updated".
-        parts: list[tuple[str, bool]] = []
-        if self._app_updated:
-            parts.append(("Vodou", False))
-        if self._defs_updated:
-            parts.append(("the malicious-site definitions", True))
-        labels = [label for label, _ in parts]
-        what = (" and ".join(labels) if len(labels) < 3
-                else ", ".join(labels[:-1]) + " and " + labels[-1])
-        verb = "were" if len(parts) > 1 or (parts and parts[0][1]) else "was"
-        restart = ("\n\nClose and reopen Vodou to start using the new version."
+        # Only 2 parts can ever update (app, definitions), so there are only
+        # 3 possible combinations once updated is True -- spelling each out
+        # as its own full sentence sidesteps list-joining and verb agreement
+        # ("was"/"were"), which don't translate the same way in every
+        # language anyway.
+        if self._app_updated and self._defs_updated:
+            what_happened = tr("Vodou and the malicious-site definitions were updated")
+        elif self._app_updated:
+            what_happened = tr("Vodou was updated")
+        else:
+            what_happened = tr("The malicious-site definitions were updated")
+        restart = (tr("\n\nClose and reopen Vodou to start using the new version.")
                    if restart_needed else "")
 
         if updated and trouble:
-            icon, title = QMessageBox.Icon.Warning, "Update partly applied"
-            text = (f"Some parts updated, but not everything succeeded — "
-                    f"{what} {verb} updated.\n\n{summary}{restart}")
+            icon, title = QMessageBox.Icon.Warning, tr("Update partly applied")
+            text = tr(
+                "Some parts updated, but not everything succeeded — "
+                "{what_happened}.\n\n{summary}{restart}").format(
+                    what_happened=what_happened, summary=summary, restart=restart)
         elif trouble:
-            icon, title = QMessageBox.Icon.Warning, "Update failed"
-            text = (f"The update did not complete and nothing was changed.\n\n"
-                    f"{summary}")
+            icon, title = QMessageBox.Icon.Warning, tr("Update failed")
+            text = tr(
+                "The update did not complete and nothing was changed.\n\n"
+                "{summary}").format(summary=summary)
         elif updated:
             icon, title = (QMessageBox.Icon.Information,
-                           "Update applied successfully")
-            text = (f"Update applied successfully — {what} {verb} updated.\n\n"
-                    f"{summary}{restart}")
+                           tr("Update applied successfully"))
+            text = tr(
+                "Update applied successfully — {what_happened}.\n\n"
+                "{summary}{restart}").format(
+                    what_happened=what_happened, summary=summary, restart=restart)
         else:
             icon = QMessageBox.Icon.Information
-            title = ("Engine update ready" if self._engine_status == "staged"
-                     else "Update check finished")
+            title = (tr("Engine update ready") if self._engine_status == "staged"
+                     else tr("Update check finished"))
             text = summary
         box = QMessageBox(self)
         box.setIcon(icon)
