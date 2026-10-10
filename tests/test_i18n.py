@@ -1,22 +1,25 @@
 """i18n.py's tr()/load_prefs()/save_prefs() -- pure Python, no Qt -- plus a
-catalog-consistency check against main.py's actual tr() call sites.
+catalog-consistency check against every wrapped file's actual tr() call
+sites (main.py's ☰ menu tree, Phase 1; vault_ui.py, Phase 2).
 
-The consistency check is AST-based rather than constructing a real
-BrowserWindow: BrowserWindow.__init__ does a lot of real-world setup
+The consistency check is AST-based rather than constructing the real
+widgets: BrowserWindow.__init__ does a lot of real-world setup
 (single-instance locking, a live QWebEngineProfile, vault/safe-browsing
 state) and reliably crashes the interpreter when built outside main()'s
 normal startup sequence -- confirmed while developing this feature. A
-static scan of main.py's source for tr(...) calls needs no Qt event loop
-and can't suffer that crash.
+static scan of each file's source for tr(...) calls needs no Qt event
+loop and can't suffer that crash. (VaultDialog itself CAN be built
+offscreen with a fake vault -- see test_two_factor_toggle.py -- but the
+AST approach stays consistent across every wrapped file, including
+BrowserWindow, which can't.)
 
-Phase 1 (this feature) only wraps main.py's menu tree; the dynamic-arg
-call sites below are each menus/toolbars.py's name/label loop variable
-iterating a real module-level dict/tuple -- see each comment. As later
-phases wrap more files, extend EXPECTED_DYNAMIC_VALUES and this docstring
-rather than re-deriving it from scratch.
+As later phases wrap more files, add that file to WRAPPED_FILES and any
+new dict/tuple-iteration dynamic values to EXPECTED_DYNAMIC_VALUES below,
+rather than re-deriving this from scratch.
 """
 import ast
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -26,12 +29,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import i18n
 
-# Mirrors main.py's SEARCH_ENGINES keys, TRANSLATE_LANGUAGES tuple,
-# spellcheck.AVAILABLE_LANGUAGES keys, i18n.LANGUAGES keys, theme.THEMES
-# keys, and _build_appearance_menu's inline dark/light mode labels -- the
-# six dict/tuple collections whose displayed members are passed to tr()
-# via a loop variable (name/label), not a literal, so the AST scan below
-# can't see their value directly.
+# Every file whose tr() call sites feed the shipped catalogs so far.
+WRAPPED_FILES = ("main.py", "vault_ui.py")
+
+# Dict/tuple collections whose displayed members are passed to tr() via a
+# loop variable (name/label), not a literal, so the AST scan below can't
+# see their value directly:
+#   main.py: SEARCH_ENGINES keys, TRANSLATE_LANGUAGES tuple,
+#   spellcheck.AVAILABLE_LANGUAGES keys, i18n.LANGUAGES keys, theme.THEMES
+#   keys, _build_appearance_menu's inline dark/light mode labels.
+#   vault_ui.py: password_strength.analyze()'s result.label values,
+#   vault_autolock.VAULT_AUTOLOCK_OPTIONS labels.
 EXPECTED_DYNAMIC_VALUES = (
     {"SearXNG (local, private)", "DuckDuckGo", "Startpage", "Brave Search",
      "Google"}
@@ -42,16 +50,19 @@ EXPECTED_DYNAMIC_VALUES = (
     | {"Vodou Violet", "Blood Ritual", "Swamp Green", "Midnight Blue",
        "Bone Amber", "Spider Web Grey", "Ghost White"}
     | {"\U0001F319  Dark mode", "☀  Light mode"}
+    | {"Weak", "Moderate", "Strong"}
+    | {"5 minutes", "2 hours", "1 day", "1 week"}
 )
 # Real trademarked product names -- deliberately never translated, so
 # they're excluded from every catalog and left to tr()'s English fallback.
 BRAND_NAMES = {"DuckDuckGo", "Startpage", "Brave Search", "Google"}
 
+_PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*(?::[^}]*)?\}")
 
-def _tr_call_strings_in_main() -> set[str]:
-    """Every literal string passed to a bare tr(...) call in main.py."""
-    tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"),
-                      filename="main.py")
+
+def _tr_call_strings(path: Path) -> set[str]:
+    """Every literal string passed to a bare tr(...) call in `path`."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.name)
     found = set()
 
     class Visitor(ast.NodeVisitor):
@@ -64,6 +75,13 @@ def _tr_call_strings_in_main() -> set[str]:
             self.generic_visit(node)
 
     Visitor().visit(tree)
+    return found
+
+
+def _all_tr_call_strings() -> set[str]:
+    found = set()
+    for name in WRAPPED_FILES:
+        found |= _tr_call_strings(ROOT / name)
     return found
 
 
@@ -132,15 +150,14 @@ class PrefsPersistenceTests(unittest.TestCase):
 
 
 class CatalogConsistencyTests(unittest.TestCase):
-    """Every shipped catalog must exactly match what main.py's Phase 1
+    """Every shipped catalog must exactly match what every wrapped file's
     tr() call sites actually need -- catches a catalog drifting out of
     sync (stale key after a source string changes, or a typo'd key that
     silently never matches anything) in either direction."""
 
     @classmethod
     def setUpClass(cls):
-        cls.expected = ((_tr_call_strings_in_main() | EXPECTED_DYNAMIC_VALUES)
-                        - BRAND_NAMES)
+        cls.expected = (_all_tr_call_strings() | EXPECTED_DYNAMIC_VALUES) - BRAND_NAMES
 
     def test_all_catalogs_match_expected_keys_exactly(self):
         for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar"):
@@ -163,16 +180,21 @@ class CatalogConsistencyTests(unittest.TestCase):
                     self.assertTrue(value.strip())
 
     def test_placeholder_tokens_preserved_in_every_translation(self):
-        """A translation of a string with a {placeholder} must keep that
-        exact token, or str.format() at the call site breaks."""
+        """A translation of a string with {placeholder} tokens must keep
+        every one of those exact tokens, or str.format() at the call site
+        breaks (KeyError for a dropped one; a silently wrong substitution
+        for anything else)."""
         for key in self.expected:
-            if "{" not in key:
+            placeholders = set(_PLACEHOLDER_RE.findall(key))
+            if not placeholders:
                 continue
             for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar"):
                 path = ROOT / "translations" / f"{code}.json"
                 catalog = json.loads(path.read_text(encoding="utf-8"))
                 with self.subTest(language=code, key=key):
-                    self.assertIn("{name}", catalog[key])
+                    translated = catalog[key]
+                    for placeholder in placeholders:
+                        self.assertIn(placeholder, translated)
 
 
 if __name__ == "__main__":
