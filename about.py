@@ -46,7 +46,7 @@ from PyQt6.QtWidgets import (
 from i18n import tr
 from theme import make_app_icon
 
-APP_VERSION = "1.54.11"
+APP_VERSION = "1.54.12"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 
 _REPO_DIR = Path(__file__).resolve().parent
