@@ -28,6 +28,8 @@ AVAILABLE_LANGUAGES: dict[str, str] = {
     "Portuguese (Brazil)": "pt-BR",
     "Portuguese (Portugal)": "pt-PT",
     "Russian": "ru-RU",
+    "Hindi": "hi-IN",
+    "Tamil": "ta-IN",
 }
 DEFAULT_ENABLED = False
 DEFAULT_LANGUAGES: list[str] = ["en-US"]

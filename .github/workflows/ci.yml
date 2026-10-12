@@ -65,53 +65,14 @@ jobs:
         run: python -m py_compile $(python -c "import glob;print(' '.join(glob.glob('*.py')))")
         shell: bash
 
-      - name: Platform assertions
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests/test_platform.py
-
-      # The coordinated Qt/PyQt6/WebEngine updater. Fully offline: PyPI, pip
-      # and the process hand-off are all stubbed; the only real work is the
-      # "does the Qt stack still import" probe.
-      - name: Updater assertions
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests/test_updater.py
-
-      - name: Security and data-integrity regressions
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYTHONUTF8: "1"
-        run: python tests/test_review_regressions.py
-
-      - name: Bookmark health checks
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYTHONUTF8: "1"
-        run: python tests/test_bookmark_health.py
-
-      - name: AI web search checks
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYTHONUTF8: "1"
-        run: python tests/test_ai_websearch.py
-
-      - name: Translate prompt checks
-        run: python tests/test_translate_prompt.py
-
-      # Bookmark/password parsing runs on every OS; the DPAPI round-trip
-      # self-skips off Windows (see the test file's own WINDOWS gating).
-      - name: Browser import checks
-        run: python tests/test_browser_import.py
-
-      - name: Onboarding checks
-        run: python tests/test_onboarding.py
-
-      - name: Spell check checks
-        run: python tests/test_spellcheck.py
-
-      - name: UI localization checks
-        run: python tests/test_i18n.py
+      # Every tests/test_*.py, each in its own process (they're standalone
+      # scripts that fake HOME and own their QApplication, so they can't share
+      # one). New test files are picked up automatically. Notes on specific
+      # files: test_updater is fully offline (PyPI, pip and the process
+      # hand-off are stubbed); test_browser_import's DPAPI round-trip
+      # self-skips off Windows.
+      - name: Run all test files
+        run: python tests/run_all.py
 
       # Catches a CRLF shebang or a typo before a Linux user does.
       - name: Check the launcher and installer

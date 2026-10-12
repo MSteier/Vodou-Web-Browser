@@ -335,5 +335,11 @@
   "unknown git error": "不明な git エラー",
   "…and {extra} more change(s)": "…他 {extra} 件の変更",
   "Chromium engine": "Chromium エンジン",
-  "Security patches": "セキュリティパッチ"
+  "Security patches": "セキュリティパッチ",
+  "Hindi": "ヒンディー語",
+  "Bengali": "ベンガル語",
+  "Tamil": "タミル語",
+  "Telugu": "テルグ語",
+  "Marathi": "マラーティー語",
+  "Gujarati": "グジャラート語"
 }
