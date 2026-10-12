@@ -40,6 +40,12 @@ LANGUAGES: dict[str, str] = {
     "Japanese": "ja",
     "Russian": "ru",
     "Arabic": "ar",
+    "Hindi": "hi",
+    "Bengali": "bn",
+    "Tamil": "ta",
+    "Telugu": "te",
+    "Marathi": "mr",
+    "Gujarati": "gu",
 }
 DEFAULT_LANGUAGE = "en"
 
