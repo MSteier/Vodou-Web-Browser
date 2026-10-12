@@ -34,12 +34,17 @@ bundled:
 | `pt-BR-3-0.bdic` | Portuguese (Brazil) | `pt-BR` |
 | `pt-PT-3-0.bdic` | Portuguese (Portugal) | `pt-PT` |
 | `ru-RU-3-0.bdic` | Russian | `ru-RU` |
+| `hi-IN-3-0.bdic` | Hindi | `hi-IN` |
+| `ta-IN-3-0.bdic` | Tamil | `ta-IN` |
 
 Chromium's Hunspell-based spellchecker has no dictionaries at all for
 Chinese, Japanese, or Arabic (CJK/Arabic morphology doesn't fit Hunspell's
-word-list model) — that's why those three aren't in this list. They're
-still fully supported by Vodou's page-translation feature, which is
-model-based and has no such limitation.
+word-list model) — that's why those three aren't in this list. The same is
+true for Bengali, Telugu, Marathi, and Gujarati (checked directly against
+the upstream repo above — no `.bdic` exists for any of them), even though
+Hindi and Tamil do have one. All of these are still fully supported by
+Vodou's page-translation feature, which is model-based and has no such
+limitation.
 
 ## License
 
