@@ -1,6 +1,15 @@
 # Vodou Browser
 
-Version **1.54.12** adds one-click import of bookmarks/passwords from Chrome
+Version **1.54.13** adds Indian languages: Hindi for the interface (the ☰
+menu, password vault, and About/update dialog), Hindi and Tamil spell check
+(offline dictionaries bundled, as before), and page translation into Hindi,
+Bengali, Tamil, Telugu, Marathi, and Gujarati. Bengali, Tamil, Telugu,
+Marathi, and Gujarati can already be chosen as the interface language but
+show English until their translations are added. It also fixes the Windows
+build, which was missing the interface translations and spell-check
+dictionaries.
+
+1.54.12 added one-click import of bookmarks/passwords from Chrome
 or Edge, a first-run onboarding wizard, multi-language spell check (offline
 dictionaries bundled for 7 languages — nothing is ever downloaded), and
 local-AI page translation into 8 languages. It also starts full UI

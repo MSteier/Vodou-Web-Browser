@@ -28,13 +28,19 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.12` — pinned version
+- `1.54.13` — pinned version
 
 Tags match Vodou's own version. A rebuild of the same Vodou version (a newer base
 image or security-patched system packages) gets a revision suffix instead:
 `1.54.10-r1`, `1.54.10-r2`, and so on. Same browser, updated image.
 
 ## Changelog
+- **1.54.13** — Indian languages: Hindi for the interface (the ☰ menu,
+  password vault, and About/update dialog), Hindi and Tamil spell check with
+  offline dictionaries, and page translation into Hindi, Bengali, Tamil,
+  Telugu, Marathi, and Gujarati. Bengali, Tamil, Telugu, Marathi, and Gujarati
+  can be chosen as the interface language but show English until their
+  translations are added.
 - **1.54.12** — One-click import of bookmarks/passwords from Chrome or Edge;
   a first-run onboarding wizard; multi-language spell check with offline
   dictionaries bundled for 7 languages (nothing is ever downloaded); and
