@@ -335,5 +335,11 @@
   "unknown git error": "خطأ git غير معروف",
   "…and {extra} more change(s)": "…و{extra} تغييرًا إضافيًا",
   "Chromium engine": "محرك Chromium",
-  "Security patches": "تصحيحات الأمان"
+  "Security patches": "تصحيحات الأمان",
+  "Hindi": "الهندية",
+  "Bengali": "البنغالية",
+  "Tamil": "التاميلية",
+  "Telugu": "التيلوغوية",
+  "Marathi": "الماراثية",
+  "Gujarati": "الغوجاراتية"
 }

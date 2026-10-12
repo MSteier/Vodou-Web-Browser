@@ -335,5 +335,11 @@
   "unknown git error": "未知的 git 错误",
   "…and {extra} more change(s)": "……以及另外 {extra} 项更改",
   "Chromium engine": "Chromium 引擎",
-  "Security patches": "安全补丁"
+  "Security patches": "安全补丁",
+  "Hindi": "印地语",
+  "Bengali": "孟加拉语",
+  "Tamil": "泰米尔语",
+  "Telugu": "泰卢固语",
+  "Marathi": "马拉地语",
+  "Gujarati": "古吉拉特语"
 }

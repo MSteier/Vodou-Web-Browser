@@ -461,7 +461,8 @@ from ai_search import (
 )
 TRANSLATE_LANGUAGES = (
     "English", "Spanish", "French", "German", "Portuguese", "Chinese",
-    "Japanese", "Russian", "Arabic",
+    "Japanese", "Russian", "Arabic", "Hindi", "Bengali", "Tamil", "Telugu",
+    "Marathi", "Gujarati",
 )
 import celebrate
 import content_credentials

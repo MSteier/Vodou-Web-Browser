@@ -47,7 +47,8 @@ EXPECTED_DYNAMIC_VALUES = (
     {"SearXNG (local, private)", "DuckDuckGo", "Startpage", "Brave Search",
      "Google"}
     | {"English", "Spanish", "French", "German", "Portuguese", "Chinese",
-       "Japanese", "Russian", "Arabic"}
+       "Japanese", "Russian", "Arabic", "Hindi", "Bengali", "Tamil",
+       "Telugu", "Marathi", "Gujarati"}
     | {"English (US)", "Spanish", "French", "German",
        "Portuguese (Brazil)", "Portuguese (Portugal)", "Russian"}
     | {"Vodou Violet", "Blood Ritual", "Swamp Green", "Midnight Blue",
@@ -167,7 +168,7 @@ class CatalogConsistencyTests(unittest.TestCase):
         cls.expected = (_all_tr_call_strings() | EXPECTED_DYNAMIC_VALUES) - BRAND_NAMES
 
     def test_all_catalogs_match_expected_keys_exactly(self):
-        for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar"):
+        for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar", "hi"):
             with self.subTest(language=code):
                 path = ROOT / "translations" / f"{code}.json"
                 catalog = json.loads(path.read_text(encoding="utf-8"))
@@ -179,7 +180,7 @@ class CatalogConsistencyTests(unittest.TestCase):
                     f"extra={keys - self.expected}")
 
     def test_no_catalog_entry_is_empty(self):
-        for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar"):
+        for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar", "hi"):
             path = ROOT / "translations" / f"{code}.json"
             catalog = json.loads(path.read_text(encoding="utf-8"))
             for key, value in catalog.items():
@@ -195,7 +196,7 @@ class CatalogConsistencyTests(unittest.TestCase):
             placeholders = set(_PLACEHOLDER_RE.findall(key))
             if not placeholders:
                 continue
-            for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar"):
+            for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar", "hi"):
                 path = ROOT / "translations" / f"{code}.json"
                 catalog = json.loads(path.read_text(encoding="utf-8"))
                 with self.subTest(language=code, key=key):
