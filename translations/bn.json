@@ -370,5 +370,16 @@
   "{count} failed link": "{count} টি ব্যর্থ লিঙ্ক",
   "{count} failed links": "{count} টি ব্যর্থ লিঙ্ক",
   "{method} check: ": "{method} পরীক্ষা: ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nগন্তব্য: {destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nগন্তব্য: {destination}",
+  "Cancelled": "বাতিল করা হয়েছে",
+  "Clear finished": "সম্পন্নগুলি সাফ করুন",
+  "Completed{size} — {where}": "সম্পন্ন{size} — {where}",
+  "Downloads": "ডাউনলোড",
+  "Failed — {reason}": "ব্যর্থ — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "এই সেশনে কোনো ডাউনলোড নেই।\n(Vodou-র সবকিছুর মতো, ব্রাউজার বন্ধ করলে তালিকা মুছে যায়।)",
+  "Open folder": "ফোল্ডার খুলুন",
+  "Starting — from {host}": "শুরু হচ্ছে — {host} থেকে",
+  "interrupted": "বিঘ্নিত",
+  "{amount} downloaded": "{amount} ডাউনলোড হয়েছে",
+  "{got} of {total}": "{total} এর মধ্যে {got}"
 }

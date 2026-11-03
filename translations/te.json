@@ -370,5 +370,16 @@
   "{count} failed link": "{count} విఫలమైన లింక్",
   "{count} failed links": "{count} విఫలమైన లింక్‌లు",
   "{method} check: ": "{method} తనిఖీ: ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nగమ్యం: {destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nగమ్యం: {destination}",
+  "Cancelled": "రద్దు చేయబడింది",
+  "Clear finished": "పూర్తయినవి తొలగించు",
+  "Completed{size} — {where}": "పూర్తయింది{size} — {where}",
+  "Downloads": "డౌన్‌లోడ్‌లు",
+  "Failed — {reason}": "విఫలమైంది — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "ఈ సెషన్‌లో డౌన్‌లోడ్‌లు లేవు.\n(Vodou లోని ప్రతిదాని వలె, బ్రౌజర్‌ను మూసివేసినప్పుడు జాబితా తొలగించబడుతుంది.)",
+  "Open folder": "ఫోల్డర్‌ను తెరువు",
+  "Starting — from {host}": "ప్రారంభమవుతోంది — {host} నుండి",
+  "interrupted": "అంతరాయం కలిగింది",
+  "{amount} downloaded": "{amount} డౌన్‌లోడ్ చేయబడింది",
+  "{got} of {total}": "{total} లో {got}"
 }

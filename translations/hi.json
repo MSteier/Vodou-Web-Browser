@@ -370,5 +370,16 @@
   "{count} failed link": "{count} विफल लिंक",
   "{count} failed links": "{count} विफल लिंक",
   "{method} check: ": "{method} जाँच: ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nगंतव्य: {destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nगंतव्य: {destination}",
+  "Cancelled": "रद्द किया गया",
+  "Clear finished": "पूर्ण हुए साफ़ करें",
+  "Completed{size} — {where}": "पूर्ण{size} — {where}",
+  "Downloads": "डाउनलोड",
+  "Failed — {reason}": "विफल — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "इस सत्र में कोई डाउनलोड नहीं है।\n(Vodou में हर चीज़ की तरह, ब्राउज़र बंद करने पर सूची साफ़ हो जाती है।)",
+  "Open folder": "फ़ोल्डर खोलें",
+  "Starting — from {host}": "शुरू हो रहा है — {host} से",
+  "interrupted": "बाधित",
+  "{amount} downloaded": "{amount} डाउनलोड हुआ",
+  "{got} of {total}": "{total} में से {got}"
 }

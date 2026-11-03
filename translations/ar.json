@@ -370,5 +370,16 @@
   "{count} failed link": "{count} رابط فاشل",
   "{count} failed links": "{count} روابط فاشلة",
   "{method} check: ": "فحص {method}: ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nالوجهة: {destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nالوجهة: {destination}",
+  "Cancelled": "تم الإلغاء",
+  "Clear finished": "مسح المكتملة",
+  "Completed{size} — {where}": "اكتمل{size} — {where}",
+  "Downloads": "التنزيلات",
+  "Failed — {reason}": "فشل — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "لا توجد تنزيلات في هذه الجلسة.\n(كما هو الحال مع كل شيء في Vodou، تُمسح القائمة عند إغلاق المتصفح.)",
+  "Open folder": "فتح المجلد",
+  "Starting — from {host}": "جارٍ البدء — من {host}",
+  "interrupted": "منقطع",
+  "{amount} downloaded": "تم تنزيل {amount}",
+  "{got} of {total}": "{got} من {total}"
 }
