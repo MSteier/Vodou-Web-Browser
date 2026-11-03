@@ -370,5 +370,16 @@
   "{count} failed link": "{count} 个失败链接",
   "{count} failed links": "{count} 个失败链接",
   "{method} check: ": "{method} 检查： ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\n目标：{destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\n目标：{destination}",
+  "Cancelled": "已取消",
+  "Clear finished": "清除已完成",
+  "Completed{size} — {where}": "已完成{size} — {where}",
+  "Downloads": "下载",
+  "Failed — {reason}": "失败 — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "本次会话没有下载。\n（与 Vodou 中的一切一样，关闭浏览器后列表会清空。）",
+  "Open folder": "打开文件夹",
+  "Starting — from {host}": "正在开始 — 来自 {host}",
+  "interrupted": "已中断",
+  "{amount} downloaded": "已下载 {amount}",
+  "{got} of {total}": "{got} / {total}"
 }

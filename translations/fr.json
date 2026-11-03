@@ -370,5 +370,16 @@
   "{count} failed link": "{count} lien en échec",
   "{count} failed links": "{count} liens en échec",
   "{method} check: ": "Vérification {method} : ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nDestination : {destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nDestination : {destination}",
+  "Cancelled": "Annulé",
+  "Clear finished": "Effacer les terminés",
+  "Completed{size} — {where}": "Terminé{size} — {where}",
+  "Downloads": "Téléchargements",
+  "Failed — {reason}": "Échec — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "Aucun téléchargement pendant cette session.\n(Comme tout dans Vodou, la liste est effacée à la fermeture du navigateur.)",
+  "Open folder": "Ouvrir le dossier",
+  "Starting — from {host}": "Démarrage — depuis {host}",
+  "interrupted": "interrompu",
+  "{amount} downloaded": "{amount} téléchargé",
+  "{got} of {total}": "{got} sur {total}"
 }

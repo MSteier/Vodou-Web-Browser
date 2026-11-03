@@ -370,5 +370,16 @@
   "{count} failed link": "{count} неудачная ссылка",
   "{count} failed links": "{count} неудачных ссылок",
   "{method} check: ": "Проверка {method}: ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nНазначение: {destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\nНазначение: {destination}",
+  "Cancelled": "Отменено",
+  "Clear finished": "Очистить завершённые",
+  "Completed{size} — {where}": "Завершено{size} — {where}",
+  "Downloads": "Загрузки",
+  "Failed — {reason}": "Не удалось — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "В этом сеансе нет загрузок.\n(Как и всё в Vodou, список очищается при закрытии браузера.)",
+  "Open folder": "Открыть папку",
+  "Starting — from {host}": "Начало — с {host}",
+  "interrupted": "прервано",
+  "{amount} downloaded": "загружено {amount}",
+  "{got} of {total}": "{got} из {total}"
 }

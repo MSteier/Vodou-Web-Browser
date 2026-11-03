@@ -370,5 +370,16 @@
   "{count} failed link": "失敗したリンク {count} 件",
   "{count} failed links": "失敗したリンク {count} 件",
   "{method} check: ": "{method} 確認: ",
-  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\n宛先: {destination}"
+  "{prefix}{reason}\nDestination: {destination}": "{prefix}{reason}\n宛先: {destination}",
+  "Cancelled": "キャンセルされました",
+  "Clear finished": "完了したものを消去",
+  "Completed{size} — {where}": "完了{size} — {where}",
+  "Downloads": "ダウンロード",
+  "Failed — {reason}": "失敗 — {reason}",
+  "No downloads this session.\n(Like everything in Vodou, the list clears when you close the browser.)": "このセッションではダウンロードはありません。\n（Vodou のすべてと同様に、ブラウザを閉じるとリストは消去されます。）",
+  "Open folder": "フォルダーを開く",
+  "Starting — from {host}": "開始中 — {host} から",
+  "interrupted": "中断されました",
+  "{amount} downloaded": "{amount} ダウンロード済み",
+  "{got} of {total}": "{got} / {total}"
 }
