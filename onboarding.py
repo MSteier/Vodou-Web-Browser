@@ -27,6 +27,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from i18n import tr
+
 ONBOARDING_FILE = Path.home() / ".vodou" / "onboarding.json"
 
 
@@ -54,7 +56,7 @@ class OnboardingDialog(QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Welcome to Vodou")
+        self.setWindowTitle(tr("Welcome to Vodou"))
         self.resize(560, 420)
         self.setModal(True)
 
@@ -68,14 +70,14 @@ class OnboardingDialog(QDialog):
         self.stack.addWidget(self._finish_page())
 
         nav = QHBoxLayout()
-        self.back_button = QPushButton("Back")
+        self.back_button = QPushButton(tr("Back"))
         self.back_button.clicked.connect(self._back)
         nav.addWidget(self.back_button)
         nav.addStretch()
-        self.skip_button = QPushButton("Skip")
+        self.skip_button = QPushButton(tr("Skip"))
         self.skip_button.clicked.connect(self.accept)
         nav.addWidget(self.skip_button)
-        self.next_button = QPushButton("Next")
+        self.next_button = QPushButton(tr("Next"))
         self.next_button.clicked.connect(self._on_next)
         nav.addWidget(self.next_button)
         layout.addLayout(nav)
@@ -87,7 +89,7 @@ class OnboardingDialog(QDialog):
         at_end = self.stack.currentIndex() == self.stack.count() - 1
         self.back_button.setEnabled(not at_start)
         self.skip_button.setVisible(not at_end)
-        self.next_button.setText("Get started" if at_end else "Next")
+        self.next_button.setText(tr("Get started") if at_end else tr("Next"))
 
     def _back(self) -> None:
         self.stack.setCurrentIndex(self.stack.currentIndex() - 1)
@@ -116,43 +118,47 @@ class OnboardingDialog(QDialog):
 
     def _welcome_page(self) -> QWidget:
         return self._page(
-            "Welcome to Vodou",
-            "Vodou is a privacy-first browser: an encrypted password vault, "
-            "private search through your own local SearXNG instance, "
-            "on-device AI summaries that never leave your machine, and no "
-            "telemetry. The next few screens set up the basics — every one "
-            "of them can be changed later from the ☰ menu.")
+            tr("Welcome to Vodou"),
+            tr("Vodou is a privacy-first browser: an encrypted password vault, "
+               "private search through your own local SearXNG instance, "
+               "on-device AI summaries that never leave your machine, and no "
+               "telemetry. The next few screens set up the basics — every one "
+               "of them can be changed later from the ☰ menu."))
 
     def _search_engine_page(self) -> QWidget:
         from main import SEARCH_ENGINES
+        names = list(SEARCH_ENGINES.keys())
         page = self._page(
-            "Choose a search engine",
-            "This is what Vodou's address bar searches with. SearXNG "
-            "(selected) runs locally and never shares your query with a "
-            "third party.")
+            tr("Choose a search engine"),
+            tr("This is what Vodou's address bar searches with. SearXNG "
+               "(selected) runs locally and never shares your query with a "
+               "third party."))
         listw = QListWidget()
-        listw.addItems(SEARCH_ENGINES.keys())
+        listw.addItems([tr(name) for name in names])
         listw.setCurrentRow(0)
-        listw.currentTextChanged.connect(
-            lambda name: self.window._set_search_engine(SEARCH_ENGINES[name]))
+        listw.currentRowChanged.connect(
+            lambda row: self.window._set_search_engine(
+                SEARCH_ENGINES[names[row]]))
         page.layout().insertWidget(page.layout().count() - 1, listw)
         return page
 
     def _theme_page(self) -> QWidget:
         from theme import THEMES
+        names = list(THEMES.keys())
         page = self._page(
-            "Pick a theme",
-            "Changes apply immediately, so you can see it before deciding.")
+            tr("Pick a theme"),
+            tr("Changes apply immediately, so you can see it before deciding."))
         listw = QListWidget()
-        listw.addItems(THEMES.keys())
+        listw.addItems([tr(name) for name in names])
         listw.setCurrentRow(0)
-        listw.currentTextChanged.connect(self.window._set_theme)
+        listw.currentRowChanged.connect(
+            lambda row: self.window._set_theme(names[row]))
         page.layout().insertWidget(page.layout().count() - 1, listw)
 
         mode_row = QHBoxLayout()
-        dark = QPushButton("🌙  Dark mode")
+        dark = QPushButton(tr("🌙  Dark mode"))
         dark.clicked.connect(lambda: self.window._set_mode("dark"))
-        light = QPushButton("☀  Light mode")
+        light = QPushButton(tr("☀  Light mode"))
         light.clicked.connect(lambda: self.window._set_mode("light"))
         mode_row.addWidget(dark)
         mode_row.addWidget(light)
@@ -162,24 +168,24 @@ class OnboardingDialog(QDialog):
     def _import_page(self) -> QWidget:
         if sys.platform == "win32":
             page = self._page(
-                "Bring your bookmarks and passwords",
-                "If you have Chrome or Edge installed, Vodou can import "
-                "its bookmarks and saved passwords directly — no manual "
-                "export needed. You can also do this later from the ☰ menu.")
-            button = QPushButton("Import from Chrome/Edge…")
+                tr("Bring your bookmarks and passwords"),
+                tr("If you have Chrome or Edge installed, Vodou can import "
+                   "its bookmarks and saved passwords directly — no manual "
+                   "export needed. You can also do this later from the ☰ menu."))
+            button = QPushButton(tr("Import from Chrome/Edge…"))
             button.clicked.connect(self.window.import_from_browser)
             page.layout().insertWidget(page.layout().count() - 1, button)
         else:
             page = self._page(
-                "Bring your bookmarks and passwords",
-                "Direct browser import is currently Windows-only. You can "
-                "still bring bookmarks or passwords in from a .html/.csv "
-                "export via the ☰ menu.")
+                tr("Bring your bookmarks and passwords"),
+                tr("Direct browser import is currently Windows-only. You can "
+                   "still bring bookmarks or passwords in from a .html/.csv "
+                   "export via the ☰ menu."))
         return page
 
     def _finish_page(self) -> QWidget:
         return self._page(
-            "You're all set",
-            "Everything here can be revisited any time from the ☰ menu — "
-            "Settings for search/theme, Password vault… and Import from "
-            "the Bookmarks/Passwords sections. Enjoy Vodou.")
+            tr("You're all set"),
+            tr("Everything here can be revisited any time from the ☰ menu — "
+               "Settings for search/theme, Password vault… and Import from "
+               "the Bookmarks/Passwords sections. Enjoy Vodou."))

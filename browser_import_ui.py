@@ -25,13 +25,8 @@ from browser_import import (
     import_bookmarks_from,
     import_passwords_from,
 )
+from i18n import tr
 from vault import normalize_site
-
-NOTE_TEXT = (
-    "Passwords are decrypted and stored in Vodou's own encrypted vault; "
-    "the source browser's files are never modified. For best results, "
-    "close Chrome/Edge first."
-)
 
 
 class BrowserImportDialog(QDialog):
@@ -42,12 +37,15 @@ class BrowserImportDialog(QDialog):
         self.bookmarks = bookmarks
         self.unlock_vault = unlock_vault
         self.on_imported = on_imported
-        self.setWindowTitle("Import from Chrome/Edge")
+        self.setWindowTitle(tr("Import from Chrome/Edge"))
         self.resize(480, 260)
 
         layout = QVBoxLayout(self)
 
-        note = QLabel(NOTE_TEXT)
+        note = QLabel(tr(
+            "Passwords are decrypted and stored in Vodou's own encrypted vault; "
+            "the source browser's files are never modified. For best results, "
+            "close Chrome/Edge first."))
         note.setTextFormat(Qt.TextFormat.PlainText)
         note.setWordWrap(True)
         note.setStyleSheet("color: gray; padding-bottom: 6px;")
@@ -59,14 +57,14 @@ class BrowserImportDialog(QDialog):
             for p in self.profiles:
                 self.combo.addItem(f"{p.browser} — {p.name}", p)
         else:
-            self.combo.addItem("No Chrome/Edge profiles found", None)
+            self.combo.addItem(tr("No Chrome/Edge profiles found"), None)
             self.combo.setEnabled(False)
         layout.addWidget(self.combo)
 
-        self.bookmarks_check = QCheckBox("Import bookmarks")
+        self.bookmarks_check = QCheckBox(tr("Import bookmarks"))
         self.bookmarks_check.setChecked(True)
         layout.addWidget(self.bookmarks_check)
-        self.passwords_check = QCheckBox("Import saved passwords")
+        self.passwords_check = QCheckBox(tr("Import saved passwords"))
         self.passwords_check.setChecked(True)
         layout.addWidget(self.passwords_check)
 
@@ -74,11 +72,11 @@ class BrowserImportDialog(QDialog):
 
         row = QHBoxLayout()
         row.addStretch()
-        self.import_button = QPushButton("Import")
+        self.import_button = QPushButton(tr("Import"))
         self.import_button.setEnabled(bool(self.profiles))
         self.import_button.clicked.connect(self._on_import)
         row.addWidget(self.import_button)
-        close = QPushButton("Close")
+        close = QPushButton(tr("Close"))
         close.setDefault(True)
         close.clicked.connect(self.accept)
         row.addWidget(close)
@@ -100,7 +98,8 @@ class BrowserImportDialog(QDialog):
         if profile is None:
             return
         if not self.bookmarks_check.isChecked() and not self.passwords_check.isChecked():
-            self._warn("Nothing to do", "Check at least one of bookmarks or passwords.")
+            self._warn(tr("Nothing to do"),
+                       tr("Check at least one of bookmarks or passwords."))
             return
 
         bookmarks_added = bookmarks_found = 0
@@ -110,20 +109,21 @@ class BrowserImportDialog(QDialog):
             try:
                 found = import_bookmarks_from(profile)
             except OSError as error:
-                self._warn("Bookmark import failed", str(error))
+                self._warn(tr("Bookmark import failed"), str(error))
                 found = []
             bookmarks_found = len(found)
             bookmarks_added = self.bookmarks.add_many(found)
 
         if self.passwords_check.isChecked():
             if not self.unlock_vault():
-                self._warn("Passwords skipped", "The vault was not unlocked, "
-                           "so saved passwords were not imported.")
+                self._warn(tr("Passwords skipped"),
+                           tr("The vault was not unlocked, "
+                              "so saved passwords were not imported."))
             else:
                 try:
                     entries, passwords_skipped = import_passwords_from(profile)
                 except OSError as error:
-                    self._warn("Password import failed", str(error))
+                    self._warn(tr("Password import failed"), str(error))
                     entries = []
                 passwords_found = len(entries)
                 existing = {(normalize_site(e.site), e.username)
@@ -140,8 +140,15 @@ class BrowserImportDialog(QDialog):
         if self.on_imported is not None:
             self.on_imported()
 
+        skip_note = (tr("{count} unreadable row skipped").format(
+                        count=passwords_skipped) if passwords_skipped == 1
+                    else tr("{count} unreadable rows skipped").format(
+                        count=passwords_skipped))
         QMessageBox.information(
-            self, "Import complete",
-            f"Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\n"
-            f"Passwords: added {passwords_added} new of {passwords_found} found "
-            f"({passwords_skipped} unreadable row(s) skipped).")
+            self, tr("Import complete"),
+            tr("Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\n"
+               "Passwords: added {passwords_added} new of {passwords_found} found "
+               "({skip_note}).").format(
+                bookmarks_added=bookmarks_added, bookmarks_found=bookmarks_found,
+                passwords_added=passwords_added, passwords_found=passwords_found,
+                skip_note=skip_note))
