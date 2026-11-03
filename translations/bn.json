@@ -421,5 +421,20 @@
   "outside its validity period": "এর বৈধতার মেয়াদের বাইরে",
   "unknown": "অজানা",
   "⚠️ Certificate could NOT be verified: {reason}": "⚠️ সার্টিফিকেট যাচাই করা যায়নি: {reason}",
-  "✅ Certificate verified — chains to a root trusted by this system.": "✅ সার্টিফিকেট যাচাই করা হয়েছে — এই সিস্টেম দ্বারা বিশ্বাসযোগ্য একটি রুটের সাথে সংযুক্ত।"
+  "✅ Certificate verified — chains to a root trusted by this system.": "✅ সার্টিফিকেট যাচাই করা হয়েছে — এই সিস্টেম দ্বারা বিশ্বাসযোগ্য একটি রুটের সাথে সংযুক্ত।",
+  "Back": "পূর্বে",
+  "Bring your bookmarks and passwords": "আপনার বুকমার্ক এবং পাসওয়ার্ড নিয়ে আসুন",
+  "Changes apply immediately, so you can see it before deciding.": "পরিবর্তনগুলি অবিলম্বে প্রযোজ্য হয়, যাতে আপনি সিদ্ধান্ত নেওয়ার আগে দেখতে পারেন।",
+  "Choose a search engine": "একটি সার্চ ইঞ্জিন নির্বাচন করুন",
+  "Direct browser import is currently Windows-only. You can still bring bookmarks or passwords in from a .html/.csv export via the ☰ menu.": "সরাসরি ব্রাউজার আমদানি বর্তমানে কেবল Windows-এ উপলব্ধ। তবুও আপনি ☰ মেনুর মাধ্যমে .html/.csv এক্সপোর্ট থেকে বুকমার্ক বা পাসওয়ার্ড আনতে পারেন।",
+  "Everything here can be revisited any time from the ☰ menu — Settings for search/theme, Password vault… and Import from the Bookmarks/Passwords sections. Enjoy Vodou.": "এখানকার সবকিছু যেকোনো সময় ☰ মেনু থেকে পুনর্বিবেচনা করা যায় — অনুসন্ধান/থিমের জন্য সেটিংস, পাসওয়ার্ড ভল্ট… এবং বুকমার্ক/পাসওয়ার্ড বিভাগে আমদানি। Vodou উপভোগ করুন।",
+  "Get started": "শুরু করুন",
+  "If you have Chrome or Edge installed, Vodou can import its bookmarks and saved passwords directly — no manual export needed. You can also do this later from the ☰ menu.": "আপনার Chrome বা Edge ইনস্টল করা থাকলে, Vodou সরাসরি তার বুকমার্ক এবং সংরক্ষিত পাসওয়ার্ড আমদানি করতে পারে — কোনো ম্যানুয়াল এক্সপোর্টের প্রয়োজন নেই। আপনি এটি পরেও ☰ মেনু থেকে করতে পারেন।",
+  "Next": "পরবর্তী",
+  "Pick a theme": "একটি থিম নির্বাচন করুন",
+  "Skip": "এড়িয়ে যান",
+  "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Vodou-র অ্যাড্রেস বার অনুসন্ধানের জন্য এটিই ব্যবহার করে। SearXNG (নির্বাচিত) স্থানীয়ভাবে চলে এবং আপনার কোয়েরি কখনো তৃতীয় পক্ষের সাথে শেয়ার করে না।",
+  "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou একটি গোপনীয়তা-প্রথম ব্রাউজার: একটি এনক্রিপ্টেড পাসওয়ার্ড ভল্ট, আপনার নিজের স্থানীয় SearXNG ইনস্ট্যান্সের মাধ্যমে ব্যক্তিগত অনুসন্ধান, ডিভাইসে চলা AI সারাংশ যা কখনো আপনার মেশিন ছাড়ে না, এবং কোনো টেলিমেট্রি নেই। পরবর্তী কয়েকটি স্ক্রিন মৌলিক বিষয়গুলি সেট আপ করে — এর প্রতিটি পরে ☰ মেনু থেকে পরিবর্তন করা যায়।",
+  "Welcome to Vodou": "Vodou-এ স্বাগতম",
+  "You're all set": "সবকিছু প্রস্তুত"
 }

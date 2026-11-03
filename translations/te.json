@@ -421,5 +421,20 @@
   "outside its validity period": "దాని చెల్లుబాటు వ్యవధికి బయట",
   "unknown": "తెలియదు",
   "⚠️ Certificate could NOT be verified: {reason}": "⚠️ సర్టిఫికేట్‌ను నిర్ధారించలేకపోయింది: {reason}",
-  "✅ Certificate verified — chains to a root trusted by this system.": "✅ సర్టిఫికేట్ నిర్ధారించబడింది — ఈ సిస్టమ్ విశ్వసించే రూట్‌కు అనుసంధానించబడింది."
+  "✅ Certificate verified — chains to a root trusted by this system.": "✅ సర్టిఫికేట్ నిర్ధారించబడింది — ఈ సిస్టమ్ విశ్వసించే రూట్‌కు అనుసంధానించబడింది.",
+  "Back": "వెనుకకు",
+  "Bring your bookmarks and passwords": "మీ బుక్‌మార్క్‌లు మరియు పాస్‌వర్డ్‌లను తీసుకురండి",
+  "Changes apply immediately, so you can see it before deciding.": "మార్పులు వెంటనే అమలవుతాయి, కాబట్టి నిర్ణయించే ముందు మీరు దానిని చూడవచ్చు.",
+  "Choose a search engine": "ఒక సెర్చ్ ఇంజన్‌ను ఎంచుకోండి",
+  "Direct browser import is currently Windows-only. You can still bring bookmarks or passwords in from a .html/.csv export via the ☰ menu.": "ప్రత్యక్ష బ్రౌజర్ దిగుమతి ఇప్పుడు Windows లో మాత్రమే అందుబాటులో ఉంది. అయినప్పటికీ మీరు ☰ మెనూ ద్వారా .html/.csv ఎగుమతి నుండి బుక్‌మార్క్‌లు లేదా పాస్‌వర్డ్‌లను తీసుకురావచ్చు.",
+  "Everything here can be revisited any time from the ☰ menu — Settings for search/theme, Password vault… and Import from the Bookmarks/Passwords sections. Enjoy Vodou.": "ఇక్కడ ఉన్న ప్రతిదీ ఎప్పుడైనా ☰ మెనూ నుండి తిరిగి మార్చుకోవచ్చు — శోధన/థీమ్ కోసం సెట్టింగ్‌లు, పాస్‌వర్డ్ వాల్ట్… మరియు బుక్‌మార్క్‌లు/పాస్‌వర్డ్‌లు విభాగాలలో దిగుమతి. Vodou ను ఆస్వాదించండి.",
+  "Get started": "ప్రారంభించండి",
+  "If you have Chrome or Edge installed, Vodou can import its bookmarks and saved passwords directly — no manual export needed. You can also do this later from the ☰ menu.": "మీకు Chrome లేదా Edge ఇన్‌స్టాల్ చేయబడి ఉంటే, Vodou దాని బుక్‌మార్క్‌లు మరియు సేవ్ చేసిన పాస్‌వర్డ్‌లను నేరుగా దిగుమతి చేయగలదు — మాన్యువల్ ఎగుమతి అవసరం లేదు. మీరు దీన్ని తర్వాత కూడా ☰ మెనూ నుండి చేయవచ్చు.",
+  "Next": "తరువాత",
+  "Pick a theme": "ఒక థీమ్‌ను ఎంచుకోండి",
+  "Skip": "దాటవేయి",
+  "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Vodou యొక్క అడ్రస్ బార్ శోధనకు దీనిని ఉపయోగిస్తుంది. SearXNG (ఎంచుకోబడింది) స్థానికంగా నడుస్తుంది మరియు మీ ప్రశ్నను ఎప్పుడూ మూడవ పక్షంతో భాగస్వామ్యం చేయదు.",
+  "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou అనేది గోప్యతకు ప్రాధాన్యతనిచ్చే బ్రౌజర్: ఎన్‌క్రిప్ట్ చేసిన పాస్‌వర్డ్ వాల్ట్, మీ స్వంత లోకల్ SearXNG ఇన్‌స్టాన్స్ ద్వారా ప్రైవేట్ శోధన, మీ పరికరాన్ని ఎప్పుడూ వదలని ఆన్-డివైస్ AI సారాంశాలు, మరియు టెలిమెట్రీ లేదు. తరువాతి కొన్ని స్క్రీన్‌లు ప్రాథమికాలను సెటప్ చేస్తాయి — వీటిలో ప్రతి ఒక్కటి తర్వాత ☰ మెనూ నుండి మార్చుకోవచ్చు.",
+  "Welcome to Vodou": "Vodou కు స్వాగతం",
+  "You're all set": "అన్నీ సిద్ధంగా ఉన్నాయి"
 }

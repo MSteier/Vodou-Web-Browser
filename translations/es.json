@@ -421,5 +421,20 @@
   "outside its validity period": "fuera de su período de validez",
   "unknown": "desconocido",
   "⚠️ Certificate could NOT be verified: {reason}": "⚠️ El certificado NO se pudo verificar: {reason}",
-  "✅ Certificate verified — chains to a root trusted by this system.": "✅ Certificado verificado — encadena a una raíz de confianza para este sistema."
+  "✅ Certificate verified — chains to a root trusted by this system.": "✅ Certificado verificado — encadena a una raíz de confianza para este sistema.",
+  "Back": "Atrás",
+  "Bring your bookmarks and passwords": "Trae tus marcadores y contraseñas",
+  "Changes apply immediately, so you can see it before deciding.": "Los cambios se aplican de inmediato, así puedes verlo antes de decidir.",
+  "Choose a search engine": "Elige un motor de búsqueda",
+  "Direct browser import is currently Windows-only. You can still bring bookmarks or passwords in from a .html/.csv export via the ☰ menu.": "La importación directa del navegador está disponible solo en Windows por ahora. Aun así puedes traer marcadores o contraseñas desde una exportación .html/.csv a través del menú ☰.",
+  "Everything here can be revisited any time from the ☰ menu — Settings for search/theme, Password vault… and Import from the Bookmarks/Passwords sections. Enjoy Vodou.": "Todo esto se puede revisar en cualquier momento desde el menú ☰ — Configuración para búsqueda/tema, Bóveda de contraseñas… e Importar en las secciones de Marcadores/Contraseñas. Disfruta Vodou.",
+  "Get started": "Comenzar",
+  "If you have Chrome or Edge installed, Vodou can import its bookmarks and saved passwords directly — no manual export needed. You can also do this later from the ☰ menu.": "Si tienes Chrome o Edge instalado, Vodou puede importar sus marcadores y contraseñas guardadas directamente — sin exportación manual. También puedes hacerlo más tarde desde el menú ☰.",
+  "Next": "Siguiente",
+  "Pick a theme": "Elige un tema",
+  "Skip": "Omitir",
+  "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Esto es lo que usa la barra de direcciones de Vodou para buscar. SearXNG (seleccionado) se ejecuta localmente y nunca comparte tu consulta con terceros.",
+  "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou es un navegador centrado en la privacidad: una bóveda de contraseñas cifrada, búsqueda privada a través de tu propia instancia local de SearXNG, resúmenes de IA en el dispositivo que nunca salen de tu máquina, y sin telemetría. Las próximas pantallas configuran lo básico — cada una se puede cambiar después desde el menú ☰.",
+  "Welcome to Vodou": "Bienvenido a Vodou",
+  "You're all set": "Todo listo"
 }
