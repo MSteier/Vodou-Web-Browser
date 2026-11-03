@@ -32,7 +32,7 @@ import i18n
 
 # Every file whose tr() call sites feed the shipped catalogs so far.
 WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py", "bookmark_health_ui.py",
-                 "downloads_ui.py")
+                 "downloads_ui.py", "cert_viewer.py")
 
 # Dict/tuple collections whose displayed members are passed to tr() via a
 # loop variable (name/label), not a literal, so the AST scan below can't
@@ -44,6 +44,8 @@ WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py", "bookmark_health_ui.py",
 #   vault_autolock.VAULT_AUTOLOCK_OPTIONS labels.
 #   about.py: engine_versions()'s dict keys (iterated via tr(k) when
 #   building the version-rows label).
+#   cert_viewer.py: _OID_LABELS values (looked up via dict.get() in
+#   _name_rows, then tr()'d at the display call site).
 EXPECTED_DYNAMIC_VALUES = (
     {"SearXNG (local, private)", "DuckDuckGo", "Startpage", "Brave Search",
      "Google"}
@@ -58,6 +60,8 @@ EXPECTED_DYNAMIC_VALUES = (
     | {"Weak", "Moderate", "Strong"}
     | {"5 minutes", "2 hours", "1 day", "1 week"}
     | {"Chromium engine", "Security patches"}
+    | {"Common name (CN)", "Organization (O)", "Organizational unit (OU)",
+       "Country (C)", "State/Province (ST)", "Locality (L)", "Email"}
 )
 # Real trademarked/technology product names -- deliberately never
 # translated, so they're excluded from every catalog and left to tr()'s
