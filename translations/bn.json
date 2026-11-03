@@ -452,5 +452,12 @@
   "Passwords skipped": "পাসওয়ার্ড এড়িয়ে যাওয়া হয়েছে",
   "The vault was not unlocked, so saved passwords were not imported.": "ভল্ট আনলক করা হয়নি, তাই সংরক্ষিত পাসওয়ার্ড আমদানি করা হয়নি।",
   "{count} unreadable row skipped": "{count} টি অপাঠযোগ্য সারি এড়িয়ে যাওয়া হয়েছে",
-  "{count} unreadable rows skipped": "{count} টি অপাঠযোগ্য সারি এড়িয়ে যাওয়া হয়েছে"
+  "{count} unreadable rows skipped": "{count} টি অপাঠযোগ্য সারি এড়িয়ে যাওয়া হয়েছে",
+  "Code ID": "কোড আইডি",
+  "On": "সক্রিয়",
+  "Plugin": "প্লাগইন",
+  "Plugins": "প্লাগইন",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "প্লাগইনগুলি Vodou-এর পর্যালোচিত ক্যাটালগ থেকে আসে — একটি বিশ্বাসযোগ্য উৎস। প্রতিটি শুধুমাত্র তালিকাভুক্ত সাইটগুলিতে এবং একটি বিচ্ছিন্ন স্যান্ডবক্সের মধ্যে চলে। একটি প্লাগইন সক্রিয় করতে চেকবক্সটি টগল করুন; পরিবর্তনগুলি আপনি পরবর্তীতে লোড করা পেজগুলিতে কার্যকর হবে (এখনই প্রয়োগ করতে খোলা ট্যাবগুলি রিলোড করুন)।",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "এই প্লাগইনের কোডের SHA-256 ফিঙ্গারপ্রিন্ট (টেম্পার-প্রমাণ পরিচয়)।",
+  "Sites": "সাইটগুলি"
 }

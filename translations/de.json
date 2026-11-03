@@ -452,5 +452,12 @@
   "Passwords skipped": "Passwörter übersprungen",
   "The vault was not unlocked, so saved passwords were not imported.": "Der Tresor wurde nicht entsperrt, daher wurden gespeicherte Passwörter nicht importiert.",
   "{count} unreadable row skipped": "{count} unlesbare Zeile übersprungen",
-  "{count} unreadable rows skipped": "{count} unlesbare Zeilen übersprungen"
+  "{count} unreadable rows skipped": "{count} unlesbare Zeilen übersprungen",
+  "Code ID": "Code-ID",
+  "On": "Aktiv",
+  "Plugin": "Plugin",
+  "Plugins": "Plugins",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "Plugins stammen aus Vodous überprüftem Katalog — einer vertrauenswürdigen Quelle. Jedes läuft nur auf den aufgeführten Websites und in einer isolierten Sandbox. Aktivieren Sie das Kontrollkästchen, um ein Plugin einzuschalten; Änderungen wirken sich auf als Nächstes geladene Seiten aus (offene Tabs neu laden, um sie jetzt anzuwenden).",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "SHA-256-Fingerabdruck des Codes dieses Plugins (manipulationssichere Identität).",
+  "Sites": "Websites"
 }

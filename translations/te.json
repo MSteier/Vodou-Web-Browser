@@ -452,5 +452,12 @@
   "Passwords skipped": "పాస్‌వర్డ్‌లు దాటవేయబడ్డాయి",
   "The vault was not unlocked, so saved passwords were not imported.": "వాల్ట్ అన్‌లాక్ చేయబడలేదు, కాబట్టి సేవ్ చేసిన పాస్‌వర్డ్‌లు దిగుమతి చేయబడలేదు.",
   "{count} unreadable row skipped": "{count} చదవలేని వరుస దాటవేయబడింది",
-  "{count} unreadable rows skipped": "{count} చదవలేని వరుసలు దాటవేయబడ్డాయి"
+  "{count} unreadable rows skipped": "{count} చదవలేని వరుసలు దాటవేయబడ్డాయి",
+  "Code ID": "కోడ్ ID",
+  "On": "ఆన్",
+  "Plugin": "ప్లగిన్",
+  "Plugins": "ప్లగిన్‌లు",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "ప్లగిన్‌లు Vodou యొక్క సమీక్షించిన జాబితా నుండి వస్తాయి — విశ్వసనీయ మూలం. ప్రతి ఒక్కటి జాబితా చేయబడిన సైట్‌లలో మాత్రమే, వేరుచేయబడిన సాండ్‌బాక్స్‌లో నడుస్తుంది. ప్లగిన్‌ను ఎనేబుల్ చేయడానికి చెక్‌బాక్స్‌ను టోగుల్ చేయండి; మార్పులు మీరు తర్వాత లోడ్ చేసే పేజీలలో అమలులోకి వస్తాయి (ఇప్పుడే వర్తింపజేయడానికి తెరిచిన టాబ్‌లను రీలోడ్ చేయండి).",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "ఈ ప్లగిన్ కోడ్ యొక్క SHA-256 ఫింగర్‌ప్రింట్ (టాంపర్-ఎవిడెంట్ గుర్తింపు).",
+  "Sites": "సైట్‌లు"
 }

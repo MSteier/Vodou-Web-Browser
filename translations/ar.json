@@ -452,5 +452,12 @@
   "Passwords skipped": "تم تخطي كلمات المرور",
   "The vault was not unlocked, so saved passwords were not imported.": "لم يتم فتح الخزنة، لذلك لم تُستورد كلمات المرور المحفوظة.",
   "{count} unreadable row skipped": "تم تخطي {count} صف غير قابل للقراءة",
-  "{count} unreadable rows skipped": "تم تخطي {count} صفوف غير قابلة للقراءة"
+  "{count} unreadable rows skipped": "تم تخطي {count} صفوف غير قابلة للقراءة",
+  "Code ID": "معرّف الكود",
+  "On": "مفعّل",
+  "Plugin": "الإضافة",
+  "Plugins": "الإضافات",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "تأتي الإضافات من كتالوج Vodou الذي تمت مراجعته — مصدر موثوق. يعمل كل منها فقط على المواقع المدرجة وداخل بيئة معزولة (sandbox). فعّل خانة الاختيار لتمكين إضافة؛ تسري التغييرات على الصفحات التي تحمّلها بعد ذلك (أعد تحميل علامات التبويب المفتوحة لتطبيقها الآن).",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "بصمة SHA-256 لرمز هذه الإضافة (هوية مقاومة للتلاعب).",
+  "Sites": "المواقع"
 }

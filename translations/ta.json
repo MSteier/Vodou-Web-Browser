@@ -452,5 +452,12 @@
   "Passwords skipped": "கடவுச்சொற்கள் தவிர்க்கப்பட்டன",
   "The vault was not unlocked, so saved passwords were not imported.": "பெட்டகம் திறக்கப்படவில்லை, எனவே சேமிக்கப்பட்ட கடவுச்சொற்கள் இறக்குமதி செய்யப்படவில்லை.",
   "{count} unreadable row skipped": "{count} படிக்க முடியாத வரிசை தவிர்க்கப்பட்டது",
-  "{count} unreadable rows skipped": "{count} படிக்க முடியாத வரிசைகள் தவிர்க்கப்பட்டன"
+  "{count} unreadable rows skipped": "{count} படிக்க முடியாத வரிசைகள் தவிர்க்கப்பட்டன",
+  "Code ID": "குறியீடு ஐடி",
+  "On": "இயக்கம்",
+  "Plugin": "செருகுநிரல்",
+  "Plugins": "செருகுநிரல்கள்",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "செருகுநிரல்கள் Vodou-இன் மதிப்பாய்வு செய்யப்பட்ட பட்டியலிலிருந்து வருகின்றன — ஒரு நம்பகமான மூலம். ஒவ்வொன்றும் பட்டியலிடப்பட்ட தளங்களில் மட்டுமே, தனிமைப்படுத்தப்பட்ட சாண்ட்பாக்ஸிற்குள் இயங்குகிறது. ஒரு செருகுநிரலை இயக்க தேர்வுப்பெட்டியை மாற்றவும்; மாற்றங்கள் நீங்கள் அடுத்து ஏற்றும் பக்கங்களில் நடைமுறைக்கு வரும் (இப்போதே பயன்படுத்த திறந்த தாவல்களை மீண்டும் ஏற்றவும்).",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "இந்த செருகுநிரலின் குறியீட்டின் SHA-256 கைரேகை (கையாளப்படாத அடையாளம்).",
+  "Sites": "தளங்கள்"
 }

@@ -452,5 +452,12 @@
   "Passwords skipped": "Palavras-passe ignoradas",
   "The vault was not unlocked, so saved passwords were not imported.": "O cofre não foi desbloqueado, por isso as palavras-passe guardadas não foram importadas.",
   "{count} unreadable row skipped": "{count} linha ilegível ignorada",
-  "{count} unreadable rows skipped": "{count} linhas ilegíveis ignoradas"
+  "{count} unreadable rows skipped": "{count} linhas ilegíveis ignoradas",
+  "Code ID": "ID do código",
+  "On": "Ativo",
+  "Plugin": "Plugin",
+  "Plugins": "Plugins",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "Os plugins vêm do catálogo revisado do Vodou — uma fonte de confiança. Cada um é executado apenas nos sites listados e dentro de uma sandbox isolada. Marque a caixa para ativar um plugin; as alterações têm efeito nas próximas páginas que carregar (recarregue os separadores abertos para aplicar agora).",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "Impressão digital SHA-256 do código deste plugin (identidade à prova de adulteração).",
+  "Sites": "Sites"
 }

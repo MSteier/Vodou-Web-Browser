@@ -452,5 +452,12 @@
   "Passwords skipped": "已跳过密码",
   "The vault was not unlocked, so saved passwords were not imported.": "保险箱未解锁，因此未导入已保存的密码。",
   "{count} unreadable row skipped": "已跳过 {count} 行不可读内容",
-  "{count} unreadable rows skipped": "已跳过 {count} 行不可读内容"
+  "{count} unreadable rows skipped": "已跳过 {count} 行不可读内容",
+  "Code ID": "代码 ID",
+  "On": "启用",
+  "Plugin": "插件",
+  "Plugins": "插件",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "插件来自 Vodou 审核过的目录 — 一个可信来源。每个插件只在列出的网站上运行，并处于隔离的沙盒中。勾选复选框以启用插件；更改会在您下次加载的页面上生效（重新加载已打开的标签页可立即应用）。",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "该插件代码的 SHA-256 指纹（防篡改标识）。",
+  "Sites": "网站"
 }
