@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "这就是 Vodou 地址栏用于搜索的方式。SearXNG（已选中）在本地运行，绝不会将您的查询分享给第三方。",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou 是一款以隐私为先的浏览器：加密密码保险箱、通过您自己的本地 SearXNG 实例进行的私密搜索、永不离开您设备的本机 AI 摘要，以及无遥测。接下来的几个屏幕用于设置基础项 — 每一项之后都可以在 ☰ 菜单中更改。",
   "Welcome to Vodou": "欢迎使用 Vodou",
-  "You're all set": "一切就绪"
+  "You're all set": "一切就绪",
+  "Bookmark import failed": "书签导入失败",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "书签：已添加 {bookmarks_added} 个新项，共找到 {bookmarks_found} 个。\n密码：已添加 {passwords_added} 个新项，共找到 {passwords_found} 个（{skip_note}）。",
+  "Check at least one of bookmarks or passwords.": "请至少勾选书签或密码之一。",
+  "Import": "导入",
+  "Import bookmarks": "导入书签",
+  "Import complete": "导入完成",
+  "Import from Chrome/Edge": "从 Chrome/Edge 导入",
+  "Import saved passwords": "导入已保存的密码",
+  "No Chrome/Edge profiles found": "未找到 Chrome/Edge 配置文件",
+  "Nothing to do": "无需操作",
+  "Password import failed": "密码导入失败",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "密码会被解密并存储在 Vodou 自己的加密保险箱中；源浏览器的文件永不会被修改。为获得最佳效果，请先关闭 Chrome/Edge。",
+  "Passwords skipped": "已跳过密码",
+  "The vault was not unlocked, so saved passwords were not imported.": "保险箱未解锁，因此未导入已保存的密码。",
+  "{count} unreadable row skipped": "已跳过 {count} 行不可读内容",
+  "{count} unreadable rows skipped": "已跳过 {count} 行不可读内容"
 }

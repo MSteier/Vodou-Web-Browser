@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Vodou-র অ্যাড্রেস বার অনুসন্ধানের জন্য এটিই ব্যবহার করে। SearXNG (নির্বাচিত) স্থানীয়ভাবে চলে এবং আপনার কোয়েরি কখনো তৃতীয় পক্ষের সাথে শেয়ার করে না।",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou একটি গোপনীয়তা-প্রথম ব্রাউজার: একটি এনক্রিপ্টেড পাসওয়ার্ড ভল্ট, আপনার নিজের স্থানীয় SearXNG ইনস্ট্যান্সের মাধ্যমে ব্যক্তিগত অনুসন্ধান, ডিভাইসে চলা AI সারাংশ যা কখনো আপনার মেশিন ছাড়ে না, এবং কোনো টেলিমেট্রি নেই। পরবর্তী কয়েকটি স্ক্রিন মৌলিক বিষয়গুলি সেট আপ করে — এর প্রতিটি পরে ☰ মেনু থেকে পরিবর্তন করা যায়।",
   "Welcome to Vodou": "Vodou-এ স্বাগতম",
-  "You're all set": "সবকিছু প্রস্তুত"
+  "You're all set": "সবকিছু প্রস্তুত",
+  "Bookmark import failed": "বুকমার্ক আমদানি ব্যর্থ হয়েছে",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "বুকমার্ক: {bookmarks_found} টির মধ্যে {bookmarks_added} টি নতুন যুক্ত হয়েছে।\nপাসওয়ার্ড: {passwords_found} টির মধ্যে {passwords_added} টি নতুন যুক্ত হয়েছে ({skip_note})।",
+  "Check at least one of bookmarks or passwords.": "অন্তত বুকমার্ক বা পাসওয়ার্ড নির্বাচন করুন।",
+  "Import": "আমদানি করুন",
+  "Import bookmarks": "বুকমার্ক আমদানি করুন",
+  "Import complete": "আমদানি সম্পন্ন",
+  "Import from Chrome/Edge": "Chrome/Edge থেকে আমদানি করুন",
+  "Import saved passwords": "সংরক্ষিত পাসওয়ার্ড আমদানি করুন",
+  "No Chrome/Edge profiles found": "কোনো Chrome/Edge প্রোফাইল পাওয়া যায়নি",
+  "Nothing to do": "করার কিছু নেই",
+  "Password import failed": "পাসওয়ার্ড আমদানি ব্যর্থ হয়েছে",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "পাসওয়ার্ড ডিক্রিপ্ট করে Vodou-র নিজস্ব এনক্রিপ্টেড ভল্টে সংরক্ষণ করা হয়; উৎস ব্রাউজারের ফাইলগুলি কখনো পরিবর্তিত হয় না। সর্বোত্তম ফলাফলের জন্য, প্রথমে Chrome/Edge বন্ধ করুন।",
+  "Passwords skipped": "পাসওয়ার্ড এড়িয়ে যাওয়া হয়েছে",
+  "The vault was not unlocked, so saved passwords were not imported.": "ভল্ট আনলক করা হয়নি, তাই সংরক্ষিত পাসওয়ার্ড আমদানি করা হয়নি।",
+  "{count} unreadable row skipped": "{count} টি অপাঠযোগ্য সারি এড়িয়ে যাওয়া হয়েছে",
+  "{count} unreadable rows skipped": "{count} টি অপাঠযোগ্য সারি এড়িয়ে যাওয়া হয়েছে"
 }

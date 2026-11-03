@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Именно это адресная строка Vodou использует для поиска. SearXNG (выбрано) работает локально и никогда не передаёт ваш запрос третьим лицам.",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou — браузер, ориентированный на приватность: зашифрованное хранилище паролей, приватный поиск через собственный локальный экземпляр SearXNG, сводки ИИ на устройстве, которые никогда не покидают вашу машину, и отсутствие телеметрии. Следующие несколько экранов настраивают основы — каждую из них можно изменить позже через меню ☰.",
   "Welcome to Vodou": "Добро пожаловать в Vodou",
-  "You're all set": "Всё готово"
+  "You're all set": "Всё готово",
+  "Bookmark import failed": "Не удалось импортировать закладки",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "Закладки: добавлено {bookmarks_added} новых из {bookmarks_found} найденных.\nПароли: добавлено {passwords_added} новых из {passwords_found} найденных ({skip_note}).",
+  "Check at least one of bookmarks or passwords.": "Отметьте хотя бы закладки или пароли.",
+  "Import": "Импортировать",
+  "Import bookmarks": "Импортировать закладки",
+  "Import complete": "Импорт завершён",
+  "Import from Chrome/Edge": "Импорт из Chrome/Edge",
+  "Import saved passwords": "Импортировать сохранённые пароли",
+  "No Chrome/Edge profiles found": "Профили Chrome/Edge не найдены",
+  "Nothing to do": "Нечего делать",
+  "Password import failed": "Не удалось импортировать пароли",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "Пароли расшифровываются и сохраняются в собственном зашифрованном хранилище Vodou; файлы исходного браузера никогда не изменяются. Для лучшего результата сначала закройте Chrome/Edge.",
+  "Passwords skipped": "Пароли пропущены",
+  "The vault was not unlocked, so saved passwords were not imported.": "Хранилище не было разблокировано, поэтому сохранённые пароли не были импортированы.",
+  "{count} unreadable row skipped": "Пропущена {count} нечитаемая строка",
+  "{count} unreadable rows skipped": "Пропущено {count} нечитаемых строк"
 }

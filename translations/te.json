@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Vodou యొక్క అడ్రస్ బార్ శోధనకు దీనిని ఉపయోగిస్తుంది. SearXNG (ఎంచుకోబడింది) స్థానికంగా నడుస్తుంది మరియు మీ ప్రశ్నను ఎప్పుడూ మూడవ పక్షంతో భాగస్వామ్యం చేయదు.",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou అనేది గోప్యతకు ప్రాధాన్యతనిచ్చే బ్రౌజర్: ఎన్‌క్రిప్ట్ చేసిన పాస్‌వర్డ్ వాల్ట్, మీ స్వంత లోకల్ SearXNG ఇన్‌స్టాన్స్ ద్వారా ప్రైవేట్ శోధన, మీ పరికరాన్ని ఎప్పుడూ వదలని ఆన్-డివైస్ AI సారాంశాలు, మరియు టెలిమెట్రీ లేదు. తరువాతి కొన్ని స్క్రీన్‌లు ప్రాథమికాలను సెటప్ చేస్తాయి — వీటిలో ప్రతి ఒక్కటి తర్వాత ☰ మెనూ నుండి మార్చుకోవచ్చు.",
   "Welcome to Vodou": "Vodou కు స్వాగతం",
-  "You're all set": "అన్నీ సిద్ధంగా ఉన్నాయి"
+  "You're all set": "అన్నీ సిద్ధంగా ఉన్నాయి",
+  "Bookmark import failed": "బుక్‌మార్క్ దిగుమతి విఫలమైంది",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "బుక్‌మార్క్‌లు: కనుగొన్న {bookmarks_found} లో {bookmarks_added} కొత్తవి జోడించబడ్డాయి.\nపాస్‌వర్డ్‌లు: కనుగొన్న {passwords_found} లో {passwords_added} కొత్తవి జోడించబడ్డాయి ({skip_note}).",
+  "Check at least one of bookmarks or passwords.": "కనీసం బుక్‌మార్క్‌లు లేదా పాస్‌వర్డ్‌లను ఎంచుకోండి.",
+  "Import": "దిగుమతి చేయండి",
+  "Import bookmarks": "బుక్‌మార్క్‌లను దిగుమతి చేయండి",
+  "Import complete": "దిగుమతి పూర్తయింది",
+  "Import from Chrome/Edge": "Chrome/Edge నుండి దిగుమతి చేయండి",
+  "Import saved passwords": "సేవ్ చేసిన పాస్‌వర్డ్‌లను దిగుమతి చేయండి",
+  "No Chrome/Edge profiles found": "Chrome/Edge ప్రొఫైల్‌లు కనుగొనబడలేదు",
+  "Nothing to do": "చేయడానికి ఏమీ లేదు",
+  "Password import failed": "పాస్‌వర్డ్ దిగుమతి విఫలమైంది",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "పాస్‌వర్డ్‌లు డీక్రిప్ట్ చేయబడి Vodou యొక్క స్వంత ఎన్‌క్రిప్ట్ చేసిన వాల్ట్‌లో నిల్వ చేయబడతాయి; మూల బ్రౌజర్ ఫైళ్లు ఎప్పుడూ మార్చబడవు. ఉత్తమ ఫలితాల కోసం, ముందుగా Chrome/Edge ను మూసివేయండి.",
+  "Passwords skipped": "పాస్‌వర్డ్‌లు దాటవేయబడ్డాయి",
+  "The vault was not unlocked, so saved passwords were not imported.": "వాల్ట్ అన్‌లాక్ చేయబడలేదు, కాబట్టి సేవ్ చేసిన పాస్‌వర్డ్‌లు దిగుమతి చేయబడలేదు.",
+  "{count} unreadable row skipped": "{count} చదవలేని వరుస దాటవేయబడింది",
+  "{count} unreadable rows skipped": "{count} చదవలేని వరుసలు దాటవేయబడ్డాయి"
 }

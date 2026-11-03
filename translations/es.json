@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Esto es lo que usa la barra de direcciones de Vodou para buscar. SearXNG (seleccionado) se ejecuta localmente y nunca comparte tu consulta con terceros.",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou es un navegador centrado en la privacidad: una bóveda de contraseñas cifrada, búsqueda privada a través de tu propia instancia local de SearXNG, resúmenes de IA en el dispositivo que nunca salen de tu máquina, y sin telemetría. Las próximas pantallas configuran lo básico — cada una se puede cambiar después desde el menú ☰.",
   "Welcome to Vodou": "Bienvenido a Vodou",
-  "You're all set": "Todo listo"
+  "You're all set": "Todo listo",
+  "Bookmark import failed": "Error al importar marcadores",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "Marcadores: añadidos {bookmarks_added} nuevos de {bookmarks_found} encontrados.\nContraseñas: añadidas {passwords_added} nuevas de {passwords_found} encontradas ({skip_note}).",
+  "Check at least one of bookmarks or passwords.": "Marca al menos marcadores o contraseñas.",
+  "Import": "Importar",
+  "Import bookmarks": "Importar marcadores",
+  "Import complete": "Importación completa",
+  "Import from Chrome/Edge": "Importar desde Chrome/Edge",
+  "Import saved passwords": "Importar contraseñas guardadas",
+  "No Chrome/Edge profiles found": "No se encontraron perfiles de Chrome/Edge",
+  "Nothing to do": "Nada que hacer",
+  "Password import failed": "Error al importar contraseñas",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "Las contraseñas se descifran y se guardan en la propia bóveda cifrada de Vodou; los archivos del navegador de origen nunca se modifican. Para mejores resultados, cierra Chrome/Edge primero.",
+  "Passwords skipped": "Contraseñas omitidas",
+  "The vault was not unlocked, so saved passwords were not imported.": "La bóveda no se desbloqueó, así que las contraseñas guardadas no se importaron.",
+  "{count} unreadable row skipped": "{count} fila no legible omitida",
+  "{count} unreadable rows skipped": "{count} filas no legibles omitidas"
 }
