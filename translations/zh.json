@@ -421,5 +421,20 @@
   "outside its validity period": "超出其有效期",
   "unknown": "未知",
   "⚠️ Certificate could NOT be verified: {reason}": "⚠️ 证书未能通过验证：{reason}",
-  "✅ Certificate verified — chains to a root trusted by this system.": "✅ 证书已验证 — 链接到此系统信任的根证书。"
+  "✅ Certificate verified — chains to a root trusted by this system.": "✅ 证书已验证 — 链接到此系统信任的根证书。",
+  "Back": "返回",
+  "Bring your bookmarks and passwords": "带上您的书签和密码",
+  "Changes apply immediately, so you can see it before deciding.": "更改会立即生效，方便您在决定前查看效果。",
+  "Choose a search engine": "选择搜索引擎",
+  "Direct browser import is currently Windows-only. You can still bring bookmarks or passwords in from a .html/.csv export via the ☰ menu.": "目前直接浏览器导入仅支持 Windows。您仍可以通过 ☰ 菜单从 .html/.csv 导出文件导入书签或密码。",
+  "Everything here can be revisited any time from the ☰ menu — Settings for search/theme, Password vault… and Import from the Bookmarks/Passwords sections. Enjoy Vodou.": "以上所有设置都可以随时在 ☰ 菜单中修改 — 搜索/主题在设置，密码保险箱……以及书签/密码部分中的导入。享受 Vodou。",
+  "Get started": "开始使用",
+  "If you have Chrome or Edge installed, Vodou can import its bookmarks and saved passwords directly — no manual export needed. You can also do this later from the ☰ menu.": "如果您安装了 Chrome 或 Edge，Vodou 可以直接导入其书签和已保存的密码 — 无需手动导出。您也可以稍后在 ☰ 菜单中进行此操作。",
+  "Next": "下一步",
+  "Pick a theme": "选择主题",
+  "Skip": "跳过",
+  "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "这就是 Vodou 地址栏用于搜索的方式。SearXNG（已选中）在本地运行，绝不会将您的查询分享给第三方。",
+  "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou 是一款以隐私为先的浏览器：加密密码保险箱、通过您自己的本地 SearXNG 实例进行的私密搜索、永不离开您设备的本机 AI 摘要，以及无遥测。接下来的几个屏幕用于设置基础项 — 每一项之后都可以在 ☰ 菜单中更改。",
+  "Welcome to Vodou": "欢迎使用 Vodou",
+  "You're all set": "一切就绪"
 }

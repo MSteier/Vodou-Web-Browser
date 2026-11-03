@@ -421,5 +421,20 @@
   "outside its validity period": "有効期間外",
   "unknown": "不明",
   "⚠️ Certificate could NOT be verified: {reason}": "⚠️ 証明書を検証できませんでした: {reason}",
-  "✅ Certificate verified — chains to a root trusted by this system.": "✅ 証明書は検証されました — このシステムが信頼するルートにチェーンされています。"
+  "✅ Certificate verified — chains to a root trusted by this system.": "✅ 証明書は検証されました — このシステムが信頼するルートにチェーンされています。",
+  "Back": "戻る",
+  "Bring your bookmarks and passwords": "ブックマークとパスワードを引き継ぐ",
+  "Changes apply immediately, so you can see it before deciding.": "変更はすぐに反映されるので、決定前に確認できます。",
+  "Choose a search engine": "検索エンジンを選択",
+  "Direct browser import is currently Windows-only. You can still bring bookmarks or passwords in from a .html/.csv export via the ☰ menu.": "直接ブラウザインポートは現在 Windows のみ対応です。それでも ☰ メニューから .html/.csv エクスポートを使ってブックマークやパスワードを引き継ぐことができます。",
+  "Everything here can be revisited any time from the ☰ menu — Settings for search/theme, Password vault… and Import from the Bookmarks/Passwords sections. Enjoy Vodou.": "ここでの設定はいつでも ☰ メニューから見直せます — 検索/テーマは設定、パスワード保管庫…、インポートはブックマーク/パスワードのセクションにあります。Vodou をお楽しみください。",
+  "Get started": "始める",
+  "If you have Chrome or Edge installed, Vodou can import its bookmarks and saved passwords directly — no manual export needed. You can also do this later from the ☰ menu.": "Chrome または Edge がインストールされている場合、Vodou はそのブックマークと保存済みパスワードを直接インポートできます — 手動でのエクスポートは不要です。後で ☰ メニューから行うこともできます。",
+  "Next": "次へ",
+  "Pick a theme": "テーマを選択",
+  "Skip": "スキップ",
+  "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "これは Vodou のアドレスバーが検索に使用するものです。SearXNG（選択中）はローカルで実行され、あなたの検索クエリを第三者と共有することはありません。",
+  "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou はプライバシーを第一に考えたブラウザです：暗号化されたパスワード保管庫、自分のローカル SearXNG インスタンスを通じたプライベート検索、デバイス上で動作し外部に送信されない AI 要約、そしてテレメトリなし。次のいくつかの画面で基本設定を行います — どの項目も後で ☰ メニューから変更できます。",
+  "Welcome to Vodou": "Vodou へようこそ",
+  "You're all set": "準備完了"
 }

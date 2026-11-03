@@ -32,7 +32,7 @@ import i18n
 
 # Every file whose tr() call sites feed the shipped catalogs so far.
 WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py", "bookmark_health_ui.py",
-                 "downloads_ui.py", "cert_viewer.py")
+                 "downloads_ui.py", "cert_viewer.py", "onboarding.py")
 
 # Dict/tuple collections whose displayed members are passed to tr() via a
 # loop variable (name/label), not a literal, so the AST scan below can't
@@ -46,6 +46,8 @@ WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py", "bookmark_health_ui.py",
 #   building the version-rows label).
 #   cert_viewer.py: _OID_LABELS values (looked up via dict.get() in
 #   _name_rows, then tr()'d at the display call site).
+#   onboarding.py: reuses main.py's SEARCH_ENGINES keys and theme.THEMES
+#   keys (same dynamic-value sets above), tr()'d via a loop variable.
 EXPECTED_DYNAMIC_VALUES = (
     {"SearXNG (local, private)", "DuckDuckGo", "Startpage", "Brave Search",
      "Google"}
