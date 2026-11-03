@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Vodou चा अ‍ॅड्रेस बार शोधासाठी हेच वापरतो. SearXNG (निवडलेले) स्थानिकरीत्या चालते आणि तुमची क्वेरी कधीही तृतीय पक्षासोबत शेअर करत नाही.",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou हा गोपनीयता-प्रथम ब्राउझर आहे: एक एन्क्रिप्टेड पासवर्ड व्हॉल्ट, तुमच्या स्वतःच्या स्थानिक SearXNG इन्स्टन्सद्वारे खाजगी शोध, डिव्हाइसवरच चालणारे AI सारांश जे तुमचे मशीन कधीही सोडत नाहीत, आणि कोणतीही टेलिमेट्री नाही. पुढील काही स्क्रीन मूलभूत गोष्टी सेट करतात — यातील प्रत्येक नंतर ☰ मेनूमधून बदलता येते.",
   "Welcome to Vodou": "Vodou मध्ये आपले स्वागत आहे",
-  "You're all set": "सर्व तयार आहे"
+  "You're all set": "सर्व तयार आहे",
+  "Bookmark import failed": "बुकमार्क इम्पोर्ट अयशस्वी",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "बुकमार्क: सापडलेल्या {bookmarks_found} पैकी {bookmarks_added} नवीन जोडले.\nपासवर्ड: सापडलेल्या {passwords_found} पैकी {passwords_added} नवीन जोडले ({skip_note}).",
+  "Check at least one of bookmarks or passwords.": "किमान बुकमार्क किंवा पासवर्ड निवडा.",
+  "Import": "इम्पोर्ट करा",
+  "Import bookmarks": "बुकमार्क इम्पोर्ट करा",
+  "Import complete": "इम्पोर्ट पूर्ण",
+  "Import from Chrome/Edge": "Chrome/Edge मधून इम्पोर्ट करा",
+  "Import saved passwords": "जतन केलेले पासवर्ड इम्पोर्ट करा",
+  "No Chrome/Edge profiles found": "कोणतेही Chrome/Edge प्रोफाइल सापडले नाही",
+  "Nothing to do": "करण्यासाठी काहीही नाही",
+  "Password import failed": "पासवर्ड इम्पोर्ट अयशस्वी",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "पासवर्ड डिक्रिप्ट केले जातात आणि Vodou च्या स्वतःच्या एन्क्रिप्टेड व्हॉल्टमध्ये साठवले जातात; मूळ ब्राउझरच्या फाइल्स कधीही बदलल्या जात नाहीत. उत्तम परिणामांसाठी, आधी Chrome/Edge बंद करा.",
+  "Passwords skipped": "पासवर्ड वगळले",
+  "The vault was not unlocked, so saved passwords were not imported.": "व्हॉल्ट अनलॉक झाले नव्हते, त्यामुळे जतन केलेले पासवर्ड इम्पोर्ट केले गेले नाहीत.",
+  "{count} unreadable row skipped": "{count} न वाचता येणारी ओळ वगळली",
+  "{count} unreadable rows skipped": "{count} न वाचता येणाऱ्या ओळी वगळल्या"
 }

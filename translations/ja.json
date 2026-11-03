@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "これは Vodou のアドレスバーが検索に使用するものです。SearXNG（選択中）はローカルで実行され、あなたの検索クエリを第三者と共有することはありません。",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou はプライバシーを第一に考えたブラウザです：暗号化されたパスワード保管庫、自分のローカル SearXNG インスタンスを通じたプライベート検索、デバイス上で動作し外部に送信されない AI 要約、そしてテレメトリなし。次のいくつかの画面で基本設定を行います — どの項目も後で ☰ メニューから変更できます。",
   "Welcome to Vodou": "Vodou へようこそ",
-  "You're all set": "準備完了"
+  "You're all set": "準備完了",
+  "Bookmark import failed": "ブックマークのインポートに失敗しました",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "ブックマーク：見つかった {bookmarks_found} 件のうち {bookmarks_added} 件を新規に追加。\nパスワード：見つかった {passwords_found} 件のうち {passwords_added} 件を新規に追加（{skip_note}）。",
+  "Check at least one of bookmarks or passwords.": "ブックマークまたはパスワードの少なくとも一方を選択してください。",
+  "Import": "インポート",
+  "Import bookmarks": "ブックマークをインポート",
+  "Import complete": "インポート完了",
+  "Import from Chrome/Edge": "Chrome/Edge からインポート",
+  "Import saved passwords": "保存済みパスワードをインポート",
+  "No Chrome/Edge profiles found": "Chrome/Edge のプロファイルが見つかりません",
+  "Nothing to do": "操作の必要はありません",
+  "Password import failed": "パスワードのインポートに失敗しました",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "パスワードは復号され、Vodou 自身の暗号化された保管庫に保存されます。元のブラウザのファイルは変更されません。最良の結果を得るには、先に Chrome/Edge を閉じてください。",
+  "Passwords skipped": "パスワードはスキップされました",
+  "The vault was not unlocked, so saved passwords were not imported.": "保管庫がロック解除されなかったため、保存済みパスワードはインポートされませんでした。",
+  "{count} unreadable row skipped": "読み取れない行を {count} 件スキップしました",
+  "{count} unreadable rows skipped": "読み取れない行を {count} 件スキップしました"
 }

@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "Vodou-இன் முகவரிப் பட்டி தேடலுக்கு இதையே பயன்படுத்துகிறது. SearXNG (தேர்ந்தெடுக்கப்பட்டது) உள்ளூரில் இயங்குகிறது மற்றும் உங்கள் தேடலை மூன்றாம் தரப்பினருடன் ஒருபோதும் பகிராது.",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou தனியுரிமையை முதன்மையாகக் கொண்ட ஒரு உலாவி: ஒரு மறைகுறியாக்கப்பட்ட கடவுச்சொல் பெட்டகம், உங்கள் சொந்த உள்ளூர் SearXNG நிகழ்வு வழியாக தனிப்பட்ட தேடல், உங்கள் சாதனத்தை விட்டு ஒருபோதும் வெளியேறாத சாதனத்திலேயே இயங்கும் AI சுருக்கங்கள், மற்றும் எந்த டெலிமெட்ரியும் இல்லை. அடுத்த சில திரைகள் அடிப்படைகளை அமைக்கின்றன — இவை ஒவ்வொன்றும் பின்னர் ☰ மெனுவிலிருந்து மாற்றப்படலாம்.",
   "Welcome to Vodou": "Vodou-க்கு வரவேற்கிறோம்",
-  "You're all set": "அனைத்தும் தயார்"
+  "You're all set": "அனைத்தும் தயார்",
+  "Bookmark import failed": "புக்மார்க் இறக்குமதி தோல்வியடைந்தது",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "புக்மார்க்குகள்: கண்டுபிடிக்கப்பட்ட {bookmarks_found} இல் {bookmarks_added} புதியவை சேர்க்கப்பட்டன.\nகடவுச்சொற்கள்: கண்டுபிடிக்கப்பட்ட {passwords_found} இல் {passwords_added} புதியவை சேர்க்கப்பட்டன ({skip_note}).",
+  "Check at least one of bookmarks or passwords.": "குறைந்தது புக்மார்க்குகள் அல்லது கடவுச்சொற்களைத் தேர்ந்தெடுக்கவும்.",
+  "Import": "இறக்குமதி செய்",
+  "Import bookmarks": "புக்மார்க்குகளை இறக்குமதி செய்",
+  "Import complete": "இறக்குமதி முடிந்தது",
+  "Import from Chrome/Edge": "Chrome/Edge-இலிருந்து இறக்குமதி செய்",
+  "Import saved passwords": "சேமிக்கப்பட்ட கடவுச்சொற்களை இறக்குமதி செய்",
+  "No Chrome/Edge profiles found": "Chrome/Edge சுயவிவரங்கள் எதுவும் கிடைக்கவில்லை",
+  "Nothing to do": "செய்ய எதுவும் இல்லை",
+  "Password import failed": "கடவுச்சொல் இறக்குமதி தோல்வியடைந்தது",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "கடவுச்சொற்கள் டிக்ரிப்ட் செய்யப்பட்டு Vodou-இன் சொந்த மறைகுறியாக்கப்பட்ட பெட்டகத்தில் சேமிக்கப்படுகின்றன; மூல உலாவியின் கோப்புகள் ஒருபோதும் மாற்றப்படுவதில்லை. சிறந்த முடிவுகளுக்கு, முதலில் Chrome/Edge-ஐ மூடவும்.",
+  "Passwords skipped": "கடவுச்சொற்கள் தவிர்க்கப்பட்டன",
+  "The vault was not unlocked, so saved passwords were not imported.": "பெட்டகம் திறக்கப்படவில்லை, எனவே சேமிக்கப்பட்ட கடவுச்சொற்கள் இறக்குமதி செய்யப்படவில்லை.",
+  "{count} unreadable row skipped": "{count} படிக்க முடியாத வரிசை தவிர்க்கப்பட்டது",
+  "{count} unreadable rows skipped": "{count} படிக்க முடியாத வரிசைகள் தவிர்க்கப்பட்டன"
 }

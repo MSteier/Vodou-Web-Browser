@@ -436,5 +436,21 @@
   "This is what Vodou's address bar searches with. SearXNG (selected) runs locally and never shares your query with a third party.": "هذا ما يستخدمه شريط عنوان Vodou للبحث. SearXNG (محدد) يعمل محليًا ولا يشارك استعلامك أبدًا مع طرف ثالث.",
   "Vodou is a privacy-first browser: an encrypted password vault, private search through your own local SearXNG instance, on-device AI summaries that never leave your machine, and no telemetry. The next few screens set up the basics — every one of them can be changed later from the ☰ menu.": "Vodou متصفح يُعطي الأولوية للخصوصية: خزنة كلمات مرور مشفّرة، بحث خاص عبر نسخة SearXNG المحلية الخاصة بك، ملخصات ذكاء اصطناعي على الجهاز لا تغادر جهازك أبدًا، ودون أي تتبّع. الشاشات القليلة القادمة تُهيّئ الأساسيات — يمكن تغيير كل منها لاحقًا من قائمة ☰.",
   "Welcome to Vodou": "مرحبًا بك في Vodou",
-  "You're all set": "كل شيء جاهز"
+  "You're all set": "كل شيء جاهز",
+  "Bookmark import failed": "فشل استيراد الإشارات المرجعية",
+  "Bookmarks: added {bookmarks_added} new of {bookmarks_found} found.\nPasswords: added {passwords_added} new of {passwords_found} found ({skip_note}).": "الإشارات المرجعية: تمت إضافة {bookmarks_added} جديدة من {bookmarks_found} تم العثور عليها.\nكلمات المرور: تمت إضافة {passwords_added} جديدة من {passwords_found} تم العثور عليها ({skip_note}).",
+  "Check at least one of bookmarks or passwords.": "حدد الإشارات المرجعية أو كلمات المرور على الأقل.",
+  "Import": "استيراد",
+  "Import bookmarks": "استيراد الإشارات المرجعية",
+  "Import complete": "اكتمل الاستيراد",
+  "Import from Chrome/Edge": "الاستيراد من Chrome/Edge",
+  "Import saved passwords": "استيراد كلمات المرور المحفوظة",
+  "No Chrome/Edge profiles found": "لم يتم العثور على ملفات تعريف Chrome/Edge",
+  "Nothing to do": "لا شيء للقيام به",
+  "Password import failed": "فشل استيراد كلمات المرور",
+  "Passwords are decrypted and stored in Vodou's own encrypted vault; the source browser's files are never modified. For best results, close Chrome/Edge first.": "يتم فك تشفير كلمات المرور وتخزينها في خزنة Vodou المشفّرة الخاصة؛ ولا يتم تعديل ملفات المتصفح المصدر مطلقًا. للحصول على أفضل النتائج، أغلق Chrome/Edge أولًا.",
+  "Passwords skipped": "تم تخطي كلمات المرور",
+  "The vault was not unlocked, so saved passwords were not imported.": "لم يتم فتح الخزنة، لذلك لم تُستورد كلمات المرور المحفوظة.",
+  "{count} unreadable row skipped": "تم تخطي {count} صف غير قابل للقراءة",
+  "{count} unreadable rows skipped": "تم تخطي {count} صفوف غير قابلة للقراءة"
 }
