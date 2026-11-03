@@ -65,6 +65,10 @@ EXPECTED_DYNAMIC_VALUES = (
 BRAND_NAMES = {"DuckDuckGo", "Startpage", "Brave Search", "Google",
                "Vodou", "Qt", "PyQt6", "Python", "Qt WebEngine"}
 
+# Every language with a shipped catalog (translations/<code>.json).
+ALL_LANGUAGE_CODES = ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar",
+                      "hi", "bn", "ta", "te", "mr", "gu")
+
 _PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*(?::[^}]*)?\}")
 
 
@@ -168,7 +172,7 @@ class CatalogConsistencyTests(unittest.TestCase):
         cls.expected = (_all_tr_call_strings() | EXPECTED_DYNAMIC_VALUES) - BRAND_NAMES
 
     def test_all_catalogs_match_expected_keys_exactly(self):
-        for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar", "hi"):
+        for code in ALL_LANGUAGE_CODES:
             with self.subTest(language=code):
                 path = ROOT / "translations" / f"{code}.json"
                 catalog = json.loads(path.read_text(encoding="utf-8"))
@@ -180,7 +184,7 @@ class CatalogConsistencyTests(unittest.TestCase):
                     f"extra={keys - self.expected}")
 
     def test_no_catalog_entry_is_empty(self):
-        for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar", "hi"):
+        for code in ALL_LANGUAGE_CODES:
             path = ROOT / "translations" / f"{code}.json"
             catalog = json.loads(path.read_text(encoding="utf-8"))
             for key, value in catalog.items():
@@ -196,7 +200,7 @@ class CatalogConsistencyTests(unittest.TestCase):
             placeholders = set(_PLACEHOLDER_RE.findall(key))
             if not placeholders:
                 continue
-            for code in ("es", "fr", "de", "pt", "zh", "ja", "ru", "ar", "hi"):
+            for code in ALL_LANGUAGE_CODES:
                 path = ROOT / "translations" / f"{code}.json"
                 catalog = json.loads(path.read_text(encoding="utf-8"))
                 with self.subTest(language=code, key=key):
