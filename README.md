@@ -1,11 +1,17 @@
 # Vodou Browser
 
-Version **1.54.13** adds Indian languages: Hindi for the interface (the ☰
+Version **1.54.14** completes UI localization: the Check Bookmarks,
+Downloads, certificate viewer, first-run onboarding wizard, Chrome/Edge
+import, and Plugins dialogs are now translated into all 14 supported
+languages, joining the ☰ menu, password vault, and About/update dialog from
+earlier releases. Every dialog in the browser is now localized.
+
+1.54.13 added Indian languages: Hindi for the interface (the ☰
 menu, password vault, and About/update dialog), Hindi and Tamil spell check
 (offline dictionaries bundled, as before), and page translation into Hindi,
 Bengali, Tamil, Telugu, Marathi, and Gujarati. Bengali, Tamil, Telugu,
 Marathi, and Gujarati can already be chosen as the interface language but
-show English until their translations are added. It also fixes the Windows
+show English until their translations are added. It also fixed the Windows
 build, which was missing the interface translations and spell-check
 dictionaries.
 
