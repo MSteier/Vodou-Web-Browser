@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 import i18n
 
 # Every file whose tr() call sites feed the shipped catalogs so far.
-WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py")
+WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py", "bookmark_health_ui.py")
 
 # Dict/tuple collections whose displayed members are passed to tr() via a
 # loop variable (name/label), not a literal, so the AST scan below can't
