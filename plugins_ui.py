@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from i18n import tr
 from plugins import PluginManager, catalog
 
 
@@ -30,16 +31,16 @@ class PluginsDialog(QDialog):
         super().__init__(parent)
         self.manager = manager
         self.on_change = on_change
-        self.setWindowTitle("Plugins")
+        self.setWindowTitle(tr("Plugins"))
         self.resize(720, 460)
 
         layout = QVBoxLayout(self)
 
-        intro = QLabel(
+        intro = QLabel(tr(
             "Plugins come from Vodou's reviewed catalog — a trusted source. "
             "Each runs only on the sites listed and inside an isolated "
             "sandbox. Toggle the checkbox to enable a plugin; changes take "
-            "effect on pages you load next (reload open tabs to apply now).")
+            "effect on pages you load next (reload open tabs to apply now)."))
         intro.setTextFormat(Qt.TextFormat.PlainText)
         intro.setWordWrap(True)
         intro.setStyleSheet("color: gray; padding-bottom: 6px;")
@@ -47,7 +48,7 @@ class PluginsDialog(QDialog):
 
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(
-            ["On", "Plugin", "Sites", "Code ID"])
+            [tr("On"), tr("Plugin"), tr("Sites"), tr("Code ID")])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -64,7 +65,7 @@ class PluginsDialog(QDialog):
 
         row = QHBoxLayout()
         row.addStretch()
-        close = QPushButton("Close")
+        close = QPushButton(tr("Close"))
         close.setDefault(True)
         close.clicked.connect(self.accept)
         row.addWidget(close)
@@ -87,8 +88,8 @@ class PluginsDialog(QDialog):
             name.setToolTip(f"{p.description}\n\nv{p.version} · {p.author}")
             sites = QTableWidgetItem(p.sites_label)
             code = QTableWidgetItem(p.fingerprint)
-            code.setToolTip("SHA-256 fingerprint of this plugin's code "
-                            "(tamper-evident identity).")
+            code.setToolTip(tr("SHA-256 fingerprint of this plugin's code "
+                               "(tamper-evident identity)."))
             for item in (name, sites, code):
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled
                               | Qt.ItemFlag.ItemIsSelectable)
