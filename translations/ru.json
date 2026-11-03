@@ -452,5 +452,12 @@
   "Passwords skipped": "Пароли пропущены",
   "The vault was not unlocked, so saved passwords were not imported.": "Хранилище не было разблокировано, поэтому сохранённые пароли не были импортированы.",
   "{count} unreadable row skipped": "Пропущена {count} нечитаемая строка",
-  "{count} unreadable rows skipped": "Пропущено {count} нечитаемых строк"
+  "{count} unreadable rows skipped": "Пропущено {count} нечитаемых строк",
+  "Code ID": "ID кода",
+  "On": "Включено",
+  "Plugin": "Плагин",
+  "Plugins": "Плагины",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "Плагины поступают из проверенного каталога Vodou — надёжного источника. Каждый работает только на указанных сайтах и в изолированной песочнице. Установите флажок, чтобы включить плагин; изменения вступят в силу на следующих загружаемых страницах (перезагрузите открытые вкладки, чтобы применить сейчас).",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "Отпечаток SHA-256 кода этого плагина (защищённая от подделки идентичность).",
+  "Sites": "Сайты"
 }

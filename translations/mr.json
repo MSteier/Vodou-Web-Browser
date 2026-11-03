@@ -452,5 +452,12 @@
   "Passwords skipped": "पासवर्ड वगळले",
   "The vault was not unlocked, so saved passwords were not imported.": "व्हॉल्ट अनलॉक झाले नव्हते, त्यामुळे जतन केलेले पासवर्ड इम्पोर्ट केले गेले नाहीत.",
   "{count} unreadable row skipped": "{count} न वाचता येणारी ओळ वगळली",
-  "{count} unreadable rows skipped": "{count} न वाचता येणाऱ्या ओळी वगळल्या"
+  "{count} unreadable rows skipped": "{count} न वाचता येणाऱ्या ओळी वगळल्या",
+  "Code ID": "कोड आयडी",
+  "On": "सुरू",
+  "Plugin": "प्लगइन",
+  "Plugins": "प्लगइन्स",
+  "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "प्लगइन्स Vodou च्या पुनरावलोकन केलेल्या यादीतून येतात — एक विश्वासार्ह स्रोत. प्रत्येक फक्त सूचीबद्ध साइट्सवर आणि एका विलग सँडबॉक्समध्ये चालते. प्लगइन सक्षम करण्यासाठी चेकबॉक्स टॉगल करा; बदल तुम्ही पुढे लोड करत असलेल्या पानांवर लागू होतील (आता लागू करण्यासाठी उघडलेले टॅब रीलोड करा).",
+  "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "या प्लगइनच्या कोडचा SHA-256 फिंगरप्रिंट (टॅम्पर-प्रूफ ओळख).",
+  "Sites": "साइट्स"
 }
