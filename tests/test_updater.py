@@ -260,6 +260,76 @@ def test_lockstep_no_version_mixing() -> None:
           not (t.pyqt6 or "").startswith("6.13"))
 
 
+def _split_numbering_table(*, with_metadata: bool = True) -> dict:
+    """The real Nov-2026 PyPI shape: PyQt6 6.12 ships with PyQt6-WebEngine
+    6.140 (not 6.12), linked only by WebEngine's requires_dist."""
+    table = {
+        "PyQt6": _project("PyQt6", {"6.11.0": ">=3.10", "6.12.0": ">=3.10"}),
+        "PyQt6-WebEngine": _project(
+            "PyQt6-WebEngine", {"6.11.0": ">=3.10", "6.140.0": ">=3.10"}),
+        "PyQt6-Qt6": _project(
+            "PyQt6-Qt6", {"6.11.2": ">=3.10", "6.12.0": ">=3.10"}),
+        "PyQt6-WebEngine-Qt6": _project(
+            "PyQt6-WebEngine-Qt6", {"6.11.2": ">=3.10", "6.140.0": ">=3.10"}),
+    }
+    if with_metadata:
+        table["PyQt6-WebEngine/6.140.0"] = {"info": {"requires_dist": [
+            "PyQt6-sip<14,>=13.13",
+            "PyQt6-WebEngine-Qt6<6.141.0,>=6.140.0",
+            "PyQt6>=6.12.0"]}}
+    return table
+
+
+def _on_611(**over) -> CurrentVersions:
+    return base_current(pyqt6_binding="6.11.0", pyqt6_wheel="6.11.0",
+                        pyqt6_webengine_wheel="6.11.0", pyqt6_qt6="6.11.2",
+                        pyqt6_webengine_qt6="6.11.2", qt="6.11.0",
+                        qt_webengine="6.11.2", **over)
+
+
+def test_split_numbering_webengine_6140() -> None:
+    # The bug: "6.12" != "6.140", so the old resolver stopped at 6.11 and
+    # reported "already up to date" while 6.12/6.140 sat on PyPI.
+    plan = _mgr(_split_numbering_table()).check_for_updates(
+        current=_on_611())
+    c = plan.compatibility
+    t = c.target
+    check("split: update offered", c.compatible and not c.up_to_date)
+    check("split: PyQt6 -> 6.12.0", t.pyqt6 == "6.12.0")
+    check("split: WebEngine -> 6.140.0", t.pyqt6_webengine == "6.140.0")
+    check("split: runtimes pinned to 6.12.0 / 6.140.0",
+          t.expected_qt6 == "6.12.0"
+          and t.expected_webengine_qt6 == "6.140.0")
+    check("split: verify expects WebEngine series 6.140", t.minor == "6.140")
+    check("split: Qt series is 6.12", t.qt_minor == "6.12")
+    check("split: pip line pins all four",
+          sorted(target_specs(t)) == sorted([
+              "PyQt6==6.12.0", "PyQt6-WebEngine==6.140.0",
+              "PyQt6-Qt6==6.12.0", "PyQt6-WebEngine-Qt6==6.140.0"]))
+
+
+def test_split_numbering_up_to_date_after_install() -> None:
+    cur = base_current(pyqt6_binding="6.12.0", pyqt6_wheel="6.12.0",
+                       pyqt6_webengine_wheel="6.140.0", pyqt6_qt6="6.12.0",
+                       pyqt6_webengine_qt6="6.140.0", qt="6.12.0",
+                       qt_webengine="6.140.0")
+    c = _mgr(_split_numbering_table()).check_for_updates(
+        current=cur).compatibility
+    check("split-current: up to date", c.compatible and c.up_to_date)
+    check("split-current: message names both series",
+          "6.12" in c.reason and "6.140" in c.reason)
+
+
+def test_split_numbering_unconfirmed_pair_not_guessed() -> None:
+    # PyPI won't tell us what 6.140 needs -> don't guess; stay on 6.11.
+    c = _mgr(_split_numbering_table(with_metadata=False)).check_for_updates(
+        current=_on_611()).compatibility
+    check("unconfirmed: never pairs 6.12 with 6.140 blindly",
+          c.target.pyqt6_webengine != "6.140.0")
+    check("unconfirmed: falls back to 6.11 (up to date)",
+          c.target.minor == "6.11" and c.up_to_date)
+
+
 def test_prerelease_gate() -> None:
     table = {
         "PyQt6": _project("PyQt6", {"6.11.0": ">=3.10", "6.12.0rc1": ">=3.10"}),
@@ -695,6 +765,9 @@ ALL = [
     test_no_update_when_current_is_latest, test_runtime_patch_only,
     test_python_incompatibility_blocks_newer_only,
     test_no_release_supports_this_python, test_lockstep_no_version_mixing,
+    test_split_numbering_webengine_6140,
+    test_split_numbering_up_to_date_after_install,
+    test_split_numbering_unconfirmed_pair_not_guessed,
     test_prerelease_gate, test_frozen_build_refused,
     test_docker_image_points_to_image_pull,
     test_readonly_site_packages_refused,

@@ -96,7 +96,10 @@ class ResolvedTarget:
     """The version set the resolver settled on. ``None`` everywhere when no
     safe set could be found (see :attr:`CompatibilityResult.reason`)."""
 
-    minor: str | None = None               # "6.11"
+    minor: str | None = None               # Qt WebEngine series, "6.140"
+    # Qt / PyQt6 series. Equal to ``minor`` through Qt 6.11; differs from 6.12
+    # on (PyQt6 6.12 + PyQt6-WebEngine 6.140). None in old saved state.
+    qt_minor: str | None = None            # "6.12"
     pyqt6: str | None = None               # binding wheel version to install
     pyqt6_webengine: str | None = None     # binding wheel version to install
     # The matching runtime wheels pip will pull in as dependencies -- recorded
