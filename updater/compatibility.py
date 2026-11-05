@@ -13,10 +13,16 @@ The rule, from observing how Riverbank ships these packages:
     upgrades Python, so a newer release that needs a newer Python is reported
     (``blocked_by_python``) and *not* selected.
 
+  * EXCEPT: from Qt 6.12 Riverbank numbers PyQt6-WebEngine separately
+    (6.140 goes with PyQt6 6.12). For a WebEngine series with no
+    same-numbered PyQt6, the pairing comes from that release's own
+    ``requires_dist`` on PyPI ("PyQt6>=6.12.0") -- never from guessing.
+
 The resolver therefore:
   1. asks PyPI for the stable, this-Python-compatible releases of both bindings
-  2. finds the highest ``X.Y`` minor published by BOTH
-  3. picks the highest patch each publishes within that minor
+  2. takes the newest WebEngine series that has a PyQt6 partner (same X.Y, or
+     the PyQt6 series its metadata declares)
+  3. picks the highest patch each publishes within its series
   4. if the current install is already on (or above) that minor -> up to date
   5. if no shared compatible minor exists -> compatible=False, with a reason
 
@@ -25,6 +31,7 @@ Nothing is downloaded or installed here -- this stage only decides.
 
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 
 from . import pypi
@@ -98,25 +105,28 @@ def resolve_compatible_versions(
 
     pyqt6_minors = _by_minor(pyqt6_ok)
     web_minors = _by_minor(web_ok)
-    shared = [m for m in pyqt6_minors if m in web_minors and m]
-    if not shared:
+    pair = _pick_series(fetch, pyqt6_minors, web_minors)
+    if pair is None:
         return CompatibilityResult(
             compatible=False,
-            reason="PyPI has no PyQt6 and PyQt6-WebEngine release that share "
-                   "a version series and support Python "
+            reason="PyPI has no PyQt6 and PyQt6-WebEngine release that are "
+                   "declared compatible with each other and support Python "
                    f"{current.python}. No changes have been made.",
             newest_seen_pyqt6=getattr(newest_pyqt6_any, "version", None),
             newest_seen_webengine=getattr(newest_web_any, "version", None))
 
-    # Highest shared minor wins; highest patch within it for each package.
-    best_minor = max(shared, key=lambda m: pypi.parse_version(m + ".0"))
-    target_pyqt6 = pyqt6_minors[best_minor][-1].version
+    # best_minor is the Qt WebEngine series (what verify_installation checks
+    # qWebEngineVersion() against); qt_minor is the Qt / PyQt6 series. They
+    # were always equal until Riverbank shipped PyQt6-WebEngine 6.140 for
+    # Qt 6.12 -- see _pick_series.
+    qt_minor, best_minor = pair
+    target_pyqt6 = pyqt6_minors[qt_minor][-1].version
     target_web = web_minors[best_minor][-1].version
 
     # The matching runtime wheels, for display + the rollback set. Best effort:
     # if PyPI can't be asked we just leave them None and pip still resolves
     # them at install time.
-    exp_qt6 = _latest_in_minor(fetch, "PyQt6-Qt6", best_minor,
+    exp_qt6 = _latest_in_minor(fetch, "PyQt6-Qt6", qt_minor,
                                allow_prerelease, py)
     exp_web_qt6 = _latest_in_minor(fetch, "PyQt6-WebEngine-Qt6", best_minor,
                                    allow_prerelease, py)
@@ -129,6 +139,7 @@ def resolve_compatible_versions(
 
     target = ResolvedTarget(
         minor=best_minor,
+        qt_minor=qt_minor,
         pyqt6=target_pyqt6,
         pyqt6_webengine=target_web,
         expected_qt6=exp_qt6,
@@ -147,12 +158,13 @@ def resolve_compatible_versions(
         and _at_least(current.pyqt6_webengine_qt6,
                       target.expected_webengine_qt6))
 
-    blocked = _python_block(current, best_minor,
+    blocked = _python_block(current, qt_minor, best_minor,
                             newest_pyqt6_any, newest_web_any)
+    series = _series_label(qt_minor, best_minor)
 
     if up_to_date:
         reason = (f"Vodou is already on the latest compatible Qt series "
-                  f"({best_minor}.x) for Python {current.python}.")
+                  f"({series}) for Python {current.python}.")
         if blocked:
             reason += (f" A newer series ({blocked[0]}) exists but needs "
                        f"Python {blocked[1]}; Vodou will not upgrade Python.")
@@ -168,7 +180,7 @@ def resolve_compatible_versions(
     if bindings_move:
         reason = (f"PyQt6 {target_pyqt6} and PyQt6-WebEngine {target_web} are "
                   f"a compatible set for Python {current.python} "
-                  f"(Qt WebEngine {best_minor}.x, Chromium bundled with it). "
+                  f"({series}, Chromium bundled with it). "
                   "The binding and runtime packages move together as one set.")
     else:
         reason = (
@@ -180,12 +192,64 @@ def resolve_compatible_versions(
     if blocked:
         reason += (f" Note: a newer series ({blocked[0]}) is out but requires "
                    f"Python {blocked[1]} -- Vodou will not upgrade Python, so "
-                   f"{best_minor}.x is the newest it will install.")
+                   f"{series} is the newest it will install.")
     return CompatibilityResult(
         compatible=True, up_to_date=False, target=target, reason=reason,
         blocked_by_python=blocked,
         newest_seen_pyqt6=getattr(newest_pyqt6_any, "version", None),
         newest_seen_webengine=getattr(newest_web_any, "version", None))
+
+
+def _series_label(qt_minor: str, web_minor: str) -> str:
+    if qt_minor == web_minor:
+        return f"{qt_minor}.x"
+    return f"Qt {qt_minor}.x with Qt WebEngine {web_minor}.x"
+
+
+# "PyQt6>=6.12.0" or the older "PyQt6 (>=6.12.0)". The name must be followed by
+# whitespace, "(" or the operator, so "PyQt6-sip>=13" never matches.
+_PYQT6_FLOOR_RE = re.compile(
+    r"^\s*PyQt6\s*\(?\s*>=\s*([0-9]+(?:\.[0-9]+)*)", re.IGNORECASE)
+
+
+def _declared_pyqt6_floor(fetch, web_version: str) -> str | None:
+    """The PyQt6 version a PyQt6-WebEngine release *declares* it needs, read
+    from that release's own PyPI metadata (``requires_dist``), e.g.
+    6.140.0 -> "6.12.0". None when PyPI can't be asked or says nothing."""
+    try:
+        j = fetch(f"PyQt6-WebEngine/{web_version}")
+    except Exception:  # noqa: BLE001 -- any failure: we simply don't know
+        return None
+    for req in ((j or {}).get("info") or {}).get("requires_dist") or []:
+        m = _PYQT6_FLOOR_RE.match(req or "")
+        if m:
+            return m.group(1)
+    return None
+
+
+def _pick_series(fetch, pyqt6_minors, web_minors):
+    """Choose (qt_minor, webengine_minor), newest WebEngine series first.
+
+    Riverbank used to number both bindings in lockstep (PyQt6 6.11 <->
+    PyQt6-WebEngine 6.11), so "same X.Y" was the whole rule. From PyQt6 6.12
+    the WebEngine binding follows its own numbering (6.140 for Qt 6.12), so a
+    WebEngine series with no same-numbered PyQt6 is paired using the PyQt6
+    floor that release itself declares on PyPI ("PyQt6>=6.12.0" -> 6.12).
+
+    Same-number pairs still win when they exist, and a series whose pairing
+    can't be confirmed from PyPI is skipped rather than guessed -- the
+    resolver then falls back to the newest series it *can* vouch for.
+    """
+    order = sorted((m for m in web_minors if m),
+                   key=lambda m: pypi.parse_version(m + ".0"), reverse=True)
+    for wm in order:
+        if wm in pyqt6_minors:
+            return wm, wm
+        floor = _declared_pyqt6_floor(fetch, web_minors[wm][-1].version)
+        qm = minor_of(floor) if floor else ""
+        if qm and qm in pyqt6_minors:
+            return qm, wm
+    return None
 
 
 def _latest_in_minor(fetch, name, minor, allow_prerelease, py):
@@ -218,15 +282,18 @@ def _at_least(installed: str | None, target: str | None) -> bool:
     return pypi.parse_version(installed) >= pypi.parse_version(target)
 
 
-def _python_block(current, best_minor, newest_pyqt6_any, newest_web_any):
+def _python_block(current, qt_minor, web_minor,
+                  newest_pyqt6_any, newest_web_any):
     """If the newest stable series (ignoring the Python gate) is above the one
-    we resolved, and it is above because of Python, report (version, spec)."""
-    for rel in (newest_web_any, newest_pyqt6_any):
+    we resolved, and it is above because of Python, report (version, spec).
+    Each binding is compared against its *own* resolved series."""
+    for rel, resolved in ((newest_web_any, web_minor),
+                          (newest_pyqt6_any, qt_minor)):
         if rel is None:
             continue
-        if minor_of(rel.version) == best_minor:
+        if minor_of(rel.version) == resolved:
             continue
-        if not _minor_ge(minor_of(rel.version), best_minor):
+        if not _minor_ge(minor_of(rel.version), resolved):
             continue
         try:
             fits = pypi.python_satisfies(rel.requires_python,

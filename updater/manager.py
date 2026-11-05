@@ -378,7 +378,8 @@ def _components(cur: CurrentVersions, compat) -> list[ComponentVersion]:
     row("PyQt6", cur.pyqt6_binding, t.pyqt6 or cur.pyqt6_binding)
     row("PyQt6-WebEngine", cur.pyqt6_webengine_wheel,
         t.pyqt6_webengine or cur.pyqt6_webengine_wheel)
-    row("Qt", cur.qt, (t.minor + ".x") if t.minor else cur.qt,
+    qt_series = getattr(t, "qt_minor", None) or t.minor
+    row("Qt", cur.qt, (qt_series + ".x") if qt_series else cur.qt,
         "pulled in automatically with the bindings")
     row("Qt WebEngine", cur.qt_webengine,
         (t.expected_webengine_qt6 or (t.minor + ".x" if t.minor else ""))
@@ -392,7 +393,9 @@ def _components(cur: CurrentVersions, compat) -> list[ComponentVersion]:
 
 
 def _target_dict(t) -> dict:
-    return {"minor": t.minor, "pyqt6": t.pyqt6,
+    return {"minor": t.minor,
+            "qt_minor": getattr(t, "qt_minor", None) or t.minor,
+            "pyqt6": t.pyqt6,
             "pyqt6_webengine": t.pyqt6_webengine,
             "expected_qt6": t.expected_qt6,
             "expected_webengine_qt6": t.expected_webengine_qt6,
