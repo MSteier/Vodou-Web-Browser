@@ -459,5 +459,7 @@
   "Plugins": "Extensions",
   "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "Les extensions proviennent du catalogue vérifié de Vodou — une source fiable. Chacune s'exécute uniquement sur les sites indiqués et dans un bac à sable isolé. Cochez la case pour activer une extension ; les changements prennent effet sur les prochaines pages chargées (rechargez les onglets ouverts pour les appliquer maintenant).",
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "Empreinte SHA-256 du code de cette extension (identité inviolable).",
-  "Sites": "Sites"
+  "Sites": "Sites",
+  "Allow Claude (MCP) access": "Autoriser l'accès de Claude (MCP)",
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Permet à Claude d'utiliser la recherche, les favoris et les onglets de Vodou via le serveur MCP de Vodou. Le désactiver bloque instantanément tous les outils."
 }

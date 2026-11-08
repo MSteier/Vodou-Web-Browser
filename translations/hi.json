@@ -459,5 +459,7 @@
   "Plugins": "प्लगइन्स",
   "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "प्लगइन्स Vodou की समीक्षित सूची से आते हैं — एक विश्वसनीय स्रोत। हर एक केवल सूचीबद्ध साइटों पर और एक अलग सैंडबॉक्स के भीतर चलता है। किसी प्लगइन को सक्रिय करने के लिए चेकबॉक्स टॉगल करें; बदलाव आगे लोड होने वाले पेजों पर लागू होंगे (अभी लागू करने के लिए खुले टैब को रीलोड करें)।",
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "इस प्लगइन के कोड का SHA-256 फिंगरप्रिंट (छेड़छाड़-रोधी पहचान)।",
-  "Sites": "साइटें"
+  "Sites": "साइटें",
+  "Allow Claude (MCP) access": "Claude (MCP) एक्सेस की अनुमति दें",
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Claude को Vodou MCP सर्वर के ज़रिए Vodou की खोज, बुकमार्क और टैब इस्तेमाल करने दें। इसे बंद करने पर सभी टूल तुरंत ब्लॉक हो जाते हैं।"
 }

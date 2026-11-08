@@ -469,6 +469,7 @@ import content_credentials
 import setting_protection
 from onboarding import OnboardingDialog, is_first_run, mark_onboarding_done
 from remote_control import ControlServer, control_enabled
+import mcp_toggle
 from browser_instance import BrowserInstance
 from safebrowsing import SafeBrowsing
 from session import (
@@ -2409,6 +2410,17 @@ class BrowserWindow(QMainWindow):
         ai_menu.addAction(tr("Local AI options…"), self.show_ai_options)
         ai_menu.addAction(tr("Set up Local AI…"), self.show_ollama_setup)
         self._build_translate_language_menu(ai_menu.addMenu(tr("Translate into")))
+        ai_menu.addSeparator()
+        # Kill switch for the Vodou MCP server (Claude Desktop / Claude Code).
+        # Writes ~/.vodou/mcp_enabled.json, which the server re-reads on every
+        # tool call -- see mcp_toggle.py.
+        self.mcp_access_action = ai_menu.addAction(tr("Allow Claude (MCP) access"))
+        self.mcp_access_action.setCheckable(True)
+        self.mcp_access_action.setChecked(mcp_toggle.is_enabled())
+        self.mcp_access_action.setToolTip(tr(
+            "Let Claude use Vodou's search, bookmarks and tabs through the "
+            "Vodou MCP server. Turning this off blocks every tool instantly."))
+        self.mcp_access_action.toggled.connect(self._set_mcp_access)
 
         # --- Extend --------------------------------------------------------
         settings_menu.addSeparator()
@@ -5638,6 +5650,21 @@ class BrowserWindow(QMainWindow):
         self._ai_stop.setEnabled(False)
         self._ai_regen.setEnabled(True)
         self._ai_send.setEnabled(True)
+
+    def _set_mcp_access(self, on: bool) -> None:
+        try:
+            mcp_toggle.set_enabled(on)
+        except OSError as exc:
+            # Couldn't save: put the checkmark back so the menu never claims a
+            # state the MCP server isn't actually seeing.
+            self.mcp_access_action.blockSignals(True)
+            self.mcp_access_action.setChecked(not on)
+            self.mcp_access_action.blockSignals(False)
+            self.statusBar().showMessage(
+                f"Couldn't save the Claude (MCP) setting: {exc}", 6000)
+            return
+        self.statusBar().showMessage(
+            f"Claude (MCP) access {'on' if on else 'off'}.", 4000)
 
     def _set_ai_search(self, on: bool) -> None:
         self.ai_cfg["enabled"] = bool(on)
