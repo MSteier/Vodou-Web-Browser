@@ -47,7 +47,7 @@ needed — the server puts the repo on `sys.path` itself.
 **Claude Code:**
 
 ```sh
-claude mcp add vodou -- python "C:/Users/Pacma/OneDrive/Desktop/Python Programs/privacy_browser/mcp_server/vodou_mcp.py"
+claude mcp add vodou -- python "C:/Users/Pacma/Desktop/Python Programs/privacy_browser/mcp_server/vodou_mcp.py"
 ```
 
 **Claude Desktop** — add to `claude_desktop_config.json`:
@@ -57,13 +57,22 @@ claude mcp add vodou -- python "C:/Users/Pacma/OneDrive/Desktop/Python Programs/
   "mcpServers": {
     "vodou": {
       "command": "python",
-      "args": ["C:/Users/Pacma/OneDrive/Desktop/Python Programs/privacy_browser/mcp_server/vodou_mcp.py"]
+      "args": ["C:/Users/Pacma/Desktop/Python Programs/privacy_browser/mcp_server/vodou_mcp.py"]
     }
   }
 }
 ```
 
 Restart the client; the five `vodou_*` tools appear.
+
+## Turning Claude's access on and off
+
+Vodou's menu has a kill switch: **Settings > Local AI > Allow Claude (MCP) access**.
+It writes `~/.vodou/mcp_enabled.json`, which this server re-reads on every tool
+call (see `mcp_toggle.py`). Off means every tool refuses with an error and
+returns no data; the server itself keeps running, so Claude Desktop never shows
+a "couldn't start" error and no client restart is needed. Default is on; a
+corrupt switch file counts as off (fail closed).
 
 ## Configuration
 

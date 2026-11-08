@@ -459,5 +459,7 @@
   "Plugins": "ప్లగిన్‌లు",
   "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "ప్లగిన్‌లు Vodou యొక్క సమీక్షించిన జాబితా నుండి వస్తాయి — విశ్వసనీయ మూలం. ప్రతి ఒక్కటి జాబితా చేయబడిన సైట్‌లలో మాత్రమే, వేరుచేయబడిన సాండ్‌బాక్స్‌లో నడుస్తుంది. ప్లగిన్‌ను ఎనేబుల్ చేయడానికి చెక్‌బాక్స్‌ను టోగుల్ చేయండి; మార్పులు మీరు తర్వాత లోడ్ చేసే పేజీలలో అమలులోకి వస్తాయి (ఇప్పుడే వర్తింపజేయడానికి తెరిచిన టాబ్‌లను రీలోడ్ చేయండి).",
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "ఈ ప్లగిన్ కోడ్ యొక్క SHA-256 ఫింగర్‌ప్రింట్ (టాంపర్-ఎవిడెంట్ గుర్తింపు).",
-  "Sites": "సైట్‌లు"
+  "Sites": "సైట్‌లు",
+  "Allow Claude (MCP) access": "Claude (MCP) యాక్సెస్‌ను అనుమతించు",
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Vodou MCP సర్వర్ ద్వారా Vodou శోధన, బుక్‌మార్క్‌లు, ట్యాబ్‌లను Claude ఉపయోగించేలా అనుమతిస్తుంది. దీన్ని ఆఫ్ చేస్తే అన్ని టూల్స్ వెంటనే బ్లాక్ అవుతాయి."
 }

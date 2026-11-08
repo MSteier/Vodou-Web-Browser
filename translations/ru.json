@@ -459,5 +459,7 @@
   "Plugins": "Плагины",
   "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "Плагины поступают из проверенного каталога Vodou — надёжного источника. Каждый работает только на указанных сайтах и в изолированной песочнице. Установите флажок, чтобы включить плагин; изменения вступят в силу на следующих загружаемых страницах (перезагрузите открытые вкладки, чтобы применить сейчас).",
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "Отпечаток SHA-256 кода этого плагина (защищённая от подделки идентичность).",
-  "Sites": "Сайты"
+  "Sites": "Сайты",
+  "Allow Claude (MCP) access": "Разрешить доступ Claude (MCP)",
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Позволяет Claude использовать поиск, закладки и вкладки Vodou через MCP-сервер Vodou. Отключение мгновенно блокирует все инструменты."
 }

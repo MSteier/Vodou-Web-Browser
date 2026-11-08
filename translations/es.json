@@ -459,5 +459,7 @@
   "Plugins": "Complementos",
   "Plugins come from Vodou's reviewed catalog — a trusted source. Each runs only on the sites listed and inside an isolated sandbox. Toggle the checkbox to enable a plugin; changes take effect on pages you load next (reload open tabs to apply now).": "Los complementos provienen del catálogo revisado de Vodou — una fuente de confianza. Cada uno se ejecuta solo en los sitios indicados y dentro de un sandbox aislado. Marca la casilla para activar un complemento; los cambios surten efecto en las próximas páginas que cargues (recarga las pestañas abiertas para aplicarlo ahora).",
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "Huella SHA-256 del código de este complemento (identidad a prueba de manipulación).",
-  "Sites": "Sitios"
+  "Sites": "Sitios",
+  "Allow Claude (MCP) access": "Permitir acceso de Claude (MCP)",
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Permite que Claude use la búsqueda, los marcadores y las pestañas de Vodou a través del servidor MCP de Vodou. Al desactivarlo, se bloquean todas las herramientas al instante."
 }
