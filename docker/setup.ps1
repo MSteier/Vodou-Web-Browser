@@ -62,4 +62,5 @@ Write-Host "Done. Next:"
 Write-Host "  docker compose up -d                  # search only"
 Write-Host "  docker compose --profile ai up -d     # search + AI summaries"
 Write-Host ""
-Write-Host "Then open Vodou — it defaults to https://localhost/searxng"
+Write-Host "Then point Vodou at https://localhost/searxng: ☰ → Settings → Start page & search,"
+Write-Host 'or put {"searxng_url": "https://localhost/searxng"} in ~\.vodou\config.json.'

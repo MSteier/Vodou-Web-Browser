@@ -50,7 +50,7 @@ WRAPPED_FILES = ("main.py", "vault_ui.py", "about.py", "bookmark_health_ui.py",
 #   onboarding.py: reuses main.py's SEARCH_ENGINES keys and theme.THEMES
 #   keys (same dynamic-value sets above), tr()'d via a loop variable.
 EXPECTED_DYNAMIC_VALUES = (
-    {"SearXNG (local, private)", "DuckDuckGo", "Startpage", "Brave Search",
+    {"Cowl", "SearXNG (local, private)", "DuckDuckGo", "Startpage", "Brave Search",
      "Google"}
     | {"English", "Spanish", "French", "German", "Portuguese", "Chinese",
        "Japanese", "Russian", "Arabic", "Hindi", "Bengali", "Tamil",
@@ -70,7 +70,7 @@ EXPECTED_DYNAMIC_VALUES = (
 # translated, so they're excluded from every catalog and left to tr()'s
 # English fallback. Includes about.py's engine_versions() dict keys that
 # are pure proper nouns (Vodou itself, Qt, PyQt6, Python, Qt WebEngine).
-BRAND_NAMES = {"DuckDuckGo", "Startpage", "Brave Search", "Google",
+BRAND_NAMES = {"Cowl", "DuckDuckGo", "Startpage", "Brave Search", "Google",
                "Vodou", "Qt", "PyQt6", "Python", "Qt WebEngine"}
 
 # Every language with a shipped catalog (translations/<code>.json).

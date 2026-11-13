@@ -576,11 +576,10 @@ def secure_config_dir(path: Path = VAULT_DIR) -> None:
         pass  # a locked or exotic filesystem must not stop the browser
 
 
-def _searxng_base() -> str:
-    """Where Vodou's search lives. Defaults to the bundled Docker stack
-    (https://localhost/searxng); override with the VODOU_SEARXNG_URL
-    environment variable or ~/.vodou/config.json {"searxng_url": "..."} to
-    point at your own SearXNG. See docker/README.md."""
+def _configured_searxng() -> str:
+    """The user's own SearXNG, if they pointed Vodou at one: the
+    VODOU_SEARXNG_URL environment variable or ~/.vodou/config.json
+    {"searxng_url": "..."}. Empty when neither is set. See docker/README.md."""
     url = os.environ.get("VODOU_SEARXNG_URL", "").strip()
     if not url:
         try:
@@ -589,15 +588,38 @@ def _searxng_base() -> str:
             url = str(data.get("searxng_url", "")).strip()
         except (OSError, ValueError, TypeError):
             url = ""
-    return (url or "https://localhost/searxng").rstrip("/")
+    return url.rstrip("/")
 
 
-SEARXNG_BASE = _searxng_base()
-HOME_URL = SEARXNG_BASE
+# Cowl: Mist Technologies' public SearXNG instance. It works out of the box,
+# so a fresh install has a working start page and search without running
+# SearXNG locally. Engines see Cowl's server, never the user's IP.
+COWL_URL = "https://search.misttechnologies.net"
+COWL_HOST = QUrl(COWL_URL).host()
+LOCAL_SEARXNG_URL = "https://localhost/searxng"
+
+_USER_SEARXNG = _configured_searxng()
+# The SearXNG the local-AI web search and the summary button talk to: the
+# user's own instance if configured, else the bundled Docker stack. This stays
+# local so AI web search never depends on a public server.
+SEARXNG_BASE = _USER_SEARXNG or LOCAL_SEARXNG_URL
+# The default start page and address-bar search: the user's own SearXNG when
+# they configured one, otherwise Cowl.
+DEFAULT_SEARCH_BASE = _USER_SEARXNG or COWL_URL
+HOME_URL = DEFAULT_SEARCH_BASE + "/"
 # The host half of SEARXNG_BASE, e.g. "host.docker.internal" for the bundled
 # Docker deployment's default — see ai_search.is_search_results, which needs
 # this to recognize the actual results page rather than only localhost.
 SEARXNG_HOST = QUrl(SEARXNG_BASE).host()
+
+
+def _is_search_results(url: QUrl) -> bool:
+    """A results page on the local SearXNG or on Cowl: the summary button
+    reads the results from the page itself and summarizes them with the
+    local Ollama, so it works the same on either instance."""
+    return (is_search_results(url, SEARXNG_HOST)
+            or is_search_results(url, COWL_HOST))
+
 
 # On-disk half of the hybrid profile: capped HTTP cache + site storage.
 # Created by the engine at startup, shredded on every exit and at the next
@@ -607,12 +629,14 @@ PROFILE_DIR = Path.home() / ".vodou" / "profile"
 # Chrome's zoom ladder; the engine accepts factors from 0.25 to 5.0.
 ZOOM_LEVELS = (0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0,
                1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0)
-SEARCH_URL = SEARXNG_BASE + "/search?q={}"
+SEARCH_URL = DEFAULT_SEARCH_BASE + "/search?q={}"
 
 # The address bar sends searches to SEARCH_URL, with {} where the query goes.
-# SearXNG (local) keeps queries on your machine; the rest are external
-# services. Offered in the Settings ▸ Search engine menu, plus a Custom option.
+# Cowl is Mist's private SearXNG instance; SearXNG (local) keeps queries on
+# your machine; the rest are external services. Offered in the Settings ▸
+# Search engine menu, plus a Custom option.
 SEARCH_ENGINES = {
+    "Cowl": COWL_URL + "/search?q={}",
     "SearXNG (local, private)": SEARXNG_BASE + "/search?q={}",
     "DuckDuckGo": "https://duckduckgo.com/?q={}",
     "Startpage": "https://www.startpage.com/sp/search?query={}",
@@ -3229,11 +3253,11 @@ class BrowserWindow(QMainWindow):
 
     def set_start_page(self) -> None:
         """Let the user pick the page new tabs and Home open. Blank restores
-        the private SearXNG default. Takes effect on the next new tab / Home."""
+        the private search default (Cowl, or the user's own SearXNG). Takes effect on the next new tab / Home."""
         global HOME_URL
         text, ok = QInputDialog.getText(
             self, "Set start page",
-            "Start page URL (leave blank for the private SearXNG page):",
+            "Start page URL (leave blank for the private search page):",
             QLineEdit.EchoMode.Normal, HOME_URL)
         if not ok:
             return
@@ -3250,10 +3274,10 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Start page set to {value} — opens on the next new tab.", 5000)
         else:
-            HOME_URL = SEARXNG_BASE
+            HOME_URL = DEFAULT_SEARCH_BASE + "/"
             _save_pref("start_page", "")
             self.statusBar().showMessage(
-                "Start page reset to the private SearXNG page.", 5000)
+                "Start page reset to the private search page.", 5000)
 
     def set_startup_page(self) -> None:
         """Let the user pick the page a fresh launch opens, independently of the
@@ -3291,8 +3315,9 @@ class BrowserWindow(QMainWindow):
         """Populate the Settings ▸ Search engine submenu: one exclusive radio
         per built-in engine, plus a Custom option."""
         menu.setToolTip(tr(
-            "Where address-bar searches go. SearXNG (local) keeps queries on "
-            "your machine; the others are external services."))
+            "Where address-bar searches go. Cowl hides your IP address from "
+            "search engines; SearXNG (local) keeps queries on your machine; "
+            "the others are external services."))
         group = QActionGroup(self)
         group.setExclusive(True)
         self._engine_actions = {}
@@ -5324,7 +5349,7 @@ class BrowserWindow(QMainWindow):
     def open_ai_panel(self) -> None:
         """The ✨ button: summarize if this is a results page, else ask."""
         view = self.current_view()
-        if view is not None and is_search_results(view.url(), SEARXNG_HOST):
+        if view is not None and _is_search_results(view.url()):
             self.summarize_search()
         else:
             self.ask_ai()
@@ -5355,7 +5380,7 @@ class BrowserWindow(QMainWindow):
         if view is None:
             return
         url = view.url()
-        if not is_search_results(url, SEARXNG_HOST):
+        if not _is_search_results(url):
             self.statusBar().showMessage(
                 "Run a search first, then use the ✨ button to summarize the "
                 "results.", 6000)

@@ -120,7 +120,7 @@ class OnboardingDialog(QDialog):
         return self._page(
             tr("Welcome to Vodou"),
             tr("Vodou is a privacy-first browser: an encrypted password vault, "
-               "private search through your own local SearXNG instance, "
+               "private search through Cowl or your own SearXNG instance, "
                "on-device AI summaries that never leave your machine, and no "
                "telemetry. The next few screens set up the basics — every one "
                "of them can be changed later from the ☰ menu."))
@@ -130,9 +130,10 @@ class OnboardingDialog(QDialog):
         names = list(SEARCH_ENGINES.keys())
         page = self._page(
             tr("Choose a search engine"),
-            tr("This is what Vodou's address bar searches with. SearXNG "
-               "(selected) runs locally and never shares your query with a "
-               "third party."))
+            tr("This is what Vodou's address bar searches with. Cowl (selected) "
+               "is a private SearXNG search that never shows search engines "
+               "your IP address. SearXNG (local) keeps your queries entirely "
+               "on your machine."))
         listw = QListWidget()
         listw.addItems([tr(name) for name in names])
         listw.setCurrentRow(0)
