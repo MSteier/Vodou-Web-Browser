@@ -43,8 +43,12 @@ docker compose up -d
 docker compose --profile ai up -d
 ```
 
-Then launch Vodou. It defaults to `https://localhost/searxng` for search and
-`http://127.0.0.1:11434` for AI summaries — exactly what this stack serves.
+Then point Vodou at it: create `~/.vodou/config.json` with
+`{"searxng_url": "https://localhost/searxng"}` (or set `VODOU_SEARXNG_URL`)
+and restart Vodou, so its start page and search use this stack instead of the
+public Cowl instance. AI web search uses `https://localhost/searxng` and AI
+summaries use `http://127.0.0.1:11434` by default — exactly what this stack
+serves.
 
 To stop: `docker compose down` (add `--profile ai` if you started it). Data
 (SearXNG cache, Ollama models) persists in named volumes across restarts.

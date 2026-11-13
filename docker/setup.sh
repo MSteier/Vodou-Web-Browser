@@ -60,5 +60,6 @@ Done. Next:
   docker compose up -d                  # search only
   docker compose --profile ai up -d     # search + AI summaries
 
-Then open Vodou — it defaults to https://localhost/searxng
+Then point Vodou at https://localhost/searxng: ☰ → Settings → Start page & search,
+or put {"searxng_url": "https://localhost/searxng"} in ~/.vodou/config.json.
 EOF

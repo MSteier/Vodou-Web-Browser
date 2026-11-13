@@ -15,8 +15,8 @@
 #   3. docker compose up -d                        — search only
 #      docker compose --profile ai up -d           — search + AI summaries
 #
-# Then run Vodou (see ../README.md). It defaults to https://localhost/searxng
-# and http://127.0.0.1:11434, which is exactly what this stack serves.
+# Then point Vodou at https://localhost/searxng (see ../README.md, "If Cowl is
+# down"). AI features use it and http://127.0.0.1:11434, which this stack serves.
 
 services:
   redis:
