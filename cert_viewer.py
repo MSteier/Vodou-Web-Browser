@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import socket
 import ssl
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -70,7 +71,7 @@ def _handshake(host: str, port: int, timeout: float,
             "Certificate inspection is unavailable while a proxy is active; "
             "no direct connection was made."))
     if verify:
-        context = ssl.create_default_context()
+        context = _verified_context()
     else:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
@@ -84,6 +85,69 @@ def _handshake(host: str, port: int, timeout: float,
                 trust_error=None,
                 tls_version=tls.version(),
                 cipher=cipher[0] if cipher else None)
+
+
+# -- trust store -------------------------------------------------------------
+
+_SERVER_AUTH_OID = ssl.Purpose.SERVER_AUTH.oid
+
+
+def _unexpired_store_ders(entries, now: datetime | None = None) -> list[bytes]:
+    """Filter ssl.enum_certificates()-style (der, encoding, trust) entries.
+
+    Keeps the entries Python's own load_default_certs() would trust (X.509,
+    trusted for TLS server auth) minus any certificate that has expired.
+
+    Why: Windows keeps old intermediates and cross-signs in its "CA" store,
+    and Python loads that store as *trust anchors*. OpenSSL looks in the
+    trust store first when building a chain, so a stale copy of an issuer
+    beats the valid one the server sent. Real case: the 2020 "ISRG Root X2"
+    cross-sign from ISRG Root X1 (expired 2025-09-15) made every Let's
+    Encrypt ECDSA chain fail with "certificate has expired" even though the
+    server's chain was fine. An expired cert can never help a verification,
+    so dropping it only removes the wrong choice.
+
+    A certificate that cryptography can't parse is kept, not dropped, so it
+    behaves exactly as it would under ssl.create_default_context().
+    """
+    now = now or datetime.now(timezone.utc)
+    kept = []
+    for der, encoding, trust in entries:
+        if encoding != "x509_asn":
+            continue
+        if not (trust is True or _SERVER_AUTH_OID in trust):
+            continue
+        try:
+            with warnings.catch_warnings():
+                # Some legacy roots have non-positive serials; cryptography
+                # warns about them but they are still the system's choice.
+                warnings.simplefilter("ignore")
+                cert = x509.load_der_x509_certificate(der)
+            if _validity(cert)[1] < now:
+                continue
+        except ValueError:
+            pass
+        kept.append(der)
+    return kept
+
+
+def _verified_context() -> ssl.SSLContext:
+    """ssl.create_default_context(), minus expired Windows store certs."""
+    if not hasattr(ssl, "enum_certificates"):  # not Windows: stdlib is fine
+        return ssl.create_default_context()
+    ders = []
+    for store in ("CA", "ROOT"):  # the stores load_default_certs() reads
+        try:
+            ders += _unexpired_store_ders(ssl.enum_certificates(store))
+        except OSError:  # store unreadable: load_default_certs skips it too
+            pass
+    if not ders:
+        return ssl.create_default_context()
+    # Passing cadata keeps create_default_context()'s hardening (protocol
+    # floor, VERIFY_X509_STRICT, ...) but loads our list instead of the stores.
+    context = ssl.create_default_context(cadata=b"".join(ders))
+    context.set_default_verify_paths()  # honour SSL_CERT_FILE like stdlib
+    return context
 
 
 # -- formatting helpers ------------------------------------------------------
