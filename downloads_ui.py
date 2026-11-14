@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from i18n import tr
 from spoofcheck import download_risk
 
 _STATE = QWebEngineDownloadRequest.DownloadState
@@ -47,6 +48,7 @@ class DownloadRow(QFrame):
         super().__init__(parent)
         self.item = item
         self.finished = False
+        self._action = "cancel"
         self.setObjectName("downloadRow")
         self.setFrameShape(QFrame.Shape.StyledPanel)
 
@@ -60,7 +62,7 @@ class DownloadRow(QFrame):
         self.name_label.setTextFormat(Qt.TextFormat.PlainText)
         self.name_label.setStyleSheet("font-weight: 600;")
         top.addWidget(self.name_label, 1)
-        self.action_btn = QPushButton("Cancel")
+        self.action_btn = QPushButton(tr("Cancel"))
         self.action_btn.clicked.connect(self._on_action)
         top.addWidget(self.action_btn)
         col.addLayout(top)
@@ -71,7 +73,8 @@ class DownloadRow(QFrame):
         self.bar.setFixedHeight(8)
         col.addWidget(self.bar)
 
-        self.status_label = QLabel(f"Starting — from {item.url().host()}")
+        self.status_label = QLabel(
+            tr("Starting — from {host}").format(host=item.url().host()))
         self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.status_label.setStyleSheet("color: gray;")
         col.addWidget(self.status_label)
@@ -94,9 +97,11 @@ class DownloadRow(QFrame):
             self.bar.setRange(0, 100)
             self.bar.setValue(int(got * 100 / total))
             self.status_label.setText(
-                f"{human_size(got)} of {human_size(total)}")
+                tr("{got} of {total}").format(
+                    got=human_size(got), total=human_size(total)))
         else:
-            self.status_label.setText(f"{human_size(got)} downloaded")
+            self.status_label.setText(
+                tr("{amount} downloaded").format(amount=human_size(got)))
 
     def _on_state(self, state) -> None:
         if state == _STATE.DownloadCompleted:
@@ -109,14 +114,17 @@ class DownloadRow(QFrame):
             except RuntimeError:
                 where, total = Path.home() / "Downloads", -1
             size = f" ({human_size(total)})" if total > 0 else ""
-            self.status_label.setText(f"Completed{size} — {where}")
-            self.action_btn.setText("Open folder")
+            self.status_label.setText(
+                tr("Completed{size} — {where}").format(size=size, where=where))
+            self.action_btn.setText(tr("Open folder"))
+            self._action = "open"
         elif state == _STATE.DownloadCancelled:
             self.finished = True
             self.bar.setRange(0, 100)
             self.bar.setValue(0)
-            self.status_label.setText("Cancelled")
-            self.action_btn.setText("Remove")
+            self.status_label.setText(tr("Cancelled"))
+            self.action_btn.setText(tr("Remove"))
+            self._action = "remove"
         elif state == _STATE.DownloadInterrupted:
             self.finished = True
             self.bar.setRange(0, 100)
@@ -124,9 +132,10 @@ class DownloadRow(QFrame):
             try:
                 reason = self.item.interruptReasonString()
             except RuntimeError:
-                reason = "interrupted"
-            self.status_label.setText(f"Failed — {reason}")
-            self.action_btn.setText("Remove")
+                reason = tr("interrupted")
+            self.status_label.setText(tr("Failed — {reason}").format(reason=reason))
+            self.action_btn.setText(tr("Remove"))
+            self._action = "remove"
 
     def _on_action(self) -> None:
         if not self.finished:
@@ -135,7 +144,7 @@ class DownloadRow(QFrame):
             except RuntimeError:
                 pass
             return
-        if self.action_btn.text() == "Open folder":
+        if self._action == "open":
             try:
                 folder = self.item.downloadDirectory()
             except RuntimeError:
@@ -151,16 +160,16 @@ class DownloadsDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setWindowTitle("Downloads")
+        self.setWindowTitle(tr("Downloads"))
         self.resize(540, 420)
         self.setModal(False)
 
         outer = QVBoxLayout(self)
 
-        self.empty_label = QLabel(
+        self.empty_label = QLabel(tr(
             "No downloads this session.\n"
             "(Like everything in Vodou, the list clears when you close "
-            "the browser.)")
+            "the browser.)"))
         self.empty_label.setStyleSheet("color: gray;")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer.addWidget(self.empty_label)
@@ -178,11 +187,11 @@ class DownloadsDialog(QDialog):
         outer.addWidget(scroll, 1)
 
         buttons = QHBoxLayout()
-        clear_btn = QPushButton("Clear finished")
+        clear_btn = QPushButton(tr("Clear finished"))
         clear_btn.clicked.connect(self.clear_finished)
         buttons.addWidget(clear_btn)
         buttons.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(tr("Close"))
         close_btn.setDefault(True)
         close_btn.clicked.connect(self.hide)
         buttons.addWidget(close_btn)

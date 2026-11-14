@@ -1,11 +1,36 @@
 # Vodou Browser
 
+Version **1.54.14** completes UI localization: the Check Bookmarks,
+Downloads, certificate viewer, first-run onboarding wizard, Chrome/Edge
+import, and Plugins dialogs are now translated into all 14 supported
+languages, joining the ☰ menu, password vault, and About/update dialog from
+earlier releases. Every dialog in the browser is now localized.
+
+1.54.13 added Indian languages: Hindi for the interface (the ☰
+menu, password vault, and About/update dialog), Hindi and Tamil spell check
+(offline dictionaries bundled, as before), and page translation into Hindi,
+Bengali, Tamil, Telugu, Marathi, and Gujarati. Bengali, Tamil, Telugu,
+Marathi, and Gujarati can already be chosen as the interface language but
+show English until their translations are added. It also fixed the Windows
+build, which was missing the interface translations and spell-check
+dictionaries.
+
+1.54.12 added one-click import of bookmarks/passwords from Chrome
+or Edge, a first-run onboarding wizard, multi-language spell check (offline
+dictionaries bundled for 7 languages — nothing is ever downloaded), and
+local-AI page translation into 8 languages. It also starts full UI
+localization: the ☰ menu, password vault, and About/update dialog are now
+available in Spanish, French, German, Portuguese, Chinese, Japanese, Russian,
+and Arabic (machine-translated so far; more dialogs follow in later
+releases). Background tabs now freeze after 15 minutes (up from 60 seconds)
+and the old discard-timeout setting is gone — tabs are always frozen, never
+discarded.
+
 Version **1.54.11** automatically applies the glass-blur workaround on
 my.replika.ai to address flickering chat inputs and messages, and removes the
 Graphics submenu. Replika panels keep their transparency without the blur.
-
-Version **1.54.10** gives Check Bookmarks a progress bar and a clear "scan
-complete" report, and greys out every button but Stop scan while a scan runs.
+1.54.10 gives Check Bookmarks a progress bar and a clear "scan complete"
+report, and greys out every button but Stop scan while a scan runs.
 1.54.9 trimmed the Docker image (GTK 3 and CUPS removed: 5 High / 7 Medium /
 66 Low in Docker Scout, nothing fixable), 1.54.8 removed the AI bookmark
 review, and 1.54.7 removed pip and fluxbox from the image. 1.54.6 fixed an
@@ -124,8 +149,8 @@ default control-disabled launch. The environment itself is not included in
 the repository; each checkout installs its own dependencies.
 
 Updating Python does not change Qt WebEngine's Chromium base. The verified
-Windows runtime uses Qt WebEngine 6.11.2 on a Chromium 140 base, with security
-fixes backported through Chrome 151. About Vodou shows both numbers
+Windows runtime uses Qt WebEngine 6.140 (PyQt6 6.12) on a Chromium 140 base,
+with security fixes backported through Chrome 152. About Vodou shows both numbers
 (*Chromium engine* and *Security patches*); compare the second with Chrome's
 version when judging how current the engine is.
 
@@ -138,13 +163,19 @@ wiping the active profile. This forwarding also works with remote control off.
 > `python -m pip install pip-system-certs` once, then retry — it teaches pip to
 > trust your system certificate store.
 
-**Optional — private search & local AI (one command):** the home page and
-default search point at a local
-[SearXNG](https://github.com/searxng/searxng) instance
-(`https://localhost/searxng`), and the local AI features use a local
-[Ollama](https://ollama.com). Vodou works fine without either (just type full
-URLs), but the [`docker/`](docker/) bundle stands up the whole backend
-reproducibly so it works the same on any machine:
+**Private search works out of the box.** Vodou's start page and default
+search use [Cowl](https://search.misttechnologies.net), Mist Technologies'
+public [SearXNG](https://github.com/searxng/searxng) instance. Cowl sends your
+searches to Google, Bing, Brave and others on your behalf, so those engines see
+Cowl's server, never your IP address. Cowl keeps no search logs and has no
+ads, and its full setup is open source at
+[github.com/MSteier/Cowl](https://github.com/MSteier/Cowl). Nothing to install.
+
+**Optional — your own SearXNG & local AI (one command):** if you'd rather not
+trust anyone's server (or Cowl is ever down), run SearXNG on your own machine.
+The local AI features also use a local [Ollama](https://ollama.com). The
+[`docker/`](docker/) bundle stands up the whole backend reproducibly so it
+works the same on any machine:
 
 ```bash
 cd docker
@@ -155,16 +186,46 @@ docker compose up -d              # search only
 docker compose --profile ai up -d
 ```
 
-**Start the backend *before* launching Vodou** (or search will fail until it's
-up — Vodou opens `https://localhost/searxng` on startup). A good first-run
-order is: bring the stack up with `docker compose up -d`, wait a few seconds
-for the containers to be healthy, then `python main.py`. The stack keeps
-running in the background across restarts, so this is a one-time thing per
-boot (or set the containers to start on login in Docker Desktop).
+That serves SearXNG at `https://localhost/searxng`. Then switch Vodou to it
+(see [If Cowl is down: use your own SearXNG](#if-cowl-is-down-use-your-own-searxng)
+below). The AI web search always uses this local instance, never Cowl. The
+stack keeps running in the background across restarts, so this is a one-time
+thing per boot (or set the containers to start on login in Docker Desktop).
 
 See [`docker/README.md`](docker/README.md) for details (GPU, custom models,
-port conflicts). To point Vodou at a search instance elsewhere, set
-`VODOU_SEARXNG_URL` or `~/.vodou/config.json` `{"searxng_url": "…"}`.
+port conflicts).
+
+### If Cowl is down: use your own SearXNG
+
+Cowl is a free public service, so it can occasionally be down or busy. You can
+switch Vodou to a SearXNG instance on your own machine in a few minutes:
+
+1. **Install [Docker](https://docs.docker.com/get-docker/)** (Docker Desktop on
+   Windows/macOS).
+2. **Start SearXNG** from this repo's `docker/` folder:
+
+   ```bash
+   cd docker
+   cp .env.example .env
+   ./setup.sh                    # Windows (PowerShell): ./setup.ps1
+   docker compose up -d
+   ```
+
+   Wait a few seconds, then open `https://localhost/searxng` in Vodou. You
+   should see the SearXNG search page.
+3. **Point Vodou at it.** Either:
+   - **From the menu:** ☰ → Settings → Start page & search → **Search engine**
+     → **SearXNG (local, private)**, then **Set start page…** →
+     `https://localhost/searxng`; **or**
+   - **Everywhere at once:** create `~/.vodou/config.json` (on Windows,
+     `C:\Users\<you>\.vodou\config.json`) containing
+     `{"searxng_url": "https://localhost/searxng"}` and restart Vodou. Vodou
+     then uses your instance as its default start page and search engine.
+     (The `VODOU_SEARXNG_URL` environment variable does the same.)
+
+To go back to Cowl, pick **Cowl** under ☰ → Settings → Start page & search →
+**Search engine**, clear the start page (blank restores the default), and
+remove `searxng_url` from `config.json` if you set it.
 
 **Optional — desktop shortcut / icon:** on Windows the repo ships `vodou.ico`
 for creating a desktop or Start-menu shortcut that points at `python main.py`.
@@ -203,11 +264,11 @@ it's not supported there.
 | HTTPS-first | Bare domains typed in the address bar load over HTTPS |
 | Location & region emulation | ☰ menu → Settings → Privacy & security → **Location & region…** — pick a region (New York, London, Tokyo, Sydney, Paris, Berlin, Toronto, São Paulo) and sites see that region's environment, driven by one coherent **Location Profile** so nothing contradictory leaks. **Language & locale** are emulated **natively** (no script, no debug port): `navigator.language` / `navigator.languages` / `Accept-Language` live, and `Intl` date/number/currency formatting after a restart (via Chromium's `--lang`). Optionally tick **"Also emulate geolocation & timezone"** to spoof `navigator.geolocation` coordinates and the `Intl`/`Date` timezone via a script injected before page load, across frames. **Honest scope, stated in the UI:** the geolocation/timezone part is script-based — it does **not** reach web/service workers, is **detectable** by a determined site, and is **not undetectable**; nothing here changes your **IP** (use a VPN/proxy for that). A built-in Diagnostics view spells out exactly what is and isn't emulated. **Per-site overrides** (Location → **Per-site overrides…**) give chosen hosts their own geolocation & timezone — resolved per frame by hostname, so different sites can sit in different regions at once; the browser *language* stays the global setting (one profile can't vary `Accept-Language` per site without leaking across tabs). **Match VPN location** (Location → **Match VPN location…**) is an **opt-in, never-automatic** one-shot HTTPS lookup of your current public IP's region (via ipwho.is) that then emulates it — it names the service and asks first, sees only the IP you're already browsing from, and does **not** change your IP. Works the same over **IPv4 or IPv6**, whichever your connection uses. A repeat click within a few seconds reuses that lookup instead of sending another request, and tells you if it's now a **different exit IP than last time** (your VPN reconnected somewhere else) or the same one — that comparison is kept in memory for the session only, never written to disk. A failed lookup says why (timed out, rate-limited, no network, or an unrecognized response) rather than a generic error. **Honest limits:** Vodou is a browser with **no VPN client of its own** — it does not detect when a VPN connects, disconnects, or changes servers; you connect your VPN/proxy yourself (OS-level), then click the button. There is also no OS/browser **native geolocation-provider API** this can hook into (confirmed: QtWebEngine exposes none to an embedding app), so "Match VPN location" reuses the same script-based override as manual region emulation above, with the same detectability caveat. Unchecking **"Emulate a region…"** is the closest thing to "VPN disconnected" this feature has: it turns emulation off again — not "restore your real location", since Vodou never hands a site your real geolocation regardless (see *Location Guard*) |
 | Content Credentials (C2PA) | Right-click any image → **Check content credentials** to verify its provenance **on your device** (nothing leaves the machine): who signed it, when, whether the credential declares it **AI/algorithmically generated**, and whether it's **untampered**. Signer trust is checked against the bundled official **C2PA trust list**, so "Verified — trusted signer" means the issuer is vetted, while a valid-but-unlisted signer is flagged as caution. This is honest provenance, **not a deepfake detector**: it can only check media that *carries* a credential, and "no credential" means **unknown, never authentic**. Powered by the official Content Authenticity Initiative library |
-| Private search | Local SearXNG instance (`https://localhost/searxng`) is the default start page and search engine — queries never go to a third-party engine directly. Self-signed certificates are accepted for localhost only. |
-| Start page, startup page & search engine | All yours to change (☰ menu → Settings → Start page & search). **Set start page…** picks the page new tabs and the Home button open (blank restores the private SearXNG page). **Set startup page…** picks the page a fresh *launch* opens, independently of new tabs (blank = open your start page on launch too). **Search engine** chooses where address-bar searches go — SearXNG (local, keeps queries on your machine) or an external service (DuckDuckGo, Startpage, Brave, Google), plus a **Custom…** template. Choosing an external engine sends your searches to that service; the SearXNG default keeps them local. Start page, startup page, and search engine are all integrity-signed, so adware can't silently hijack them |
+| Private search | [Cowl](https://search.misttechnologies.net), Mist Technologies' public SearXNG instance, is the default start page and search engine — search engines see Cowl's server, never your IP. Prefer to trust no one? Run your own SearXNG (`https://localhost/searxng`, see *If Cowl is down* above) and Vodou uses it instead. Self-signed certificates are accepted for localhost only. |
+| Start page, startup page & search engine | All yours to change (☰ menu → Settings → Start page & search). **Set start page…** picks the page new tabs and the Home button open (blank restores the private search page: Cowl, or your own SearXNG if configured). **Set startup page…** picks the page a fresh *launch* opens, independently of new tabs (blank = open your start page on launch too). **Search engine** chooses where address-bar searches go — Cowl (private, hides your IP from search engines), SearXNG (local, keeps queries on your machine), or an external service (DuckDuckGo, Startpage, Brave, Google), plus a **Custom…** template. Choosing an external engine sends your searches straight to that service. Start page, startup page, and search engine are all integrity-signed, so adware can't silently hijack them |
 | Browser Setting Protection | ☰ menu → Settings → Privacy & security → **Browser Setting Protection…**. The three settings above are signed with a per-install, owner-only key and **verified on every launch**. If any of them is changed on disk by something other than Vodou's own Settings UI — adware, an installer, a hand edit — the tampered file fails verification and Vodou **restores your real last-authorized value** (kept in an OS-keystore-sealed snapshot — Windows DPAPI, or a desktop-keyring key on Linux), not just a blank default. Every blocked change is recorded in a sealed **history** (timestamp, setting, your value → attempted value, action) you can review and clear from the panel. **Honest scope:** Vodou is a QtWebEngine browser, so web pages have no path to these settings and there are no extensions, sync, or enterprise policy to guard against — the protection targets the one real threat, another program rewriting the settings file on disk. Values are shown as plain text since an attempted value is attacker-controlled |
 | Start-page hijack protection | Only *you* can change the start page or search engine, and only through the Settings dialog. A start page can only ever be a normal `http`/`https` web page — `file:`, `chrome:`, `about:`, `data:`, `javascript:` and the like are refused. Vodou **signs** the saved settings with a per-install key (`~/.vodou/prefs.key`); if adware, a synced edit, or a script changes `~/.vodou/prefs.json` behind your back, the signature no longer matches, so on the next launch Vodou **restores your real last-authorized value** from an OS-keystore-sealed snapshot (or the private defaults if it holds none) and tells you — see *Browser Setting Protection* above, which also logs every blocked attempt. (Edit these through Settings, not by hand — a hand-edited file trips the same guard.) |
-| Light on memory | Background tabs don't hold RAM forever. A tab left idle for a minute is **frozen** (its scripts and timers pause); left past the discard timeout, it is **discarded** — its render process is freed and the page reloads the moment you return to it. The discard timeout is yours to set under ☰ → Settings → **Idle tab memory** (5 minutes, 10 minutes — the default, 30 minutes, 1 hour, or **Never** to keep every tab in memory and only ever freeze). Tabs playing audio, downloading, or otherwise busy are left running (Vodou defers to the engine's own judgement), and **pinned tabs are never touched**. Switching to a tab always wakes it instantly |
+| Light on memory | Background tabs don't hold RAM forever. A tab left idle for **15 minutes** is **frozen**: its scripts and timers pause until you come back. Tabs are only ever frozen, never discarded, so returning to one never forces a reload. Tabs playing audio, downloading, in a call, or otherwise busy are left running (Vodou defers to the engine's own judgement), and **pinned tabs are never touched**. Switching to a tab always wakes it instantly |
 | Proxy support | Route all of Vodou's traffic through a proxy under ☰ → Settings → **Network → Proxy…** — an **HTTP** proxy or a **SOCKS5** proxy (host and port). SOCKS5 can **resolve DNS at the proxy** rather than locally, so your lookups don't leak to the system resolver. If the proxy needs a username and password, they're stored in your **encrypted vault** (never in plain text) and supplied automatically when the vault is unlocked; while it's locked, Vodou asks you once and remembers the answer for the session. Choose "No proxy" to go direct again |
 | Open local files | Type a local path in the address bar and Vodou opens it. It accepts what you'd naturally type on Windows — `C:\Users\you\file.html`, a `file://` URL, forward or back slashes — and normalises it to the form the engine needs. A local page is sandboxed: it **can't reach the network or read other local files**, and web pages can't link into your filesystem |
 | Drag pages in and out | **In:** drag a **link** (or a file from the file manager) onto Vodou's **tab strip** and it opens in a new tab — dropped links pass the same deceptive-site check as anything you type, and `javascript:` payloads are refused. **Out:** drag a **Vodou tab** out of the window and drop it on another browser's tab strip (Chrome, Edge, Firefox) or the desktop, and that page opens there — the tab carries the page's URL (not cookies or login). Dragging a tab *down* still makes a Split View; dragging it *out of the window* sends it elsewhere |

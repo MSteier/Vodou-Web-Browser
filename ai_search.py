@@ -73,7 +73,13 @@ DEFAULTS = {
     "max_turns": 12,
     "web_search": False,
     "web_search_url": "",
+    "translate_language": "English",
 }
+
+# A full page can run well past what a local model's context window can
+# usefully hold; this is a conservative cap, not an attempt at
+# chunked/long-document translation (see translate_prompt).
+TRANSLATE_MAX_CHARS = 8000
 
 
 # Hosts the endpoint may point at. The whole promise of this module is that a
@@ -220,6 +226,22 @@ def build_prompt(query: str, results: list[dict]) -> str:
         "Cite claims with the result number in brackets, like [2]. If the "
         "snippets don't actually answer the query, say so plainly. Do not "
         "invent facts or URLs.",
+    ]
+    return "\n".join(lines)
+
+
+def translate_prompt(text: str, target_language: str) -> str:
+    """One-shot translate instruction for OllamaClient.translate. `text` is
+    truncated to TRANSLATE_MAX_CHARS -- see that constant's comment."""
+    truncated = text[:TRANSLATE_MAX_CHARS]
+    lines = [
+        f"Translate the following text into {target_language}. Output ONLY "
+        "the translation, with no preamble, explanation, or quotation marks "
+        "around it. Preserve the original paragraph breaks.",
+        "",
+        "---",
+        truncated,
+        "---",
     ]
     return "\n".join(lines)
 
@@ -410,6 +432,13 @@ class OllamaClient(QObject):
         """Summarize search results — a one-shot request, no history."""
         self._start([{"role": "user",
                       "content": build_prompt(query, results)}], cfg)
+
+    def translate(self, text: str, target_language: str, cfg: dict) -> None:
+        """Translate `text` into `target_language` — a one-shot request, no
+        history, same shape as summarize()."""
+        self._start([{"role": "user",
+                      "content": translate_prompt(text, target_language)}],
+                     cfg)
 
     def chat(self, history: list[dict], cfg: dict, *, search_url=None) -> None:
         """Answer the conversation in `history` (a list of {role, content},

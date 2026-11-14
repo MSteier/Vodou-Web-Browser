@@ -22,9 +22,21 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-import vodou_backends as be
+import vodou_backends as be  # also puts the repo root on sys.path
+import mcp_toggle
 
 mcp = FastMCP("vodou")
+
+
+def _require_enabled() -> None:
+    """Refuse the call if the user switched Claude access off in Vodou.
+
+    Checked on EVERY call (it's one small file read), so the switch in Vodou's
+    menu takes effect instantly. Raising makes the MCP client show the message
+    as a tool error instead of returning any data.
+    """
+    if not mcp_toggle.is_enabled():
+        raise RuntimeError(mcp_toggle.DISABLED_MESSAGE)
 
 
 @mcp.tool()
@@ -35,6 +47,7 @@ def vodou_search(query: str, max_results: int = 8) -> list[dict]:
     lookups; nothing about the query is sent to a third-party search engine
     beyond what SearXNG itself federates.
     """
+    _require_enabled()
     return be.search(query, max_results=max_results)
 
 
@@ -46,12 +59,14 @@ def vodou_ask(query: str, model: str = "") -> dict:
     results with [n] citations. The AI endpoint is enforced to be loopback, so
     the question never leaves the machine. Returns {answer, model, sources}.
     """
+    _require_enabled()
     return be.summarize(query, model=(model or None))
 
 
 @mcp.tool()
 def vodou_bookmarks() -> list[dict]:
     """The user's saved Vodou bookmarks as [{title, url}] (read-only)."""
+    _require_enabled()
     return be.read_bookmarks()
 
 
@@ -62,6 +77,7 @@ def vodou_open_tabs() -> dict:
     Read-only; reflects the last persisted session, not necessarily a live
     running browser.
     """
+    _require_enabled()
     return be.read_open_tabs()
 
 
@@ -72,6 +88,7 @@ def vodou_vault_status() -> dict:
     Returns NO entries and NO secrets — the vault is encrypted under a master
     password and its contents are intentionally not accessible here.
     """
+    _require_enabled()
     return be.vault_status()
 
 
@@ -93,6 +110,7 @@ def vodou_live_tabs() -> dict:
     Requires Vodou started with VODOU_ENABLE_CONTROL=1; otherwise returns
     {ok: false, error: ...}.
     """
+    _require_enabled()
     return _control("list_tabs")
 
 
@@ -102,6 +120,7 @@ def vodou_open_url(url: str) -> dict:
 
     Requires VODOU_ENABLE_CONTROL=1. Non-http(s) URLs are rejected.
     """
+    _require_enabled()
     return _control("open_tab", {"url": url})
 
 
@@ -111,6 +130,7 @@ def vodou_navigate(url: str) -> dict:
 
     Requires VODOU_ENABLE_CONTROL=1. Non-http(s) URLs are rejected.
     """
+    _require_enabled()
     return _control("navigate", {"url": url})
 
 
@@ -120,6 +140,7 @@ def vodou_live_blocking_stats(period: str = "1h") -> dict:
 
     Requires VODOU_ENABLE_CONTROL=1. Returns totals and top blocked hosts.
     """
+    _require_enabled()
     return _control("blocking_stats", {"period": period})
 
 

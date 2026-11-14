@@ -148,6 +148,27 @@ check("vault_status: present file -> configured (no secrets returned)",
       be.vault_status(vf) == {"configured": True})
 
 # ---------------------------------------------------------------------------
+print("\nClaude (MCP) access switch (mcp_toggle)")
+
+import mcp_toggle  # noqa: E402  (repo root is on sys.path via vodou_backends)
+
+sw = fresh_dir() / "mcp_enabled.json"
+check("missing file -> enabled (pre-switch behavior)", mcp_toggle.is_enabled(sw))
+mcp_toggle.set_enabled(False, sw)
+check("set off -> disabled", not mcp_toggle.is_enabled(sw))
+mcp_toggle.set_enabled(True, sw)
+check("set on -> enabled", mcp_toggle.is_enabled(sw))
+check("no temp files left behind",
+      [p.name for p in sw.parent.iterdir()] == ["mcp_enabled.json"])
+sw.write_text("{not json", encoding="utf-8")
+check("corrupt file -> disabled (fail closed)", not mcp_toggle.is_enabled(sw))
+sw.write_text('{"enabled": "yes"}', encoding="utf-8")
+check("non-boolean value -> disabled", not mcp_toggle.is_enabled(sw))
+nested = fresh_dir() / "new" / "mcp_enabled.json"
+mcp_toggle.set_enabled(False, nested)
+check("creates missing ~/.vodou folder", not mcp_toggle.is_enabled(nested))
+
+# ---------------------------------------------------------------------------
 print()
 if _failures:
     print(f"{len(_failures)} FAILURE(S): " + "; ".join(_failures))

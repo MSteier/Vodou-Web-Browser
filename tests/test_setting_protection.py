@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import dpapi  # noqa: E402
 import setting_protection as sp  # noqa: E402
 
 _failures = []
@@ -28,26 +29,35 @@ def check(label, cond):
         _failures.append(label)
 
 
-# Isolate all state in a temp dir (real DPAPI on Windows; magic header elsewhere).
+# Isolate all state in a temp dir. Both files are sealed with dpapi (DPAPI on
+# Windows, an encrypted desktop keyring elsewhere). Where no keystore exists --
+# a headless Linux CI runner -- saving is a deliberate no-op rather than a
+# plaintext write, so the persistence checks switch to asserting exactly that.
 _tmp = Path(tempfile.mkdtemp())
 sp.SNAPSHOT_FILE = _tmp / "snap.dat"
 sp.LOG_FILE = _tmp / "prot.log"
+SEALED = dpapi.available()
 
 KEYS = ("start_page", "search_engine", "startup_page")
+authorized = {"start_page": "https://home.example",
+              "search_engine": "https://searx.example/?q={}",
+              "startup_page": "https://start.example"}
 
 # --- snapshot round-trip -----------------------------------------------------
 print("snapshot")
 check("no file -> empty", sp.load_snapshot() == {})
-authorized = {"start_page": "https://home.example",
-              "search_engine": "https://searx.example/?q={}",
-              "startup_page": "https://start.example"}
 sp.save_snapshot(authorized)
 back = sp.load_snapshot()
-check("round-trips the authorized values",
-      all(back.get(k) == authorized[k] for k in KEYS))
-check("snapshot is sealed, not plaintext JSON",
-      b"home.example" not in sp.SNAPSHOT_FILE.read_bytes()
-      or sys.platform != "win32")
+if SEALED:
+    check("round-trips the authorized values",
+          all(back.get(k) == authorized[k] for k in KEYS))
+    check("snapshot is sealed, not plaintext JSON",
+          b"home.example" not in sp.SNAPSHOT_FILE.read_bytes())
+else:
+    print(f"  (no keystore: {dpapi.unavailable_reason()})")
+    check("without a keystore, nothing is written to disk",
+          not any(_tmp.iterdir()))
+    check("without a keystore, the snapshot loads back empty", back == {})
 
 # --- tamper diff -------------------------------------------------------------
 print("\ntamper diff")
@@ -65,40 +75,45 @@ if events:
     check("event has a friendly label", e.label() == "Default search engine")
 check("no change -> no events",
       sp.diff_tamper(authorized, authorized, KEYS, "RESTORED") == [])
-check("restore values come straight from the snapshot",
-      {k: back.get(k, "") for k in KEYS} == authorized)
+if SEALED:
+    check("restore values come straight from the snapshot",
+          {k: back.get(k, "") for k in KEYS} == authorized)
 
 # --- history log -------------------------------------------------------------
 print("\nhistory")
 check("no log -> no events", sp.load_events() == [])
 sp.record_events(events)
-loaded = sp.load_events()
-check("recorded event loads back",
-      len(loaded) == 1 and loaded[0].setting == "search_engine")
-check("history survives a 'restart' (re-read from disk)",
-      len(sp.load_events()) == 1)
-# newest-first ordering
-time.sleep(0.01)
-later = sp.diff_tamper({"start_page": "https://home.example"},
-                       {"start_page": "https://hijack.example"},
-                       ("start_page",), "RESTORED")
-sp.record_events(later)
-ev = sp.load_events()
-check("newest event first", ev[0].setting == "start_page" and len(ev) == 2)
+if not SEALED:
+    check("without a keystore, history is not written to disk",
+          not any(_tmp.iterdir()) and sp.load_events() == [])
+else:
+    loaded = sp.load_events()
+    check("recorded event loads back",
+          len(loaded) == 1 and loaded[0].setting == "search_engine")
+    check("history survives a 'restart' (re-read from disk)",
+          len(sp.load_events()) == 1)
+    # newest-first ordering
+    time.sleep(0.01)
+    later = sp.diff_tamper({"start_page": "https://home.example"},
+                           {"start_page": "https://hijack.example"},
+                           ("start_page",), "RESTORED")
+    sp.record_events(later)
+    ev = sp.load_events()
+    check("newest event first", ev[0].setting == "start_page" and len(ev) == 2)
 
-# cap at _MAX_EVENTS
-many = [sp.ProtectionEvent(time.time(), "start_page", "a", "b", "RESET")
-        for _ in range(sp._MAX_EVENTS + 25)]
-sp.record_events(many)
-check("history capped at _MAX_EVENTS",
-      len(sp.load_events()) == sp._MAX_EVENTS)
+    # cap at _MAX_EVENTS
+    many = [sp.ProtectionEvent(time.time(), "start_page", "a", "b", "RESET")
+            for _ in range(sp._MAX_EVENTS + 25)]
+    sp.record_events(many)
+    check("history capped at _MAX_EVENTS",
+          len(sp.load_events()) == sp._MAX_EVENTS)
 
-# --- clear -------------------------------------------------------------------
-print("\nclear")
-sp.clear_events()
-check("clear empties the history", sp.load_events() == [])
-check("clearing history does not touch the snapshot",
-      sp.load_snapshot().get("start_page") == authorized["start_page"])
+    # --- clear ---------------------------------------------------------------
+    print("\nclear")
+    sp.clear_events()
+    check("clear empties the history", sp.load_events() == [])
+    check("clearing history does not touch the snapshot",
+          sp.load_snapshot().get("start_page") == authorized["start_page"])
 
 # --- RESET path (no snapshot) ------------------------------------------------
 print("\nreset path (no last-good)")

@@ -6,8 +6,12 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=collect_dynamic_libs('c2pa'),
+    # translations/ (UI language catalogs, read by i18n.py) and dictionaries/
+    # (spell-check .bdic files, QTWEBENGINE_DICTIONARIES_PATH in main.py) are
+    # both located via Path(__file__).parent, which is the bundle root here.
     datas=[('trackers.txt', '.'), ('c2pa_trust_anchors.pem', '.'),
-           ('vodou.ico', '.')],
+           ('vodou.ico', '.'), ('translations', 'translations'),
+           ('dictionaries', 'dictionaries')],
     # The updater is imported lazily (About -> Qt & WebEngine…); name its
     # modules so a frozen build still bundles them -- it can at least show the
     # diagnostics report and the "rebuild required" refusal.

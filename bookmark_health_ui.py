@@ -5,10 +5,12 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QDoubleSpinBox, QHBoxLayout,
                              QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout)
 
 from bookmark_health import DEFAULT_CONCURRENCY, DEFAULT_TIMEOUT_SECONDS, HealthCheckWorker
+from i18n import tr
 
 
 def _failed(count):
-    return f'{count} failed link' + ('' if count == 1 else 's')
+    return (tr("{count} failed link").format(count=count) if count == 1
+            else tr("{count} failed links").format(count=count))
 
 
 class BookmarkHealthDialog(QDialog):
@@ -19,46 +21,47 @@ class BookmarkHealthDialog(QDialog):
         self.results = []
         self.checked = self.total = 0
         self.scan_error = ''
-        self.setWindowTitle('Check Bookmarks')
+        self.setWindowTitle(tr('Check Bookmarks'))
         # Non-modal (see main.py's check_bookmarks()) so a scan can run in
         # the background while browsing continues; the minimize button only
         # does anything useful because of that.
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinimizeButtonHint)
         self.resize(940, 600)
         layout = QVBoxLayout(self)
-        label = QLabel('Check bookmarked links with HEAD, then retry failures with GET. '
-                       'Rate-limited or overloaded servers are backed off and retried rather '
-                       'than reported broken immediately. Only failed links appear below. '
-                       'A failure does not mean permanent removal: outages, expired certificates '
-                       'and login restrictions are also listed. Nothing is deleted until you '
-                       'select entries and confirm Delete Selected.')
+        label = QLabel(tr('Check bookmarked links with HEAD, then retry failures with GET. '
+                          'Rate-limited or overloaded servers are backed off and retried rather '
+                          'than reported broken immediately. Only failed links appear below. '
+                          'A failure does not mean permanent removal: outages, expired certificates '
+                          'and login restrictions are also listed. Nothing is deleted until you '
+                          'select entries and confirm Delete Selected.'))
         label.setWordWrap(True)
         layout.addWidget(label)
-        self.status = QLabel('Ready. Checks run in the background; no AI model is required.')
+        self.status = QLabel(tr('Ready. Checks run in the background; no AI model is required.'))
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.status)
         self.progress = QProgressBar()
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
-        self.progress.setFormat('Not started')
+        self.progress.setFormat(tr('Not started'))
         layout.addWidget(self.progress)
         options = QHBoxLayout()
-        options.addWidget(QLabel('Timeout per request (seconds):'))
+        options.addWidget(QLabel(tr('Timeout per request (seconds):')))
         self.timeout = QDoubleSpinBox()
         self.timeout.setRange(.1, 120)
         self.timeout.setValue(DEFAULT_TIMEOUT_SECONDS)
         options.addWidget(self.timeout)
-        options.addWidget(QLabel('Concurrent checks:'))
+        options.addWidget(QLabel(tr('Concurrent checks:')))
         self.concurrency = QSpinBox()
         self.concurrency.setRange(1, 64)
         self.concurrency.setValue(DEFAULT_CONCURRENCY)
         options.addWidget(self.concurrency)
-        self.select_all = QPushButton('Select all')
+        self.select_all = QPushButton(tr('Select all'))
         self.select_all.clicked.connect(self._select_all)
         options.addWidget(self.select_all)
         layout.addLayout(options)
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(['Delete', 'Title', 'Reason', 'URL'])
+        self.table.setHorizontalHeaderLabels(
+            [tr('Delete'), tr('Title'), tr('Reason'), tr('URL')])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -74,16 +77,16 @@ class BookmarkHealthDialog(QDialog):
         self.details.setMaximumHeight(140)
         layout.addWidget(self.details)
         row = QHBoxLayout()
-        self.scan = QPushButton('Check Bookmarks')
+        self.scan = QPushButton(tr('Check Bookmarks'))
         self.scan.clicked.connect(self._start)
-        self.stop = QPushButton('Stop scan')
+        self.stop = QPushButton(tr('Stop scan'))
         self.stop.setEnabled(False)
         self.stop.clicked.connect(self._stop)
-        self.open = QPushButton('Open saved bookmark')
+        self.open = QPushButton(tr('Open saved bookmark'))
         self.open.clicked.connect(self._open)
-        self.remove = QPushButton('Delete Selected…')
+        self.remove = QPushButton(tr('Delete Selected…'))
         self.remove.clicked.connect(self._remove)
-        self.close_button = QPushButton('Close')
+        self.close_button = QPushButton(tr('Close'))
         self.close_button.clicked.connect(self.reject)
         for button in (self.scan, self.stop, self.open, self.remove, self.close_button):
             row.addWidget(button)
@@ -112,10 +115,11 @@ class BookmarkHealthDialog(QDialog):
         self.table.setRowCount(0)
         self.details.clear()
         self.checked, self.total = 0, len(self.store.all())
-        self.status.setText(f'Scanning… Checked 0/{self.total} — {_failed(0)}')
+        self.status.setText(tr('Scanning… Checked {checked}/{total} — {failed}').format(
+            checked=0, total=self.total, failed=_failed(0)))
         self.progress.setRange(0, max(self.total, 1))
         self.progress.setValue(0)
-        self.progress.setFormat('%v / %m checked (%p%)')
+        self.progress.setFormat(tr('%v / %m checked (%p%)'))
         worker = HealthCheckWorker(self.store.all(), QApplication.instance(),
                                    timeout=self.timeout.value(), concurrency=self.concurrency.value())
         self.scanner = worker
@@ -137,8 +141,10 @@ class BookmarkHealthDialog(QDialog):
 
     def _stop(self):
         self._cancel()
-        self.progress.setFormat(f'Stopped at {self.checked} / {self.total}')
-        self._finished(f'Scan stopped. Checked {self.checked}/{self.total}; {_failed(len(self.results))} listed.')
+        self.progress.setFormat(
+            tr('Stopped at {checked} / {total}').format(checked=self.checked, total=self.total))
+        self._finished(tr('Scan stopped. Checked {checked}/{total}; {failed} listed.').format(
+            checked=self.checked, total=self.total, failed=_failed(len(self.results))))
 
     def _from_current_scanner(self):
         sender = self.sender()
@@ -149,7 +155,8 @@ class BookmarkHealthDialog(QDialog):
         if not self._from_current_scanner():
             return
         self.checked, self.total = checked, total
-        self.status.setText(f'Scanning… Checked {checked}/{total} — {_failed(len(self.results))}')
+        self.status.setText(tr('Scanning… Checked {checked}/{total} — {failed}').format(
+            checked=checked, total=total, failed=_failed(len(self.results))))
         self.progress.setRange(0, max(total, 1))
         self.progress.setValue(checked)
 
@@ -164,17 +171,23 @@ class BookmarkHealthDialog(QDialog):
             return
         self.scanner = None
         if self.scan_error:
-            self.progress.setFormat(f'Scan failed at {self.checked} / {self.total}')
+            self.progress.setFormat(
+                tr('Scan failed at {checked} / {total}').format(
+                    checked=self.checked, total=self.total))
             self._finished(self.scan_error)
             return
         # Complete even when the last progress tick was missed, or there was nothing to check.
         self.progress.setValue(self.progress.maximum())
         failed = len(self.results)
-        self.progress.setFormat(f'Scan complete — {self.total} checked, {failed} failed')
-        summary = (f'Scan complete. Checked {self.checked}/{self.total} — no broken links found.'
-                   if not failed else
-                   f'Scan complete. Checked {self.checked}/{self.total} — {_failed(failed)}. '
-                   'Review before deleting.')
+        self.progress.setFormat(tr('Scan complete — {total} checked, {failed} failed').format(
+            total=self.total, failed=failed))
+        summary = (
+            tr('Scan complete. Checked {checked}/{total} — no broken links found.').format(
+                checked=self.checked, total=self.total)
+            if not failed else
+            tr('Scan complete. Checked {checked}/{total} — {failed}. '
+               'Review before deleting.').format(
+                checked=self.checked, total=self.total, failed=_failed(failed)))
         self._finished(summary)
         # Flash the window in the taskbar if the user switched away during a long scan.
         QApplication.alert(self)
@@ -209,8 +222,9 @@ class BookmarkHealthDialog(QDialog):
         index = self.table.currentRow()
         if 0 <= index < len(self.results):
             r = self.results[index]
-            prefix = f'{r.method} check: ' if r.method else ''
-            self.details.setPlainText(f'{prefix}{r.reason}\nDestination: {r.final_url or r.bookmark.url}')
+            prefix = tr('{method} check: ').format(method=r.method) if r.method else ''
+            self.details.setPlainText(tr('{prefix}{reason}\nDestination: {destination}').format(
+                prefix=prefix, reason=r.reason, destination=r.final_url or r.bookmark.url))
 
     def _open(self):
         index = self.table.currentRow()
@@ -224,11 +238,12 @@ class BookmarkHealthDialog(QDialog):
         if not selected:
             return
         box = QMessageBox(self)
-        box.setWindowTitle('Confirm bookmark removal')
+        box.setWindowTitle(tr('Confirm bookmark removal'))
         box.setIcon(QMessageBox.Icon.Question)
         box.setTextFormat(Qt.TextFormat.PlainText)
-        box.setText(f'Permanently remove these {len(selected)} checked bookmarks? '
-                    'Some failures may be temporary or require a login. Use Show Details to review the full list.')
+        box.setText(tr('Permanently remove these {count} checked bookmarks? '
+                       'Some failures may be temporary or require a login. '
+                       'Use Show Details to review the full list.').format(count=len(selected)))
         box.setDetailedText('\n\n'.join(f'{b.title}\n{b.url}' for b in selected))
         box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
@@ -237,9 +252,11 @@ class BookmarkHealthDialog(QDialog):
         try:
             removed = self.store.remove_reviewed(selected)
         except OSError:
-            self.status.setText('Could not save bookmarks. Nothing was removed; check folder permissions.')
+            self.status.setText(tr('Could not save bookmarks. Nothing was removed; '
+                                   'check folder permissions.'))
             return
-        self.status.setText(f'Removed {removed} bookmarks. Entries edited since the scan were kept.')
+        self.status.setText(tr('Removed {removed} bookmarks. Entries edited since '
+                               'the scan were kept.').format(removed=removed))
         for row in range(self.table.rowCount()):
             self.table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
         # Reflect actual store deletions in the results, not just the saved file.
