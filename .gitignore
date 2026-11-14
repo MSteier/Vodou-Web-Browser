@@ -8,6 +8,9 @@ venv/
 # PyInstaller build output (large binaries — attached to GitHub Releases instead)
 build/
 dist/
+# Windows release bundles + checksums built in the repo root (also on Releases)
+Vodou-v*-windows-x64.zip
+SHA256SUMS.txt
 
 # Editor / OS
 .vscode/
