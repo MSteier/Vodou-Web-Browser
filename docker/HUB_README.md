@@ -28,13 +28,17 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.14` — pinned version
+- `1.54.15` — pinned version
 
 Tags match Vodou's own version. A rebuild of the same Vodou version (a newer base
 image or security-patched system packages) gets a revision suffix instead:
 `1.54.10-r1`, `1.54.10-r2`, and so on. Same browser, updated image.
 
 ## Changelog
+- **1.54.15** — Cowl (search.misttechnologies.net), Mist Technologies' private
+  SearXNG search, is now the default start page and search engine. Adds a
+  Settings toggle for Claude (MCP) access, and the updater now pairs
+  PyQt6-WebEngine 6.140 with PyQt6 6.12 automatically.
 - **1.54.14** — Full UI localization: the Check Bookmarks, Downloads,
   certificate viewer, first-run onboarding wizard, Chrome/Edge import, and
   Plugins dialogs are now translated into all 14 supported languages,
