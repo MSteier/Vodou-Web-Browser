@@ -7,7 +7,9 @@ security states and shift only for contrast between modes.
 
 Applied at startup and re-applied live when the user switches theme or mode;
 QSS only touches the chrome — page content is rendered by Chromium and never
-styled from here. The choice is persisted to ~/.vodou/theme.json.
+styled from here. The mode is also passed to Chromium as the app's color
+scheme, so sites that honor `prefers-color-scheme` match the toggle. The
+choice is persisted to ~/.vodou/theme.json.
 """
 
 from __future__ import annotations
@@ -577,3 +579,20 @@ def apply_theme(app: QApplication, theme_name: str | None = None,
 
     app.setStyleSheet(build_qss(p))
     app.setWindowIcon(make_app_icon())
+
+    _apply_page_color_scheme(app, mode)
+
+
+def _apply_page_color_scheme(app: QApplication, mode: str) -> None:
+    """Tell web pages which mode the user picked.
+
+    Chromium answers a page's `prefers-color-scheme` query from the app's
+    color scheme, which otherwise follows the OS (Windows' dark setting, or
+    light in a bare Linux container). Setting it here makes Vodou's own
+    toggle win, so the chrome and the page always agree. Needs Qt 6.8+;
+    on older Qt this is a no-op and pages keep following the OS."""
+    hints = app.styleHints()
+    if not hasattr(hints, "setColorScheme"):
+        return
+    hints.setColorScheme(
+        Qt.ColorScheme.Light if mode == "light" else Qt.ColorScheme.Dark)
