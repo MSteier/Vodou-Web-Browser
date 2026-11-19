@@ -246,77 +246,102 @@ def translate_prompt(text: str, target_language: str) -> str:
     return "\n".join(lines)
 
 
-def build_site_safety_prompt(facts: dict) -> str:
-    """A first-person message, as if the user relayed Vodou's own local
-    security checks to the model and then asked about them. This is what
-    actually gets sent — and shown as the user's own chat turn — when
-    "Check this site" (the AI panel / ☰ menu action) starts or continues a
-    conversation (see main.BrowserWindow.check_site_safety, which builds
-    `facts` from spoofcheck.py, safebrowsing.py, cert_viewer.py, and the
-    session's download list — the exact same checks the browser's own
-    navigation blocking and download warnings already use).
+# "Check this site" instructions, sent as a system message ahead of the
+# facts. Small local models answer "is this safe?" badly when left to judge
+# thin facts themselves: they hedge, invent details, or lecture. So Vodou
+# rates the page with fixed rules (site_signals.rate) and the model's job is
+# narrowed to explaining that rating, citing only the listed evidence, in a
+# fixed shape that's easy to read at a glance. This message is kept out of
+# the visible transcript (see main.BrowserWindow._render_ai_chat).
+SITE_CHECK_SYSTEM = (
+    "You are the safety explainer inside Vodou, a privacy browser. The user "
+    "pressed \"Check this site\". Vodou has already examined the page on the "
+    "user's own computer and rated it. Your job is to explain that rating "
+    "to a non-technical person.\n\n"
+    "Rules:\n"
+    "1. Use Vodou's rating as your verdict, word for word. Never lower it. "
+    "You may only raise it if the evidence plainly shows a scam.\n"
+    "2. Base every statement on the evidence list. Don't invent anything: "
+    "no domain age, owner, reviews, reputation, or what the page says.\n"
+    "3. \"Not on the list\" and \"not flagged\" are not proof of safety. New "
+    "scam sites appear every day. Say that once, briefly, when the rating "
+    "is \"No red flags found\".\n"
+    "4. Never comment on the user's own choices or what they may have known.\n"
+    "5. Plain words, no jargon, no generic online-safety lecture.\n\n"
+    "Reply in exactly this format:\n"
+    "**Verdict: <rating>**\n"
+    "<one sentence saying what that means for the user>\n\n"
+    "**Why**\n"
+    "- <2 to 4 bullets, each restating one piece of evidence in plain words>\n\n"
+    "**What to do**\n"
+    "- <1 to 3 short, concrete steps>\n\n"
+    "For Dangerous: tell them to leave the page, not to enter passwords, "
+    "card numbers, or codes, and, if they already did, to change that "
+    "password and contact their bank. For Suspicious: tell them to go to "
+    "the real site by typing its address themselves instead of using this "
+    "link. For No red flags found: say they can continue but should still "
+    "type the address of important sites (bank, email) themselves.\n\n"
+    "After this first answer, answer follow-up questions normally, still "
+    "using only the evidence."
+)
 
-    Every fact named here is something Vodou verified locally moments ago;
-    nothing is invented for the model, and the model is never told Vodou
-    checked something it didn't (no antivirus scan, no live reputation
-    lookup, no browsing beyond this one page)."""
+
+def build_site_safety_prompt(facts: dict) -> str:
+    """The visible user turn for "Check this site": Vodou's rule-based
+    rating and the evidence behind it, followed by the question. Pairs with
+    SITE_CHECK_SYSTEM. `facts` comes from main.BrowserWindow
+    ._site_safety_facts (spoofcheck, Safe Browsing, the certificate probe,
+    this session's downloads, plus site_signals' address and page findings).
+
+    Every line is something Vodou checked locally. No page text is included:
+    only fixed-vocabulary findings, so a scam page can't address the model.
+    The model is never told Vodou checked something it didn't (no antivirus
+    scan, no live reputation lookup)."""
+    from site_signals import NO_RED_FLAGS as NO_RED_FLAGS_RATING, rate
+
+    rating, signals = rate(facts)
     lines = [
-        "Here is what Vodou's own local security checks just found for the "
-        f"page I have open right now ({facts['url']}):",
+        f"I'm on {facts['host']} ({facts['url']}). Is this site safe, or "
+        "could it be a scam?",
         "",
-        f"- Host: {facts['host']}",
-        f"- Connection: {facts['connection']}",
+        f"**Vodou's rating: {rating}**",
+        "",
     ]
-    if facts.get("cert_trusted") is not None:
-        if facts["cert_trusted"]:
-            lines.append(
-                "- Certificate: verified against the system trust store.")
-        else:
-            reason = facts.get("cert_trust_error") or "not specified"
-            lines.append(
-                f"- Certificate: NOT verified/trusted ({reason}).")
+    warnings = [s.text for s in signals if s.weight != "info"]
+    context = [s.text for s in signals if s.weight == "info"]
+    if rating == NO_RED_FLAGS_RATING:
+        lines.append("Warning signs Vodou found on this computer: none.")
+        if warnings:
+            lines += ["", "Minor notes (not a concern on their own):"]
+            lines += [f"- {t}" for t in warnings]
+    else:
+        lines.append("Warning signs Vodou found on this computer:")
+        lines += [f"- {t}" for t in warnings]
+    if context:
+        lines += ["", "For context:"] + [f"- {t}" for t in context]
+    lines += ["", "Also checked, nothing wrong:"]
+    ok = [f"- Connection: {facts['connection']}."]
+    if facts.get("cert_trusted"):
+        ok.append("- Certificate: verified against the system trust store.")
+    if facts.get("spoof") is None:
+        ok.append("- Address: no look-alike/typosquat pattern detected "
+                  "against Vodou's known-brands list.")
+    if not facts.get("malicious"):
+        ok.append("- This host is not on Vodou's local "
+                  "reported-phishing/malware list.")
+    if not facts.get("downloads"):
+        ok.append("- No downloads from this site this session.")
+    lines += ok
     if facts.get("cert_check_skipped"):
-        lines.append(f"- Certificate: not checked ({facts['cert_check_skipped']}).")
-    spoof = facts.get("spoof")
-    if spoof is not None:
-        lines.append(
-            f"- Deceptive-address check: FLAGGED — {spoof.detail}")
-    else:
-        lines.append(
-            "- Deceptive-address check: no look-alike/typosquat pattern "
-            "detected against Vodou's known-brands list.")
-    if facts.get("malicious"):
-        lines.append(
-            "- Malicious-site list: this host IS on a locally-cached list "
-            "of reported phishing/malware sites.")
-    else:
-        lines.append(
-            "- Malicious-site list: this host is not on Vodou's local "
-            "reported-phishing/malware list.")
-    if facts.get("bypassed_warning"):
-        lines.append(
-            "- Note: I previously clicked \"Continue anyway\" past a "
-            "warning Vodou showed for this exact site.")
-    downloads = facts.get("downloads") or []
-    if downloads:
-        lines.append("- Downloads from this site this session:")
-        for name, risky in downloads:
-            tag = (f' — DANGEROUS: a "{risky}" file, which can run programs'
-                  if risky else " — not an executable/installer type")
-            lines.append(f'    - "{name}"{tag}')
-    else:
-        lines.append("- No downloads from this site this session.")
+        lines.append(f"- Certificate: not checked "
+                     f"({facts['cert_check_skipped']}).")
+    if facts.get("page_checked") is False:
+        lines.append("- The page's contents couldn't be examined, so only "
+                     "the address was checked.")
     lines += [
         "",
-        "Based ONLY on the facts above, is this site safe? Could it be a "
-        "scam or a spoofed/fake version of a real site? Should I be "
-        "cautious about downloading anything from it? Be direct — say "
-        "plainly if something here looks dangerous, and say plainly when "
-        "nothing suspicious was found rather than hedging with generic "
-        "\"always be careful online\" advice. You have no information "
-        "beyond what's listed above: no antivirus scan of file contents, "
-        "no live web/reputation lookup, and no way to browse further "
-        "yourself.",
+        "Not available: no antivirus scan of file contents, no live "
+        "web/reputation lookup, no domain age or owner information.",
     ]
     return "\n".join(lines)
 
@@ -342,9 +367,15 @@ def build_chat_messages(history: list[dict], cfg: dict) -> list[dict]:
         limit = max(2, int(cfg.get("max_turns", DEFAULTS["max_turns"])))
     except (TypeError, ValueError):
         limit = DEFAULTS["max_turns"]
-    recent = [m for m in history
-              if isinstance(m, dict) and m.get("role") and m.get("content")]
-    return [{"role": "system", "content": ASK_SYSTEM}] + recent[-limit:]
+    valid = [m for m in history
+             if isinstance(m, dict) and m.get("role") and m.get("content")]
+    # Task-specific system messages (e.g. SITE_CHECK_SYSTEM) live in the
+    # history so they stay with that conversation; hoist them so trimming a
+    # long chat never drops them.
+    extra = [m for m in valid if m["role"] == "system"]
+    recent = [m for m in valid if m["role"] != "system"]
+    return ([{"role": "system", "content": ASK_SYSTEM}] + extra
+            + recent[-limit:])
 
 
 _THINK_CLOSED = re.compile(r"<think>.*?</think>", re.DOTALL)

@@ -103,6 +103,8 @@ clean_facts = {
 }
 clean = ai.build_site_safety_prompt(clean_facts)
 check("clean site names the real host", "example.com" in clean)
+check("clean site: rated No red flags found",
+      "Vodou's rating: No red flags found" in clean)
 check("clean site: no look-alike pattern detected, said plainly",
       "no look-alike/typosquat pattern" in clean)
 check("clean site: not on the malicious list, said plainly",
@@ -129,19 +131,27 @@ spoofed_facts = {
     "downloads": [("invoice.exe", ".exe"), ("readme.txt", None)],
 }
 spoofed = ai.build_site_safety_prompt(spoofed_facts)
-check("spoofed site: the deceptive-address flag is included",
-      "FLAGGED" in spoofed and "paypal.com" in spoofed)
+check("spoofed site: rated Dangerous", "Vodou's rating: Dangerous" in spoofed)
+check("spoofed site: the deceptive-address finding is included",
+      "paypal.com" in spoofed and "impersonating" in spoofed)
 check("spoofed site: the malicious-list hit is included",
-      "IS on a locally-cached list" in spoofed)
+      "reported phishing/malware list" in spoofed)
 check("spoofed site: untrusted certificate is reported with its reason",
-      "NOT verified/trusted (self-signed certificate)" in spoofed)
-check("spoofed site: a previously-bypassed warning is disclosed",
-      "Continue anyway" in spoofed)
+      "could not be verified (self-signed certificate)" in spoofed)
+check("spoofed site: an earlier warning is disclosed as evidence",
+      "showed a warning for this site" in spoofed)
+check("spoofed site: the bypassed warning is not framed as the user's fault",
+      "Continue anyway" not in spoofed)
 check("spoofed site: the risky download is called out",
-      "DANGEROUS" in spoofed and "invoice.exe" in spoofed)
-check("spoofed site: the harmless download is listed without alarm",
-      "readme.txt" in spoofed
-      and "not an executable/installer type" in spoofed)
+      "invoice.exe" in spoofed)
+check("spoofed site: the harmless download raises no alarm",
+      "readme.txt" not in spoofed)
+check("a dangerous site lists its warning signs",
+      "Warning signs Vodou found on this computer:" in spoofed)
+check("a clean site says plainly there are no warning signs",
+      "Warning signs Vodou found on this computer: none." in clean)
+check("strongest evidence is listed first",
+      spoofed.index("reported phishing") < spoofed.index("invoice.exe"))
 
 no_cert_facts = {
     "url": "http://plain.example/", "host": "plain.example",
@@ -154,6 +164,30 @@ check("missing cert_trusted key is handled without raising",
       "example" in no_cert)
 check("plain HTTP connection state is reported",
       "NOT encrypted" in no_cert)
+
+# --- "Check this site" instructions and hidden system messages ---------------
+print("\nsite-check instructions")
+sysmsg = ai.SITE_CHECK_SYSTEM
+check("model must use Vodou's rating as its verdict",
+      "Use Vodou's rating as your verdict" in sysmsg)
+check("model must not lower the rating", "Never lower it" in sysmsg)
+check("model is told 'not flagged' isn't proof of safety",
+      "not proof of safety" in sysmsg)
+check("model must not comment on the user's choices",
+      "Never comment on the user's own choices" in sysmsg)
+check("a fixed reply format is required",
+      "**Verdict: <rating>**" in sysmsg and "**What to do**" in sysmsg)
+
+hist = [{"role": "system", "content": sysmsg},
+        {"role": "user", "content": "q0"}]
+hist += [{"role": "assistant" if i % 2 else "user", "content": f"m{i}"}
+         for i in range(1, 40)]
+msgs = ai.build_chat_messages(hist, {"max_turns": 6})
+check("ASK_SYSTEM still comes first", msgs[0]["content"] == ai.ASK_SYSTEM)
+check("the site-check instructions survive trimming a long chat",
+      msgs[1]["content"] == sysmsg)
+check("only the recent turns are kept",
+      len(msgs) == 2 + 6 and msgs[-1]["content"] == "m39")
 
 print()
 if _failures:

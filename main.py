@@ -453,6 +453,7 @@ from privacy import (
 from ai_search import (
     OllamaClient,
     build_site_safety_prompt,
+    SITE_CHECK_SYSTEM,
     is_search_results,
     load_config as load_ai_config,
     query_from_url,
@@ -485,6 +486,7 @@ from spoofcheck import (
     safe_download_name,
 )
 from spoofcheck import inspect as spoof_inspect
+from site_signals import PAGE_SIGNALS_JS, page_signals, url_signals
 from about import (
     APP_VERSION,
     REPO_URL,
@@ -5468,6 +5470,7 @@ class BrowserWindow(QMainWindow):
             downloads_dialog = getattr(self, "_downloads", None)
             facts["downloads"] = (downloads_dialog.for_host(host)
                                   if downloads_dialog is not None else [])
+            facts["url_signals"] = url_signals(url.toString(), host)
         return facts
 
     def check_site_safety(self) -> None:
@@ -5492,7 +5495,31 @@ class BrowserWindow(QMainWindow):
         self._ai_stream = ""
         self._set_ai_mode("ask")
         self._set_ai_status("Running local safety checks on this page…")
-        prompt = build_site_safety_prompt(self._site_safety_facts(view))
+        self._ai_send.setEnabled(False)
+        # Snapshot the page in Vodou's isolated script world (the page's own
+        # scripts can't see or alter it), then finish in _site_check_ready.
+        # Only fixed-vocabulary findings from it reach the model.
+        url = view.url()
+        view.page().runJavaScript(
+            PAGE_SIGNALS_JS, APP_WORLD,
+            lambda snap, v=view, u=url: self._site_check_ready(v, u, snap))
+
+    def _site_check_ready(self, view: WebView, url: QUrl, snap) -> None:
+        """Second half of check_site_safety, once the page snapshot is in."""
+        try:
+            changed = view.url() != url
+        except RuntimeError:            # tab closed while the snapshot ran
+            changed = True
+        if self._ai_panel is None or changed:
+            self._ai_send.setEnabled(True)
+            self._set_ai_status("The page changed. Press Check this site "
+                                "again.")
+            return
+        facts = self._site_safety_facts(view)
+        facts["page_checked"] = isinstance(snap, dict)
+        facts["page_signals"] = page_signals(snap, url.host())
+        prompt = build_site_safety_prompt(facts)
+        self._ai_chat.append({"role": "system", "content": SITE_CHECK_SYSTEM})
         self._ai_chat.append({"role": "user", "content": prompt})
         self._render_ai_chat()
         self._set_ai_status(
@@ -5610,6 +5637,8 @@ class BrowserWindow(QMainWindow):
             return
         blocks = []
         for msg in self._ai_chat:
+            if msg["role"] == "system":
+                continue                 # task instructions, not transcript
             if msg["role"] == "user":
                 blocks.append(f"**You:** {msg['content']}")
             else:
@@ -5682,6 +5711,8 @@ class BrowserWindow(QMainWindow):
             # Drop the unanswered question so a retry doesn't double it up.
             if self._ai_chat and self._ai_chat[-1]["role"] == "user":
                 self._ai_chat.pop()
+            if all(m["role"] == "system" for m in self._ai_chat):
+                self._ai_chat = []
             self._ai_stream = ""
             self._render_ai_chat()
             self._set_ai_status(f"Couldn't answer. {message}")
