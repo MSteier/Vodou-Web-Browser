@@ -11,6 +11,10 @@ site you visit):
     (Latin + Cyrillic/Greek) or renders from punycode; almost always an attack.
   * typosquatting           — a near-miss ASCII spelling of a known brand
     within one edit (gooogle, faceook, paypa1).
+  * brand + bait word       — a known brand glued to a lure word in the
+    registrable name (paypal-login, chase-secure, zalopaywin). Only fires when
+    everything besides the brand is a lure word, so real brand-owned names
+    like googleapis or microsoftonline stay quiet.
 
 Detection is heuristic and brand-list-bound: it protects a curated set of the
 most-impersonated names, not the whole web, and errs toward silence over
@@ -48,6 +52,7 @@ BRANDS: dict[str, str] = {
     "ebay": "ebay.com", "pinterest": "pinterest.com", "snapchat": "snapchat.com",
     # Payments / retail
     "paypal": "paypal.com", "stripe": "stripe.com", "walmart": "walmart.com",
+    "zalopay": "zalopay.vn",
     "target": "target.com", "bestbuy": "bestbuy.com", "alibaba": "alibaba.com",
     "aliexpress": "aliexpress.com",
     # Banks
@@ -97,7 +102,7 @@ _CONFUSABLES = {
 
 @dataclass(frozen=True)
 class SpoofVerdict:
-    kind: str            # "homograph" | "mixed_script" | "typosquat"
+    kind: str            # "homograph" | "mixed_script" | "typosquat" | "brand_bait"
     display_host: str    # the real (decoded) host, shown to the user
     impersonated: str    # brand domain it resembles, or "" if none
     headline: str        # short interstitial title
@@ -212,6 +217,70 @@ def _nearest_brand(label: str) -> str | None:
     return None
 
 
+# Lure words phishing kits bolt onto a brand name: account actions, fake
+# support, and prize/giveaway bait. Kept tight on purpose: a word belongs here
+# only if a real company would almost never register brand+word for itself.
+# Deliberately absent: "online" (microsoftonline), "pay" (amazonpay),
+# "services" (amazonservices), "gift"/"gifts" (redditgifts, paypal-gifts),
+# "kids"/"music"/"tv"/"cdn"/"apis"/"content"/"usercontent" (real brand domains).
+BAIT_WORDS: frozenset[str] = frozenset({
+    # account / security pretexts
+    "login", "logon", "signin", "signon", "verify", "verification", "verified",
+    "secure", "security", "auth", "authenticate", "confirm", "unlock",
+    "locked", "suspended", "recover", "recovery", "reset", "update",
+    "account", "accounts", "billing", "invoice", "refund", "wallet",
+    "support", "helpdesk", "help", "customer",
+    "alert", "notice", "validate", "kyc",
+    # prize / giveaway pretexts
+    "win", "wins", "winner", "winners", "lucky", "luckydraw", "prize",
+    "prizes", "reward", "rewards", "bonus", "giveaway",
+    "claim", "promo", "free", "airdrop", "jackpot", "spin", "lottery",
+    "cashback", "vip",
+})
+# Brands too short or too word-like to match inside a longer name without
+# false alarms (apple, chase, target, office, windows, ledger...): the
+# combo check only uses distinctive brand labels.
+_COMBO_MIN_BRAND_LEN = 6
+_COMBO_SKIP_BRANDS = frozenset({
+    "office", "windows", "target", "ledger", "kraken", "stripe",
+    "outlook", "blockchain",
+})
+
+
+def _only_bait(rest: str) -> bool:
+    """True if `rest` splits entirely into BAIT_WORDS (e.g. "loginsecure")."""
+    if not rest:
+        return False
+    ok = [True] + [False] * len(rest)
+    for i in range(1, len(rest) + 1):
+        for j in range(max(0, i - 12), i):
+            if ok[j] and rest[j:i] in BAIT_WORDS:
+                ok[i] = True
+                break
+    return ok[-1]
+
+
+def _brand_plus_bait(label: str) -> str | None:
+    """Brand domain if `label` is a known brand plus only lure words, with
+    optional hyphens/digits (paypal-login, zalopaywin, chase-secure-2fa).
+    Matches the longest brand first so "wellsfargo" wins over a shorter
+    brand inside it."""
+    compact = "".join(ch for ch in label if ch.isalpha())
+    if compact in _BRAND_LABELS:
+        return None                    # handled as the brand itself
+    for brand_label in sorted(_BRAND_LABELS, key=len, reverse=True):
+        if (len(brand_label) < _COMBO_MIN_BRAND_LEN
+                or brand_label in _COMBO_SKIP_BRANDS):
+            continue
+        at = compact.find(brand_label)
+        if at < 0:
+            continue
+        rest = compact[:at] + compact[at + len(brand_label):]
+        if _only_bait(rest):
+            return BRANDS[brand_label]
+    return None
+
+
 def inspect(host: str) -> SpoofVerdict | None:
     """Judge a hostname. Returns a verdict for a suspected spoof, else None."""
     if not host:
@@ -271,6 +340,16 @@ def inspect(host: str) -> SpoofVerdict | None:
                 "Possible misspelled address",
                 f"This address is one character away from “{brand}” and may "
                 f"be impersonating it.")
+
+        # 5. Brand + bait word: a real brand name dressed up with a lure
+        #    ("zalopaywin", "paypal-login", "coinbase-wallet-verify").
+        brand = _brand_plus_bait(reg_label)
+        if brand and brand != reg_domain:
+            return SpoofVerdict(
+                "brand_bait", host, brand,
+                "Suspicious brand address",
+                f"This address pairs the name “{brand}” with bait words like "
+                f"“login” or “win”, a common trick to pass as the real site.")
 
     return None
 
