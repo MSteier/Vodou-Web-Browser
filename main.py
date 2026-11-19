@@ -454,6 +454,7 @@ from ai_search import (
     OllamaClient,
     build_site_safety_prompt,
     SITE_CHECK_SYSTEM,
+    SITE_CHECK_NOTE,
     is_search_results,
     load_config as load_ai_config,
     query_from_url,
@@ -5636,13 +5637,22 @@ class BrowserWindow(QMainWindow):
         if self._ai_panel is None:
             return
         blocks = []
+        # A "Check this site" conversation gets Vodou's own caveat under the
+        # first answer, so it's there even if the model leaves it out.
+        note_pending = any(m["role"] == "system"
+                           and m["content"] == SITE_CHECK_SYSTEM
+                           for m in self._ai_chat)
         for msg in self._ai_chat:
             if msg["role"] == "system":
                 continue                 # task instructions, not transcript
             if msg["role"] == "user":
                 blocks.append(f"**You:** {msg['content']}")
             else:
-                blocks.append(msg["content"])
+                text = msg["content"]
+                if note_pending:
+                    text += f"\n\n{SITE_CHECK_NOTE}"
+                    note_pending = False
+                blocks.append(text)
         if self._ai_stream:
             blocks.append(self._ai_stream)
         self._ai_text.setMarkdown("\n\n---\n\n".join(blocks))

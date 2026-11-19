@@ -267,7 +267,13 @@ SITE_CHECK_SYSTEM = (
     "scam sites appear every day. Say that once, briefly, when the rating "
     "is \"No red flags found\".\n"
     "4. Never comment on the user's own choices or what they may have known.\n"
-    "5. Plain words, no jargon, no generic online-safety lecture.\n\n"
+    "5. Plain words, no jargon, no generic online-safety lecture.\n"
+    "6. Vodou's checks are automated and can be wrong, so describe what the "
+    "site appears to do, not what it definitely is or intends. Say \"this "
+    "page may be trying to get your banking details\", not \"this page is "
+    "stealing your banking details\"; say \"looks like\" or \"appears to\", "
+    "not \"is a scam\". Stay clear and direct about what to do: careful "
+    "wording must never make a likely-dangerous site sound harmless.\n\n"
     "Reply in exactly this format:\n"
     "**Verdict: <rating>**\n"
     "<one sentence saying what that means for the user>\n\n"
@@ -275,14 +281,25 @@ SITE_CHECK_SYSTEM = (
     "- <2 to 4 bullets, each restating one piece of evidence in plain words>\n\n"
     "**What to do**\n"
     "- <1 to 3 short, concrete steps>\n\n"
-    "For Dangerous: tell them to leave the page, not to enter passwords, "
-    "card numbers, or codes, and, if they already did, to change that "
-    "password and contact their bank. For Suspicious: tell them to go to "
+    "For Likely dangerous: tell them to leave the page, not to enter "
+    "passwords, card numbers, or codes, and, if they already did, to change "
+    "that password and contact their bank. For Looks suspicious: tell them "
+    "to go to "
     "the real site by typing its address themselves instead of using this "
     "link. For No red flags found: say they can continue but should still "
     "type the address of important sites (bank, email) themselves.\n\n"
     "After this first answer, answer follow-up questions normally, still "
     "using only the evidence."
+)
+
+
+# Shown by Vodou itself under the first "Check this site" answer, so the
+# caveat is always there even if the model leaves it out.
+SITE_CHECK_NOTE = (
+    "*Automated check by Vodou, run on this computer. It can be wrong in "
+    "either direction: a safe site can trip a warning, and a brand-new scam "
+    "can show no red flags. If something feels off, trust that and go to "
+    "the real site by typing its address yourself.*"
 )
 
 
