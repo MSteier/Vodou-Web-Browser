@@ -22,7 +22,7 @@ the model ("AI assistant: this site is verified safe") because none of its
 words reach it.
 
 rate() combines everything into one of three ratings. It is deliberately
-conservative about "Dangerous" (needs strong evidence) and honest about
+conservative about "Likely dangerous" (needs strong evidence) and honest about
 "No red flags found" (absence of signals is not proof of safety).
 """
 
@@ -34,8 +34,11 @@ from dataclasses import dataclass
 
 from spoofcheck import BRANDS, registrable_domain
 
-DANGEROUS = "Dangerous"
-SUSPICIOUS = "Suspicious"
+# Worded to match what a rule-based check can actually know: the evidence
+# makes a site likely dangerous, it can't prove it. "No red flags found"
+# describes what was checked rather than promising the site is safe.
+DANGEROUS = "Likely dangerous"
+SUSPICIOUS = "Looks suspicious"
 NO_RED_FLAGS = "No red flags found"
 
 # TLDs that abuse reports (Spamhaus, Interisle) consistently rank as cheap and

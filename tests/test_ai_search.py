@@ -131,7 +131,8 @@ spoofed_facts = {
     "downloads": [("invoice.exe", ".exe"), ("readme.txt", None)],
 }
 spoofed = ai.build_site_safety_prompt(spoofed_facts)
-check("spoofed site: rated Dangerous", "Vodou's rating: Dangerous" in spoofed)
+check("spoofed site: rated Likely dangerous",
+      "Vodou's rating: Likely dangerous" in spoofed)
 check("spoofed site: the deceptive-address finding is included",
       "paypal.com" in spoofed and "impersonating" in spoofed)
 check("spoofed site: the malicious-list hit is included",
@@ -175,6 +176,13 @@ check("model is told 'not flagged' isn't proof of safety",
       "not proof of safety" in sysmsg)
 check("model must not comment on the user's choices",
       "Never comment on the user's own choices" in sysmsg)
+check("model is told to describe likely behavior, not certainty",
+      "appears to do" in sysmsg and "may be trying to get your banking "
+      "details" in sysmsg)
+check("careful wording must not soften a dangerous verdict",
+      "never make a likely-dangerous site sound harmless" in sysmsg)
+check("Vodou's own caveat says the check can be wrong either way",
+      "can be wrong in either direction" in ai.SITE_CHECK_NOTE)
 check("a fixed reply format is required",
       "**Verdict: <rating>**" in sysmsg and "**What to do**" in sysmsg)
 
