@@ -490,7 +490,6 @@ from spoofcheck import inspect as spoof_inspect
 from site_signals import PAGE_SIGNALS_JS, page_signals, url_signals
 from about import (
     APP_VERSION,
-    DOCKER_PULL_CMD,
     REPO_URL,
     VERSION_DISPLAY,
     AboutDialog,
@@ -4991,9 +4990,8 @@ class BrowserWindow(QMainWindow):
                         else f"browser engine {engine_ver}")
                 self.version_label.show_update_available(what)
                 self.statusBar().showMessage(
-                    f"Update available: {what} — run  {DOCKER_PULL_CMD}  on "
-                    "your computer, then recreate this container "
-                    "(☰ → About Vodou has the details).", 20000)
+                    f"Update available: {what} — open ☰ → About Vodou "
+                    "for the commands that update this Docker image.", 20000)
             else:
                 self.version_label.show_up_to_date()
             return
