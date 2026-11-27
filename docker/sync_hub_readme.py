@@ -13,7 +13,8 @@ No credentials live in the repo. The script borrows the Docker Hub login that
 memory only, and never prints or writes it. It only works on a machine that is
 logged in to Docker Hub as the repository's owner.
 
-Standard library only, so it runs without installing anything.
+Standard library only, so it runs without installing anything. If the optional
+`certifi` package is installed, its CA bundle is used for TLS (see _tls_context).
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import argparse
 import base64
 import json
 import os
+import ssl
 import subprocess
 import sys
 import urllib.error
@@ -67,13 +69,41 @@ def docker_hub_login() -> tuple[str, str]:
     sys.exit("No Docker Hub login found. Run `docker login` (or sign in to Docker Desktop) first.")
 
 
+def _tls_context() -> ssl.SSLContext:
+    """Certificate checking stays ON either way; this only picks the trust list.
+
+    On Windows, Python trusts only the root certificates already sitting in the
+    OS store, and Windows installs roots lazily, the first time its own TLS
+    stack needs one. A store that is missing the current ISRG Root X1 but still
+    holds the expired pre-2024 copy makes every Let's Encrypt site (Docker Hub
+    included) fail with "certificate has expired", while curl, browsers and
+    `docker push` work fine. certifi ships a maintained root bundle, so prefer
+    it when present; otherwise fall back to the OS store as before."""
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+_TLS = _tls_context()
+
+
 def _request(method: str, url: str, body: dict | None = None, token: str | None = None) -> dict:
     req = urllib.request.Request(url, method=method,
                                  data=None if body is None else json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=30) as response:
+    try:
+        response = urllib.request.urlopen(req, timeout=30, context=_TLS)
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, ssl.SSLCertVerificationError):
+            sys.exit(f"TLS certificate check failed for Docker Hub: {e.reason.verify_message}. "
+                     "If it says 'expired', your OS root store is likely stale; "
+                     "`pip install certifi` and run this again.")
+        raise
+    with response:
         return json.loads(response.read() or b"{}")
 
 
