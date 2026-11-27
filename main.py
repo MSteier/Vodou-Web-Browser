@@ -647,6 +647,15 @@ SEARCH_ENGINES = {
     "Google": "https://www.google.com/search?q={}",
 }
 
+# The two SearXNG choices double as start pages: picking Cowl or SearXNG
+# (local) in Settings ▸ Search engine also moves new tabs / Home to that
+# instance, so one click switches the whole browser between the public and
+# the private search. A custom start page the user set is never overridden.
+SEARXNG_HOMES = {
+    SEARCH_ENGINES["Cowl"]: COWL_URL + "/",
+    SEARCH_ENGINES["SearXNG (local, private)"]: SEARXNG_BASE + "/",
+}
+
 # Apply the user's saved Settings ▸ start-page / search-engine overrides — but
 # ONLY if the file's signature verifies. A start page or search engine changed
 # on disk by anything other than Vodou (a homepage hijacker, adware, a stray
@@ -697,6 +706,9 @@ if _has_overrides:
     _saved_engine = str(_prefs.get("search_engine", "")).strip()
     if "{}" in _saved_engine:
         SEARCH_URL = _saved_engine
+    # No custom start page: the home follows the chosen SearXNG instance.
+    if not _saved_start and SEARCH_URL in SEARXNG_HOMES:
+        HOME_URL = SEARXNG_HOMES[SEARCH_URL]
     _saved_startup = _safe_start_page(
         _normalize_url(str(_prefs.get("startup_page", ""))))
     STARTUP_URL = _saved_startup or HOME_URL
@@ -2475,6 +2487,13 @@ class BrowserWindow(QMainWindow):
                             lambda: self.add_tab(QUrl(REPO_URL)))
         help_menu.addSeparator()
         help_menu.addAction(tr("About Vodou…"), self.show_about)
+
+        # --- Exit ---
+        # close() runs the same closeEvent cleanup as the window's X button
+        # (clipboard wipe, cookie flush, vault + detached windows closed), so
+        # quitting from here is never less clean than closing the window.
+        menu.addSeparator()
+        menu.addAction(tr("Exit"), self.close)
         menu_button.setMenu(menu)
         toolbar.addWidget(menu_button)
         self._apply_static_icons()
@@ -3278,7 +3297,7 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Start page set to {value} — opens on the next new tab.", 5000)
         else:
-            HOME_URL = DEFAULT_SEARCH_BASE + "/"
+            HOME_URL = SEARXNG_HOMES.get(SEARCH_URL, DEFAULT_SEARCH_BASE + "/")
             _save_pref("start_page", "")
             self.statusBar().showMessage(
                 "Start page reset to the private search page.", 5000)
@@ -3349,12 +3368,23 @@ class BrowserWindow(QMainWindow):
         self._custom_engine_action.setChecked(not matched)
 
     def _set_search_engine(self, template: str) -> None:
-        global SEARCH_URL
+        global SEARCH_URL, HOME_URL, STARTUP_URL
         SEARCH_URL = template
         _save_pref("search_engine", template)
         self._sync_engine_check()
         name = next((n for n, t in SEARCH_ENGINES.items() if t == template),
                     template)
+        # Cowl / SearXNG (local) also become the start page, but only while the
+        # start page is still one of the SearXNG homes -- a custom start page
+        # the user chose stays put.
+        home = SEARXNG_HOMES.get(template)
+        if home and HOME_URL in SEARXNG_HOMES.values():
+            if STARTUP_URL == HOME_URL:   # startup page follows the start page
+                STARTUP_URL = home
+            HOME_URL = home
+            self.statusBar().showMessage(
+                f"Search engine and start page set to {name}.", 5000)
+            return
         self.statusBar().showMessage(f"Search engine set to {name}.", 5000)
 
     def _set_custom_engine(self) -> None:

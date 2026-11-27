@@ -461,5 +461,6 @@
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "આ પ્લગઇનના કોડની SHA-256 ફિંગરપ્રિન્ટ (ટેમ્પર-એવિડન્ટ ઓળખ).",
   "Sites": "સાઇટ્સ",
   "Allow Claude (MCP) access": "Claude (MCP) ઍક્સેસની મંજૂરી આપો",
-  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Vodou MCP સર્વર દ્વારા Claude ને Vodou ની શોધ, બુકમાર્ક અને ટૅબ વાપરવા દો. આ બંધ કરવાથી બધાં ટૂલ્સ તરત બ્લૉક થઈ જાય છે."
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Vodou MCP સર્વર દ્વારા Claude ને Vodou ની શોધ, બુકમાર્ક અને ટૅબ વાપરવા દો. આ બંધ કરવાથી બધાં ટૂલ્સ તરત બ્લૉક થઈ જાય છે.",
+  "Exit": "બહાર નીકળો"
 }

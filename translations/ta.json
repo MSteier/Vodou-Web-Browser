@@ -461,5 +461,6 @@
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "இந்த செருகுநிரலின் குறியீட்டின் SHA-256 கைரேகை (கையாளப்படாத அடையாளம்).",
   "Sites": "தளங்கள்",
   "Allow Claude (MCP) access": "Claude (MCP) அணுகலை அனுமதி",
-  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Vodou MCP சர்வர் வழியாக Vodou-வின் தேடல், புக்மார்க்குகள் மற்றும் தாவல்களை Claude பயன்படுத்த அனுமதிக்கும். இதை அணைத்தால் எல்லா கருவிகளும் உடனே தடுக்கப்படும்."
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Vodou MCP சர்வர் வழியாக Vodou-வின் தேடல், புக்மார்க்குகள் மற்றும் தாவல்களை Claude பயன்படுத்த அனுமதிக்கும். இதை அணைத்தால் எல்லா கருவிகளும் உடனே தடுக்கப்படும்.",
+  "Exit": "வெளியேறு"
 }
