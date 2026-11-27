@@ -145,7 +145,21 @@ if [ -n "${VODOU_OLLAMA_HOST:-}" ]; then
     socat TCP4-LISTEN:11434,bind=127.0.0.1,fork,reuseaddr \
         "TCP4:${VODOU_OLLAMA_HOST}:${OLLAMA_PORT}" >/dev/null 2>&1 &
 fi
-echo "[vodou] ready -> open  http://localhost:8080/  in your browser"
+# Settings ▸ Search engine ▸ "SearXNG (local)" opens https://localhost/searxng,
+# but inside a container localhost is the container. So forward the
+# container's own 127.0.0.1:443 to the host, where the repo's docker/ stack
+# (Caddy) serves SearXNG. Vodou keeps the exact URL, Host header and localhost
+# certificate the desktop app uses, so nothing else changes. Cowl stays the
+# default; with no local SearXNG running, picking "local" just fails to load.
+# Docker lets non-root bind ports < 1024 inside a container
+# (net.ipv4.ip_unprivileged_port_start=0), so this works under --cap-drop ALL.
+# Off: -e VODOU_LOCAL_SEARXNG_BRIDGE=0. Other host: -e VODOU_LOCAL_SEARXNG_HOST=...
+if [ "${VODOU_LOCAL_SEARXNG_BRIDGE:-1}" = "1" ]; then
+    SEARX_HOST="${VODOU_LOCAL_SEARXNG_HOST:-host.docker.internal}"
+    socat TCP4-LISTEN:443,bind=127.0.0.1,fork,reuseaddr \
+        "TCP4:${SEARX_HOST}:443" >/dev/null 2>&1 &
+fi
+echo "[vodou] ready -> open  http://127.0.0.1:8080/  in your browser"
 exec python main.py
 EOF
 

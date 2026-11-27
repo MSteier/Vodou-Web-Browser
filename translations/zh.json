@@ -461,5 +461,6 @@
   "SHA-256 fingerprint of this plugin's code (tamper-evident identity).": "该插件代码的 SHA-256 指纹（防篡改标识）。",
   "Sites": "网站",
   "Allow Claude (MCP) access": "允许 Claude (MCP) 访问",
-  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "允许 Claude 通过 Vodou MCP 服务器使用 Vodou 的搜索、书签和标签页。关闭后会立即阻止所有工具。"
+  "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "允许 Claude 通过 Vodou MCP 服务器使用 Vodou 的搜索、书签和标签页。关闭后会立即阻止所有工具。",
+  "Exit": "退出"
 }
