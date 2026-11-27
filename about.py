@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import sys
 import time
 from importlib import metadata
@@ -54,6 +55,23 @@ REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
 # The Docker image updates by pulling a newer image -- never by git or pip from
 # inside the container, where Vodou can't write its own files anyway.
 DOCKER_PULL_CMD = "docker pull msteier/vodou:latest"
+
+
+# What a fresh `docker run` from the Docker Hub quick start looks like. Shown as
+# the last update step; users with their own options are told to reuse theirs.
+DOCKER_RUN_CMD = ("docker run -d -p 127.0.0.1:8080:8080 "
+                  "-v vodou-data:/home/vodou/.vodou msteier/vodou:latest")
+
+
+def docker_update_commands() -> str:
+    """The full, copy-pasteable update sequence for THIS container: pull the
+    new image, remove this container, start a fresh one. Docker's default
+    hostname is the container's 12-character ID, so `docker rm -f` can name
+    the exact container; anything else (a custom --hostname) falls back to a
+    placeholder rather than a guess that would remove the wrong thing."""
+    host = socket.gethostname()
+    cid = host if re.fullmatch(r"[0-9a-f]{12}", host or "") else "<container>"
+    return f"{DOCKER_PULL_CMD}\ndocker rm -f {cid}\n{DOCKER_RUN_CMD}"
 
 
 def in_docker_image() -> bool:
@@ -403,27 +421,40 @@ class AboutDialog(QDialog):
 
         if in_docker_image():
             # Neither update button can work in the container: Vodou and its
-            # engine are baked into the image. Show the real update path
-            # (pull a new image, recreate the container) instead.
+            # engine are baked into the image. Show the real update path, as
+            # exact commands a Docker beginner can paste: pull, remove this
+            # container, start a new one.
             self.update_btn.hide()
             self.qt_update_btn.hide()
+            commands = docker_update_commands()
             note = QLabel(tr(
-                "Running in Docker: updates come as a new image. Run this "
-                "command on your computer, then recreate this container. "
-                "Your profile volume keeps your bookmarks and vault."))
+                "Running in Docker: updates come as a new image. Click Copy, "
+                "then paste these commands into a terminal on your computer "
+                "(PowerShell on Windows) and run them. This page disconnects "
+                "when the old container is removed; that's expected. If "
+                "pasting doesn't work, open the noVNC panel on the left edge "
+                "of this page: the commands are in its clipboard box."))
             note.setTextFormat(Qt.TextFormat.PlainText)
             note.setWordWrap(True)
             outer.addWidget(note)
-            cmd = QLabel(DOCKER_PULL_CMD)
+            cmd = QLabel(commands)
             cmd.setTextFormat(Qt.TextFormat.PlainText)
             cmd.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse)
             cmd.setStyleSheet("font-family: Consolas, 'DejaVu Sans Mono', "
                               "monospace; padding: 6px 4px;")
             outer.addWidget(cmd)
+            own = QLabel(tr(
+                "Started Vodou with your own docker run options? Use that "
+                "command for the last line instead, keeping the same -v "
+                "volume so your bookmarks and vault carry over."))
+            own.setTextFormat(Qt.TextFormat.PlainText)
+            own.setWordWrap(True)
+            own.setStyleSheet("color: gray;")
+            outer.addWidget(own)
             copy_btn = QPushButton(tr("Copy"))
             copy_btn.clicked.connect(
-                lambda: QApplication.clipboard().setText(DOCKER_PULL_CMD))
+                lambda: QApplication.clipboard().setText(commands))
             buttons.insertWidget(0, copy_btn)
         outer.addLayout(buttons)
 
