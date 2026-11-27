@@ -462,5 +462,7 @@
   "Sites": "সাইটগুলি",
   "Allow Claude (MCP) access": "Claude (MCP) অ্যাক্সেসের অনুমতি দিন",
   "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Vodou MCP সার্ভারের মাধ্যমে Claude-কে Vodou-এর সার্চ, বুকমার্ক ও ট্যাব ব্যবহার করতে দিন। এটি বন্ধ করলে সব টুল সঙ্গে সঙ্গে ব্লক হয়ে যায়।",
-  "Exit": "প্রস্থান"
+  "Exit": "প্রস্থান",
+  "Running in Docker: updates come as a new image. Click Copy, then paste these commands into a terminal on your computer (PowerShell on Windows) and run them. This page disconnects when the old container is removed; that's expected. If pasting doesn't work, open the noVNC panel on the left edge of this page: the commands are in its clipboard box.": "Docker-এ চলছে: আপডেট আসে নতুন ইমেজ হিসেবে। “কপি করুন”-এ ক্লিক করুন, তারপর আপনার কম্পিউটারের একটি টার্মিনালে (Windows-এ PowerShell) এই কমান্ডগুলো পেস্ট করে চালান। পুরোনো কন্টেইনার সরানো হলে এই পেজের সংযোগ বিচ্ছিন্ন হবে; এটা স্বাভাবিক। পেস্ট কাজ না করলে এই পেজের বাঁ প্রান্তে noVNC প্যানেল খুলুন: কমান্ডগুলো তার ক্লিপবোর্ড বক্সে আছে।",
+  "Started Vodou with your own docker run options? Use that command for the last line instead, keeping the same -v volume so your bookmarks and vault carry over.": "নিজের docker run অপশন দিয়ে Vodou চালু করেছিলেন? শেষ লাইনের বদলে সেই কমান্ডটি ব্যবহার করুন, একই -v ভলিউম রেখে, যাতে আপনার বুকমার্ক ও ভল্ট থেকে যায়।"
 }
