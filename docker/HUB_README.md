@@ -28,13 +28,19 @@ running inside the container. Works the same on Windows, macOS, and Linux.
 
 ## Tags
 - `latest` — most recent build (includes the built-in web viewer)
-- `1.54.15` — pinned version
+- `1.54.16` — pinned version
 
 Tags match Vodou's own version. A rebuild of the same Vodou version (a newer base
 image or security-patched system packages) gets a revision suffix instead:
 `1.54.10-r1`, `1.54.10-r2`, and so on. Same browser, updated image.
 
 ## Changelog
+- **1.54.16** — Choosing **Cowl** or **SearXNG (local)** in ☰ → Settings →
+  Search engine now switches the start page too, and the local option works
+  from inside the container (bridged to the SearXNG stack on your computer).
+  Adds **Exit** to the bottom of the ☰ menu. Inside Docker, the update notice
+  and About box now say how to update: `docker pull msteier/vodou:latest`,
+  then recreate the container (your profile volume keeps your data).
 - **1.54.15** — Cowl (search.misttechnologies.net), Mist Technologies' private
   SearXNG search, is now the default start page and search engine. Adds a
   Settings toggle for Claude (MCP) access, and the updater now pairs

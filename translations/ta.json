@@ -462,5 +462,7 @@
   "Sites": "தளங்கள்",
   "Allow Claude (MCP) access": "Claude (MCP) அணுகலை அனுமதி",
   "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "Vodou MCP சர்வர் வழியாக Vodou-வின் தேடல், புக்மார்க்குகள் மற்றும் தாவல்களை Claude பயன்படுத்த அனுமதிக்கும். இதை அணைத்தால் எல்லா கருவிகளும் உடனே தடுக்கப்படும்.",
-  "Exit": "வெளியேறு"
+  "Exit": "வெளியேறு",
+  "Running in Docker: updates come as a new image. Click Copy, then paste these commands into a terminal on your computer (PowerShell on Windows) and run them. This page disconnects when the old container is removed; that's expected. If pasting doesn't work, open the noVNC panel on the left edge of this page: the commands are in its clipboard box.": "Docker-இல் இயங்குகிறது: புதுப்பிப்புகள் புதிய இமேஜாக வருகின்றன. “நகலெடு” என்பதைக் கிளிக் செய்து, இந்தக் கட்டளைகளை உங்கள் கணினியின் டெர்மினலில் (Windows-இல் PowerShell) ஒட்டி இயக்கவும். பழைய கண்டெய்னர் அகற்றப்படும்போது இந்தப் பக்கம் துண்டிக்கப்படும்; இது எதிர்பார்க்கப்பட்டதே. ஒட்டுவது வேலை செய்யவில்லை என்றால், இந்தப் பக்கத்தின் இடது ஓரத்தில் உள்ள noVNC பேனலைத் திறக்கவும்: கட்டளைகள் அதன் கிளிப்போர்டு பெட்டியில் உள்ளன.",
+  "Started Vodou with your own docker run options? Use that command for the last line instead, keeping the same -v volume so your bookmarks and vault carry over.": "உங்கள் சொந்த docker run விருப்பங்களுடன் Vodou-ஐத் தொடங்கினீர்களா? கடைசி வரிக்குப் பதிலாக அந்தக் கட்டளையையே, அதே -v வால்யூமுடன் பயன்படுத்துங்கள்; அப்போது உங்கள் புக்மார்க்குகளும் பெட்டகமும் தொடரும்."
 }

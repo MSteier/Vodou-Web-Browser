@@ -16,6 +16,7 @@ QProcess; the engine uses updater_ui's backup, verification and restart flow.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -35,6 +36,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -46,8 +48,20 @@ from PyQt6.QtWidgets import (
 from i18n import tr
 from theme import make_app_icon
 
-APP_VERSION = "1.54.15"
+APP_VERSION = "1.54.16"
 REPO_URL = "https://github.com/MSteier/Vodou-Web-Browser"
+
+# The Docker image updates by pulling a newer image -- never by git or pip from
+# inside the container, where Vodou can't write its own files anyway.
+DOCKER_PULL_CMD = "docker pull msteier/vodou:latest"
+
+
+def in_docker_image() -> bool:
+    """True inside the Vodou Docker image. Same test as
+    updater.manager.in_docker_image, kept here so the About box and the
+    footer never depend on the updater package importing cleanly."""
+    return (bool(os.environ.get("VODOU_DOCKER_IMAGE"))
+            or Path("/.dockerenv").exists())
 
 _REPO_DIR = Path(__file__).resolve().parent
 # {branch} is filled in per-checkout (see _git_branch) so the version check
@@ -386,6 +400,31 @@ class AboutDialog(QDialog):
         self.close_btn.setDefault(True)
         self.close_btn.clicked.connect(self.accept)
         buttons.addWidget(self.close_btn)
+
+        if in_docker_image():
+            # Neither update button can work in the container: Vodou and its
+            # engine are baked into the image. Show the real update path
+            # (pull a new image, recreate the container) instead.
+            self.update_btn.hide()
+            self.qt_update_btn.hide()
+            note = QLabel(tr(
+                "Running in Docker: updates come as a new image. Run this "
+                "command on your computer, then recreate this container. "
+                "Your profile volume keeps your bookmarks and vault."))
+            note.setTextFormat(Qt.TextFormat.PlainText)
+            note.setWordWrap(True)
+            outer.addWidget(note)
+            cmd = QLabel(DOCKER_PULL_CMD)
+            cmd.setTextFormat(Qt.TextFormat.PlainText)
+            cmd.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse)
+            cmd.setStyleSheet("font-family: Consolas, 'DejaVu Sans Mono', "
+                              "monospace; padding: 6px 4px;")
+            outer.addWidget(cmd)
+            copy_btn = QPushButton(tr("Copy"))
+            copy_btn.clicked.connect(
+                lambda: QApplication.clipboard().setText(DOCKER_PULL_CMD))
+            buttons.insertWidget(0, copy_btn)
         outer.addLayout(buttons)
 
     def _open_qt_updater(self):

@@ -462,5 +462,7 @@
   "Sites": "المواقع",
   "Allow Claude (MCP) access": "السماح بوصول Claude ‏(MCP)",
   "Let Claude use Vodou's search, bookmarks and tabs through the Vodou MCP server. Turning this off blocks every tool instantly.": "يتيح لـ Claude استخدام البحث والإشارات المرجعية وعلامات التبويب في Vodou عبر خادم Vodou MCP. يؤدي إيقاف هذا الخيار إلى حظر جميع الأدوات فورًا.",
-  "Exit": "خروج"
+  "Exit": "خروج",
+  "Running in Docker: updates come as a new image. Click Copy, then paste these commands into a terminal on your computer (PowerShell on Windows) and run them. This page disconnects when the old container is removed; that's expected. If pasting doesn't work, open the noVNC panel on the left edge of this page: the commands are in its clipboard box.": "يعمل داخل Docker: تصل التحديثات كصورة جديدة. انقر «نسخ»، ثم الصق هذه الأوامر في طرفية على حاسوبك (PowerShell على Windows) وشغّلها. ستنقطع هذه الصفحة عند إزالة الحاوية القديمة، وهذا متوقع. إذا لم يعمل اللصق، افتح لوحة noVNC على الحافة اليسرى لهذه الصفحة: الأوامر موجودة في مربع الحافظة فيها.",
+  "Started Vodou with your own docker run options? Use that command for the last line instead, keeping the same -v volume so your bookmarks and vault carry over.": "هل شغّلت Vodou بخيارات docker run خاصة بك؟ استخدم ذلك الأمر بدلًا من السطر الأخير، مع الاحتفاظ بنفس مجلد -v حتى تنتقل المفضلة والخزنة."
 }

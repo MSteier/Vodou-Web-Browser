@@ -490,6 +490,7 @@ from spoofcheck import inspect as spoof_inspect
 from site_signals import PAGE_SIGNALS_JS, page_signals, url_signals
 from about import (
     APP_VERSION,
+    DOCKER_PULL_CMD,
     REPO_URL,
     VERSION_DISPLAY,
     AboutDialog,
@@ -497,6 +498,7 @@ from about import (
     clear_engine_outdated,
     engine_nag_due,
     engine_versions,
+    in_docker_image,
     installed_engine_version,
     mark_engine_nagged,
     note_engine_outdated,
@@ -1326,8 +1328,9 @@ class VersionLabel(QLabel):
         where one click installs both parts."""
         self._update_available = True
         self.setText(f"Vodou v{VERSION_DISPLAY} — update available ⬆ ")
-        self.setToolTip(f"Update available: {what}\n"
-                        f"Click to open About Vodou and update")
+        how = ("Click for how to update the Docker image" if in_docker_image()
+               else "Click to open About Vodou and update")
+        self.setToolTip(f"Update available: {what}\n{how}")
         self.browser._center_version()  # width changed; keep it centred
 
     def show_engine_update_available(self, engine_ver: str,
@@ -4978,6 +4981,22 @@ class BrowserWindow(QMainWindow):
         self.version_label.show_up_to_date(restart_needed=updated)
 
     def _on_update_check(self, vodou_ver, engine_ver) -> None:
+        if in_docker_image():
+            # In Docker, Vodou and its engine both ship inside the image, so
+            # either update means a newer image. Skip the daily engine popup
+            # (its "Update now" can't install anything here); the tag opens
+            # About, which shows the docker pull command.
+            if vodou_ver or engine_ver:
+                what = (f"Vodou v{vodou_ver}" if vodou_ver
+                        else f"browser engine {engine_ver}")
+                self.version_label.show_update_available(what)
+                self.statusBar().showMessage(
+                    f"Update available: {what} — run  {DOCKER_PULL_CMD}  on "
+                    "your computer, then recreate this container "
+                    "(☰ → About Vodou has the details).", 20000)
+            else:
+                self.version_label.show_up_to_date()
+            return
         if engine_ver:
             # The engine is the security-critical part — nudge it harder.
             days = note_engine_outdated(engine_ver)
